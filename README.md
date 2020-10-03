@@ -4,17 +4,16 @@ FQLite is a tool to find and restore deleted records in sqlite databases. It is 
 
 The program is able to search a SQLite database file for regular as well as deleted records.
 
-Technical Background
---------------------
+# Technical Background
 
+To be done.
 
+# Example Usage
 
-Example Usage
--------------
-
-To start the tool in CLI mode the executable jar can normally be started with a double-click on the jar-archive file. If this does not work, since javaw is not linked correctly to files of ending .jar
+To run the *FQLite* in CLI mode the executable jar can normally be started with a double-click on the jar-archive file. If this does not work, since *javaw* is not linked correctly to files of ending *.jar*, you can use the command line as well:
 
 $>java -jar fqlite.jar 
+
 
 
 $>java -cp fqlite.jar fqlite.hsmw.de.RT <database.db>
