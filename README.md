@@ -1,6 +1,6 @@
-# fqlite
+# FQLite
 
-FQLite is a tool to find and restore deleted records in sqlite databases. It is written with the Java programming language. The program can operate in two different modes. It can be started from the command line (CLI mode). A simple graphical user interface is also supported (GUI mode).  
+FQLite is a tool to find and restore deleted records in sqlite databases. It therefore examines the database for entries marked as deleted. Those entries can be recovered and displayed. It is written with the Java programming language. The program can operate in two different modes. It can be started from the command line (CLI mode). A simple graphical user interface is also supported (GUI mode).  
 
 The program is able to search a SQLite database file for regular as well as deleted records.
 
@@ -8,15 +8,21 @@ The program is able to search a SQLite database file for regular as well as dele
 
 To be done.
 
+# Prerequisites
+
+To run the tool you need at least a Java Runtime Environment 1.8 or higher.
+
+
 # Example Usage
 
-To run the *FQLite* in CLI mode the executable jar can normally be started with a double-click on the jar-archive file. If this does not work, since *javaw* is not linked correctly to files of ending *.jar*, you can use the command line as well:
+To run the *FQLite* in GUI mode the executable jar can normally be started with a double-click on the jar-archive file. If this does not work, since *javaw* is not linked correctly to *.jar* files, you can use the command line as well:
 
-$>java -jar fqlite.jar 
+- $>java -jar fqlite.jar 
 
+To run the *FQLite* from the command line you can use the following command:
 
+- $>java -cp fqlite.jar fqlite.hsmw.de.RT <database.db>
 
-$>java -cp fqlite.jar fqlite.hsmw.de.RT <database.db>
 
 
 
