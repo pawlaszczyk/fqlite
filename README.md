@@ -1,14 +1,8 @@
-                            
+# Official Project Webpage
 
-    __________    __    _ __     
-   / ____/ __ \  / /   (_) /____ 
-  / /_  / / / / / /   / / __/ _ \
- / __/ / /_/ / / /___/ / /_/  __/
-/_/    \___\_\/_____/_/\__/\___/ 
-                                 
+Check out the latest binary version (as a runnable jar-Archive) from the official project homepage
 
-                                 
-
+https://www.staff.hs-mittweida.de/~pawlaszc/fqlite/                          
 
 # FQLite
 
