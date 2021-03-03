@@ -1,8 +1,12 @@
+FQLite - Forensic SQLite Data Recovery Tool 
+
+
 # Official Project Webpage
 
 Check out the latest binary version (as a runnable jar-Archive) from the official project homepage
 
 https://www.staff.hs-mittweida.de/~pawlaszc/fqlite/                          
+
 
 # FQLite
 
@@ -12,7 +16,14 @@ The program is able to search a SQLite database file for regular as well as dele
 
 # Technical Background
 
-To be done.
+On overview article highlighting the technical background of FQLite can be retrieved from 
+
+https://conceptechint.net/index.php/CFATI/article/view/17/6
+
+D. Pawlaszczyk, C. Hummert: (2021). 
+Making the Invisible Visible – Techniques for Recovering Deleted SQLite Data Records. 
+International Journal of Cyber Forensics and Advanced Threat Investigations,
+
 
 # Prerequisites
 
