@@ -1,6 +1,7 @@
-<H1>FQLite - Forensic SQLite Data Recovery Tool<H1>
+<H1>FQLite - Forensic SQLite Data Recovery Tool
 
-Author: Dirk Pawlaszczyk (pawlasz@hs-mittweida.de)
+
+Author: Dirk Pawlaszczyk *(pawlasz@hs-mittweida.de)*
 Last updated: 03/03/2021
 
 # Official Project Webpage
