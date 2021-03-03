@@ -21,7 +21,7 @@ import java.util.concurrent.ExecutionException;
 * 
 * 
 * @author Dirk Pawlaszczyk
-* @version 1.2
+* @version 1.5
 */
 public class MAIN {
 
