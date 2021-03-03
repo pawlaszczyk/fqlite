@@ -1,0 +1,110 @@
+##################################################################
+# Only used for internal testing                                 #
+# Author: Dirk Pawlaszczyk	                                     #
+# https://faui1-files.cs.fau.de/public/sqlite-forensic-corpus/   #
+##################################################################
+
+# malformed table definitions 
+test/01/01-01.db:0
+test/01/01-02.db:0
+test/01/01-03.db:0
+test/01/01-04.db:0
+test/01/01-05.db:0
+test/01/01-06.db:0
+test/01/01-07.db:0
+test/01/01-08.db:0
+test/01/01-09.db:0
+test/01/01-10.db:0
+test/01/01-11.db:0
+test/01/01-12.db:0
+test/01/01-13.db:0
+test/01/01-14.db:0
+test/01/01-15.db:0
+test/01/01-16.db:0
+test/01/01-17.db:0
+test/01/01-18.db:0
+
+# malformed column definitions
+test/02/02-01.db:0
+test/02/02-02.db:0
+test/02/02-03.db:0
+test/02/02-04.db:0
+test/02/02-05.db:0
+test/02/02-06.db:0
+test/02/02-07.db:0
+
+# index table (without row id)
+test/03/03-01.db:0
+test/03/03-02.db:0
+test/03/03-03.db:0
+test/03/03-04.db:0
+
+
+# unicode BE LE and surrogate characters (very tricky) 
+test/04/04-01.db:0
+test/04/04-02.db:0
+test/04/04-03.db:0
+test/04/04-04.db:0
+test/04/0A-05.db:0   
+test/04/0A-06.db:0   
+
+# trigger, index, ...
+test/05/05-01.db:0
+test/05/05-02.db:0
+test/05/05-03.db:0
+test/05/05-04.db:0  # works but without index table
+
+#virtual tables - not implemented yet
+
+
+
+# overflow, multibyte columns
+test/07/07-01.db:0
+test/07/07-02.db:0 
+test/07/07-03.db:0 
+test/07/07-04.db:0 
+
+
+# big number floating point values
+test/08/08-01.db:0
+
+
+# AUTOVACCUMtest
+test/09/09-01.db:0
+
+
+# deleted entries or dropped tables 
+test/0A/0A-01.db:0
+test/0A/0A-02.db:0
+test/0A/0A-03.db:0
+test/0A/0A-04.db:0
+test/0A/0A-05.db:0
+
+# dropped table, partly overwritten with content from another table
+test/0B/0B-01.db:0  # works, but some lines of a dropped table are assigned to the overwriting table
+test/0B/0B-02.db:0	# works, but some lines of a dropped table are assigned to the overwriting table
+
+
+# definition area of values, very small and very large values, deleted records and dropped tables
+test/0C/0C-01.db:0 
+test/0C/0C-02.db:0 
+test/0C/0C-03.db:0 
+test/0C/0C-04.db:0  
+test/0C/0C-05.db:0 
+test/0C/0C-06.db:0 
+test/0C/0C-07.db:0 
+test/0C/0C-08.db:0
+test/0C/0C-09.db:0
+test/0C/0C-10.db:0
+
+
+# deleted data records 
+test/0D/0D-01.db:0 
+test/0D/0D-02.db:0 
+test/0D/0D-03.db:0 
+test/0D/0D-04.db:0 
+test/0D/0D-05.db:0 
+test/0D/0D-06.db:0 
+test/0D/0D-07.db:0 
+test/0D/0D-08.db:0 
+
