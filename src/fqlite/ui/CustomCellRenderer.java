@@ -23,6 +23,9 @@ public class CustomCellRenderer extends DefaultTableCellRenderer {
  // private static ImageIcon icon_status =  new ImageIcon(Toolkit.getDefaultToolkit().getImage(GUI.class.getResource("/icon_status.png")));
  //	private static ImageIcon icon_photo = new ImageIcon(Toolkit.getDefaultToolkit().getImage(GUI.class.getResource("/picture.png")));
 
+	public boolean walnode = false;
+    public GUI gui = null;
+	
 	/*
 	 * (non-Javadoc)
 	 * 
@@ -33,11 +36,6 @@ public class CustomCellRenderer extends DefaultTableCellRenderer {
 	public Component getTableCellRendererComponent(JTable table, Object value, boolean isSelected, boolean hasFocus,
 			int row, int column) {
 
-		//if (row == 0 && column == 0)
-	    //{
-		//	this.setIcon(icon_status);
-
-	    //}
 		
 		Component rendererComp = super.getTableCellRendererComponent(table, value, isSelected, hasFocus, row, column);
 		if (column < 2)
@@ -54,26 +52,12 @@ public class CustomCellRenderer extends DefaultTableCellRenderer {
 			if (value instanceof String)
 			{	
 				String v = (String)value;
-				System.out.println("Checking value :: " + v );
 				if (BLOBCarver.isGraphic(v))
 				{
-					//byte[] b = hexStringToByteArray(v.toUpperCase());
 					try {
-						//BufferedImage img = ImageIO.read(new ByteArrayInputStream(b));
-						
-						//ImageIcon out = new ImageIcon(b,"test");
-						//ImageViewer.getInstance().show(out);
-						
-						//this.setIcon(icon_photo);
-					    this.setValue("[PICTURE]");
+			
+						this.setValue("[PICTURE]");
 
-					    //JLabel image = new JLabel(icon_photo);
-					    //rendererComp = image;
-					    
-					    
-					    
-						//jl.setIcon(out);
-						//rendererComp = jl; 
 					} catch (Exception e) {
 						
 						e.printStackTrace();
@@ -107,31 +91,36 @@ public class CustomCellRenderer extends DefaultTableCellRenderer {
 			this.setIcon(null);
 		}
 
-		if (! isSelected)
-		{	
-			if ((row % 2) == 0) {
-				rendererComp.setBackground(rowcol);
-			} else
-				rendererComp.setBackground(Color.WHITE);
-	
-			if (column > 1)
-				rendererComp.setForeground(Color.BLUE);
-			else
-				rendererComp.setForeground(Color.BLACK);
-		}
 		
-	/*	
-		if (value instanceof String)
-		{	
-			String v = (String)value;
+		
+		if(walnode)
+		{
+			Object salt = table.getValueAt(row,5);
+			//int vrow = table.convertRowIndexToView(row);
 			
-			if (v.length()>100)
-				if (BLOBCarver.isJPEG(v))
-				{
-					System.out.println(" Achtung " + v);
-					setIcon(new ImageIcon(Auxiliary.decode(v)));
-				}	
-		}*/
+			Component cell = super.getTableCellRendererComponent(table, value, isSelected, hasFocus, row, column);
+
+			if (null != gui && gui.getRowcolors().containsKey(salt)) {
+				cell.setBackground(gui.getRowcolors().get(salt));
+			}
+		}
+		else
+		{
+			if (! isSelected)
+			{	
+				if ((row % 2) == 0) {
+					rendererComp.setBackground(rowcol);
+				} else
+					rendererComp.setBackground(Color.WHITE);
+		
+				if (column > 1)
+					rendererComp.setForeground(Color.BLUE);
+				else
+					rendererComp.setForeground(Color.BLACK);
+			}
+			
+		}
+	
 		return rendererComp;
 	}
 

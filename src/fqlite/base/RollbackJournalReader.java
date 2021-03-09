@@ -51,6 +51,8 @@ import fqlite.util.Logger;
  */
 public class RollbackJournalReader extends Base {
 
+	public static final String MAGIC_HEADER_STRING = "d9d505f920a163d7";
+	
 	/* An asynchronous channel for reading, writing, and manipulating a file. */
 	public AsynchronousFileChannel file;
 
@@ -77,6 +79,11 @@ public class RollbackJournalReader extends Base {
 	int pagenumber_rol;
 	int pagenumber_maindb;
 	
+	long pagecount;
+	long nounce;
+	long pages;
+	long sectorsize;
+	long journalpagesize;
 
 	boolean withoutROWID = false;
 
@@ -167,6 +174,62 @@ public class RollbackJournalReader extends Base {
 		/*******************************************************************/
 
 		
+		/*
+		 * A valid rollback journal begins with a header in the following format:
+		 * 
+		 * Offset	Size	Description
+		 * 0 		8 		Header string: 0xd9, 0xd5, 0x05, 0xf9, 0x20, 0xa1, 0x63, 0xd7
+		 * 8	 	4 		The "Page Count" - The number of pages in the next segment of the journal, or -1 to mean all content to the end of the file
+		 * 12	 	4 		A random nonce for the checksum
+		 * 16	 	4 		Initial size of the database in pages
+		 * 20 		4 		Size of a disk sector assumed by the process that wrote this journal.
+		 * 24 		4 		Size of pages in this journal. 
+		 */
+		
+		/* read header of the WAL file - the first 28 bytes */
+		ByteBuffer header = ByteBuffer.allocate(28);
+
+		
+		Future<Integer> result = file.read(header, 0); // position = 0
+
+		while (!result.isDone()) {
+
+			// we can do something in between or just wait ;-).
+		}
+
+		header.flip();
+		
+		
+		byte head[] = new byte[8];
+		header.get(head);
+		
+
+		if (Auxiliary.bytesToHex(head).equals(MAGIC_HEADER_STRING))
+		{
+			info("header is okay. seems to be an rollback journal file.");
+		}
+		else 
+		{
+				info("sorry. doesn't seem to be an rollback journal file. Wrong header.");
+				err("Doesn't seem to be an valid rollback journal file. Wrong header.");
+			
+		}
+		
+		pagecount = Integer.toUnsignedLong(header.getInt());
+		info(" pagecount " + pagecount);
+
+		nounce = Integer.toUnsignedLong(header.getInt());
+		info(" nounce " + nounce);
+
+		pages = Integer.toUnsignedLong(header.getInt());
+		info(" pages " + pages);
+		
+		sectorsize = Integer.toUnsignedLong(header.getInt());
+		info(" sector size  " + sectorsize);
+		
+		journalpagesize = Integer.toUnsignedLong(header.getInt());
+		info(" journal page size  " + journalpagesize);
+
 		
 	    journalpointer = 512; // this is the position, where the first frame should be
 
@@ -672,7 +735,7 @@ public class RollbackJournalReader extends Base {
 				String[] data = line.split(";");
 
 				path = job.guiroltab.get(data[0]);
-				job.gui.update_table(path, data);
+				job.gui.update_table(path, data, false);
 				
 			}
 			

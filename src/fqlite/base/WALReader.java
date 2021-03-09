@@ -10,15 +10,24 @@ import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.Arrays;
 import java.util.BitSet;
+import java.util.Enumeration;
+import java.util.Hashtable;
 import java.util.Iterator;
 import java.util.LinkedList;
 import java.util.List;
+import java.util.Map;
 import java.util.Map.Entry;
 import java.util.Set;
+import java.util.SortedMap;
+import java.util.TreeMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.Future;
+
+import javax.swing.JComponent;
+import javax.swing.JTable;
 import javax.swing.SwingUtilities;
 import javax.swing.SwingWorker;
+import javax.swing.table.TableModel;
 import javax.swing.tree.DefaultMutableTreeNode;
 import javax.swing.tree.DefaultTreeModel;
 import javax.swing.tree.TreeModel;
@@ -29,6 +38,7 @@ import fqlite.descriptor.AbstractDescriptor;
 import fqlite.descriptor.TableDescriptor;
 import fqlite.pattern.SerialTypeMatcher;
 import fqlite.types.CarverTypes;
+import fqlite.ui.CustomTableModel;
 import fqlite.ui.DBTable;
 import fqlite.ui.HexView;
 import fqlite.ui.NodeObject;
@@ -37,7 +47,7 @@ import fqlite.util.Auxiliary;
 /**
  * The class analyzes a WAL-file and writes the found records into a file.
  * 
- * From the SQLite documtation:
+ * From the SQLite documentation:
  * 
  * "The original content is preserved in the database file and the changes are appended into a separate WAL file. 
  *  A COMMIT occurs when a special record indicating a commit is appended to the WAL. Thus a COMMIT can happen 
@@ -49,6 +59,20 @@ import fqlite.util.Auxiliary;
  *
  */
 public class WALReader extends Base {
+	
+	/* checkpoints is a data structure 
+	 * 
+	 * The salt1-value stays the same for all operations within the same transaction. It is incremented by one, 
+	 * if a new checkpoint or transaction is prepared.
+	 *
+	 * All frames that belong to the same transaction also have an identical "salt1" value
+	 * Accordingly, we use salt1 as key for the data structure. 
+	 * 
+	 * A list of all page numbers belonging to the same transaction and their status (committed or not). 
+	 * 
+	 * 
+	 */
+	TreeMap<Long,LinkedList<WALFrame>> checkpoints = new TreeMap<Long,LinkedList<WALFrame>>();
 
 	/* An asynchronous channel for reading, writing, and manipulating a file. */
 	public AsynchronousFileChannel file;
@@ -59,9 +83,28 @@ public class WALReader extends Base {
 	/* total size of WAL-file in bytes */
 	long size;
 
+	/* File format version. Currently 3007000. */
+	
+	int ffversion;
+	
 	/* pagesize */
 	int ps;
 
+	/* header field: checkpoint sequence number */
+	int csn;
+	
+	/* Salt-1: random integer incremented with each checkpoint */
+	long hsalt1;
+	
+	/* Salt-2: a different random number for each checkpoint */
+	long hsalt2;
+	
+	/* Checksum-1: First part of a checksum on the first 24 bytes of header */
+	long hchecksum1;
+	
+	/* Checksum-2: Second part of the checksum on the first 24 bytes of header  */
+	long hchecksum2;
+	
 	/* path to WAL-file */
 	String path;
 
@@ -78,10 +121,12 @@ public class WALReader extends Base {
     int pagenumber_wal;
 	int framestart = 0;
     
+	public String headerstring = "";
+	
 	/* offers a lot of useful utility functions */
 	private Auxiliary ct;
 
-	/* knowlegde store */
+	/* knowledge store */
 	private StringBuffer firstcol = new StringBuffer();
 
 	private static final String MAGIC_HEADER_STRING1 = "377f0682";
@@ -120,6 +165,8 @@ public class WALReader extends Base {
 	 * @return
 	 */
 	public void parse() {
+		int framenumber = 0;
+		
 		Path p = Paths.get(path);
 
 		System.out.println("parse WAL-File");
@@ -160,20 +207,46 @@ public class WALReader extends Base {
 		try {
 			if(file.size() <= 32)
 			{	
-				System.out.println("WAL-File is empty. Skip analyzing.");
+				    info("WAL-File is empty. Skip analyzing.");
 					return;
 			}
 		} catch (IOException e) {
 			e.printStackTrace();
 		}	
+		
+		/* 
+		 * WAL Header Format:
+		 * 
+		 *	0	4 	Magic number. 0x377f0682 or 0x377f0683
+		 *  4	4 	File format version. Currently 3007000.
+		 *  8	4 	Database page size. Example: 1024
+		 *  12	4 	Checkpoint sequence number
+		 *  16	4 	Salt-1: random integer incremented with each checkpoint
+		 *  20	4 	Salt-2: a different random number for each checkpoint
+		 *  24	4 	Checksum-1: First part of a checksum on the first 24 bytes of header
+		 *  28	4 	Checksum-2: Second part of the checksum on the first 24 bytes of header 
+		 * 
+		 * 
+		 *  Source: https://www.sqlite.org/fileformat2.html#walformat
+		 */
+		
 		/********************************************************************/
 		/* Check the MAGIC NUMBERS 0x377f0682 or 0x377f0683 */
 
 		byte header[] = new byte[4];
 		buffer.get(header);
-		if (Auxiliary.bytesToHex(header).equals(MAGIC_HEADER_STRING1)
-				|| Auxiliary.bytesToHex(header).equals(MAGIC_HEADER_STRING2))
+		if (Auxiliary.bytesToHex(header).equals(MAGIC_HEADER_STRING1))
+		{		
+				headerstring = MAGIC_HEADER_STRING1;
+				info("header is okay. seems to be an write ahead log file.");
+		}
+		else
+		if (Auxiliary.bytesToHex(header).equals(MAGIC_HEADER_STRING2))
+		{
+			headerstring = MAGIC_HEADER_STRING2;
 			info("header is okay. seems to be an write ahead log file.");
+			
+		}
 		else {
 			info("sorry. doesn't seem to be an WAL file. Wrong header.");
 			err("Doesn't seem to be an valid WAL file. Wrong header");
@@ -181,8 +254,12 @@ public class WALReader extends Base {
 
 		/*******************************************************************/
 
-		/* at offset 8 */
-		buffer.position(8);
+		/* at offset 4 */
+		buffer.position(4);
+		
+		ffversion = buffer.getInt();
+		info(" file format version " + ffversion);
+		
 		ps = buffer.getInt();
 
 		/*
@@ -199,28 +276,72 @@ public class WALReader extends Base {
 
 		info("page size " + ps + " Bytes ");
 
+		
+	
+		/*
+		 * Offset 12 Size 4 Checkpoint sequence number 
+		 */
+		csn = buffer.getInt();
+		info(" checkpoint sequence number " + csn);
+
+	
+		/*
+		 * Offset 16 Size 4 Salt-1: random integer incremented with each checkpoint 
+		 */
+		hsalt1 = Integer.toUnsignedLong(buffer.getInt());
+		info(" salt1 " + hsalt1);
+
+		
+		/*
+		 * Offset 20 Size 4 Salt-2: Salt-2: a different random number for each checkpoint 
+		 */
+		hsalt2 = Integer.toUnsignedLong(buffer.getInt());
+		info(" salt2 " + hsalt2);
+
+		
+		/* Offset 24 Checksum-1: First part of a checksum on the first 24 bytes of header */
+		hchecksum1 = Integer.toUnsignedLong(buffer.getInt());
+		info(" checksum-1 of first frame header " + hchecksum1);
+
+		
+		
+		/* Offset 28 Checksum-2: Second part of the checksum on the first 24 bytes of header  */
+		hchecksum2 = Integer.toUnsignedLong(buffer.getInt());
+		info(" checksum-2 second part ot the checksum on the first frame header " + hchecksum2);
+
+		
 		/* initialize the BitSet for already visited location within a wal-page */
 
 		visit = new BitSet(ps);
-
-		/*
-		 * That is all we need from the header fields in the moment. So we can skip
-		 * reading the rest of the WAL header.
-		 */
+		
+		/* end of WAL-header has been reached at offset 31 */
+		/* now we can go on with the frames */
 
 		/*******************************************************************/
 
 		/*
+		 * WAL Frame Header Format
+		 * 
 		 * Let us now read the WAL Frame Header. Immediately following the wal-header
 		 * are zero or more frames. Each frame consists of a 24-byte frame-header
 		 * followed by a page-size bytes of page data. The frame-header is six
 		 * big-endian 32-bit unsigned integer values, as follows:
+		 * 
+		 * 
+		 * 
+		 * 0	4 	Page number 
+		 * 4	4 	For commit records, the size of the database file in pages after the commit. 
+		 *          For all other records, zero. 
+		 * 8	4 	Salt-1 copied from the WAL header 
+		 * 12	4 	Salt-2 copied from the WAL header 
+		 * 16	4 	Checksum-1: Cumulative checksum up through and including this page 
+		 * 20	4 	Checksum-2: Second half of the cumulative checksum. 
+		 * 
+		 * 
+		 * Source: https://www.sqlite.org/fileformat2.html#walformat
+         *
 		 */
-		if (size < 32)
-		{
-			info("seems to be an empty WAL-file.");
-			return;
-		}
+		
 		
 		framestart = 32; // this is the position, where the first frame should be
 
@@ -236,6 +357,34 @@ public class WALReader extends Base {
 	
 			/* get the page number of this frame */
 			pagenumber_maindb = fheader.getInt();
+			
+			/* number or size of pages for a commit header, otherwise zero. */
+			int commit = fheader.getInt();
+			if (commit > 0)
+				info(" Information of the WAL-archive has been commited successful. ");
+			else
+				info(" No commit so far. this frame holds the latest! version of the page ");
+			
+			long fsalt1 = Integer.toUnsignedLong(fheader.getInt());
+			info("fsalt1 " + fsalt1);
+			
+			long fsalt2 = Integer.toUnsignedLong(fheader.getInt());
+			info("fsalt2" + fsalt2);
+			
+			/* A frame is considered valid if and only if the following conditions are true:
+			 * 
+			 * 1) The salt-1 and salt-2 values in the frame-header match salt values in the wal-header
+			 * 
+			 * 2) The checksum values in the final 8 bytes of the frame-header exactly match the checksum
+			 *    computed consecutively on the first 24 bytes of the WAL header and the first 8 bytes and 
+			 *    the content of all frames up to and including the current frame.
+			 */
+			
+			if (hsalt1 == fsalt1 && hsalt2 == fsalt2)
+			{
+				 info("seems to be an valid frame. Condition 1 is true at least. ");
+			}	
+				
 	
 			debug("pagenumber of frame in main db " + pagenumber_maindb);
 			
@@ -248,11 +397,12 @@ public class WALReader extends Base {
 			numberofpages++;
 			pagenumber_wal = numberofpages;
 
-		    System.out.println("before analyzePage()");
 			
-			analyzePage();
+			WALFrame frame = updateCheckpoint(pagenumber_maindb, framenumber,fsalt1, fsalt2,(commit==0)? false: true);
+			
+			
+			analyzePage(frame);
 
-		    System.out.println("before analyzePage()");
 
 			
 			framestart += ps +  24;
@@ -267,11 +417,37 @@ public class WALReader extends Base {
 			else
 				next = false;
 			
+			framenumber++;
+			
 		}while(next);
 
 		info("Lines after WAL-file recovery: " + output.size());
 		info("Number of pages in WAL-file" + numberofpages);
 	
+		
+		info("Checkpoints " + checkpoints.toString());
+	}
+	
+	private WALFrame updateCheckpoint(int pagenumber, int framenumber,long salt1, long salt2, boolean committed){
+		
+		WALFrame f = new WALFrame(pagenumber, framenumber , salt1, salt2,  committed);
+
+		
+		/* new checkpoint/transaction id? */
+		if (!checkpoints.containsKey(salt1))
+		{
+			LinkedList<WALFrame> trx = new LinkedList<WALFrame>();
+			trx.add(f);
+			checkpoints.put(salt1, trx);
+			
+		}
+		else
+		{
+			LinkedList<WALFrame> trx = checkpoints.get(salt1);
+			trx.add(f);
+		}
+		
+		return f;
 	}
 
 	/**
@@ -279,7 +455,7 @@ public class WALReader extends Base {
 	 * 
 	 * @return int success
 	 */
-	public int analyzePage() {
+	public int analyzePage(WALFrame frame) {
 		
 		withoutROWID = false;
 
@@ -418,13 +594,20 @@ public class WALReader extends Base {
 			hls.trim();
 			
 			String rc = null;
+			
 
-			try {
+			try { 
 				rc = ct.readRecord(celloff, buffer, pagenumber_maindb, visit, type, Integer.MAX_VALUE, firstcol, withoutROWID,framestart+24);
 			} catch (IOException e) {
 				e.printStackTrace();
 			}
 
+			/* adding WAL-Frame fields to output line */
+			
+			String info = frame.committed + "," + frame.pagenumber + "," + frame.framenumber + "," + frame.salt1 + "," +  frame.salt2;
+			rc = rc + "#walframe#" + info;
+			System.out.println("***********  " + rc);
+					
 			// add new line to output
 			if (null != rc && rc.length() > 0) {
 
@@ -490,7 +673,9 @@ public class WALReader extends Base {
 					}
 
 				}
+				//rc = frame.framenumber + ";" + frame.pagenumber + ";" + frame.salt1 + ";" + rc;
 
+				
 				output.add(rc);
 			}
 
@@ -702,6 +887,8 @@ public class WALReader extends Base {
 		
 	}
 	
+	
+	
 	/**
 	 *  This method can be used to write the result to a file or
 	 *  to update tables in the user interface (in gui-mode). 
@@ -710,17 +897,19 @@ public class WALReader extends Base {
 	{
 		if (job.gui != null) {
 			
+			
 			info("Number of records recovered: " + output.size());
 
 			String[] lines = output.toArray(new String[0]);
 			Arrays.sort(lines);
 
+	
 			TreePath path  = null;
 			for (String line : lines) {
 				String[] data = line.split(";");
 
 				path = job.guiwaltab.get(data[0]);
-				job.gui.update_table(path, data);
+				job.gui.update_table(path, data, true);
 				
 			}
 			
@@ -958,5 +1147,33 @@ public class WALReader extends Base {
 			}
 
 		}
+	}
+	
+	class WALFrame
+	{
+		int pagenumber;
+		int framenumber;
+		long salt1;
+	    long salt2;
+		boolean committed = false;
+		
+		@Override
+		public String toString()
+		{
+			return "{pagenumber=" + pagenumber + " framenumber=" + framenumber + " committed=" + committed +"}";
+			
+		}
+		
+		
+		public WALFrame(int pagenumber, int framenumber, long salt1, long salt2, boolean committed)
+		{
+			this.salt1 = salt1;
+			this.salt2 = salt2;
+			this.pagenumber = pagenumber;
+			this.framenumber  = framenumber;
+			this.committed = committed;
+		}
+		
+		
 	}
 }

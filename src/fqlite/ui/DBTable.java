@@ -5,6 +5,7 @@ import javax.swing.JTable;
 import javax.swing.ListSelectionModel;
 import javax.swing.table.*;
 
+import fqlite.base.GUI;
 import fqlite.base.Global;
 
 /**
@@ -16,17 +17,22 @@ import fqlite.base.Global;
  */
 public class DBTable extends JTable {
 
-	/**
-	* 
-	*/
+	boolean isWALTable = false;
 	private static final long serialVersionUID = 1L;
 	final CustomCellRenderer renderer = new CustomCellRenderer();
 
+	public DBTable(TableModel dm, boolean isWALTable, GUI gui) {
+		this(dm);  
+		this.isWALTable = isWALTable;
+		if (isWALTable)
+		{
+			renderer.walnode = true;
+			renderer.gui = gui;
+		}
+	}	
+	
 	public DBTable(TableModel dm) {
-		super(dm);
-		//FontTester.getSupportedFonts();
-		//setFont(FontTester.EMOJIFONT);
-		
+	   super(dm);
 	   setSelectionMode(ListSelectionModel.MULTIPLE_INTERVAL_SELECTION);
        setColumnSelectionAllowed(false);
 	   setRowSelectionAllowed(true);

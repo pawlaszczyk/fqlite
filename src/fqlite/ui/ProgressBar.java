@@ -187,7 +187,10 @@ class Task extends SwingWorker<Void, Void> {
 		{
 			job.updateWALPanel();
 		}
-			
+		if (job.readRollbackJournal)
+		{
+			job.updateRollbackPanel();
+		}	
 		
 	}
 

@@ -30,6 +30,7 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Enumeration;
+import java.util.Hashtable;
 import java.util.Iterator;
 import java.util.LinkedList;
 import java.util.List;
@@ -78,9 +79,6 @@ import javax.swing.tree.DefaultMutableTreeNode;
 import javax.swing.tree.DefaultTreeModel;
 import javax.swing.tree.TreeNode;
 import javax.swing.tree.TreePath;
-
-import org.apache.commons.codec.digest.DigestUtils;
-
 import fqlite.types.FileTypes;
 import fqlite.ui.AboutDialog;
 import fqlite.ui.CopyAction;
@@ -93,7 +91,6 @@ import fqlite.ui.FTreeNode;
 import fqlite.ui.FileInfo;
 import fqlite.ui.FontChooser;
 import fqlite.ui.HexView;
-//import fqlite.ui.ImageViewer;
 import fqlite.ui.NodeObject;
 import fqlite.ui.PasteAction;
 import fqlite.ui.PopUpListener;
@@ -166,7 +163,7 @@ import fqlite.util.Logger;
  * 
  * 
  * @author Dirk Pawlaszczyk
- * @version 1.4
+ * @version 1.5
  *
  */
 
@@ -177,8 +174,10 @@ public class GUI extends JFrame {
 	private static final long serialVersionUID = -4356985691362465255L;
 	private JPanel contentPane;
 	private GUI mainwindow;
-	static ConcurrentHashMap<TreePath, JComponent> tables = new ConcurrentHashMap<TreePath, JComponent>();
+	ConcurrentHashMap<TreePath, JComponent> tables = new ConcurrentHashMap<TreePath, JComponent>();
 	ConcurrentHashMap<TreePath, JTextPane> hexviews = new ConcurrentHashMap<TreePath, JTextPane>();
+	private Hashtable<Object, Color> rowcolors = new Hashtable<Object, Color>();
+
 
 	JTextArea logwindow;
 	JMenuBar menuBar;
@@ -625,7 +624,7 @@ public class GUI extends JFrame {
 			}
 		}
 		root.removeAllChildren();
-		GUI.tables.clear();
+		tables.clear();
 		updateTreeUI();
 		// scrollpane_tables.setViewportView(null);
 	}
@@ -713,8 +712,8 @@ public class GUI extends JFrame {
 			model.addColumnType(coltype);
 		}
 		
-		
-		DBTable table = new DBTable(model);
+		DBTable table = new DBTable(model, walnode, this);
+			
 		TableRowSorter<CustomTableModel> sorter = new TableRowSorter<CustomTableModel>();
 		table.setRowSorter(sorter);
 		sorter.setModel(model);
@@ -854,11 +853,11 @@ public class GUI extends JFrame {
 				}
 			}
 
-			protected void doPopup(MouseEvent e) {
+			public void doPopup(MouseEvent e) {
 				pm.show(e.getComponent(), e.getX(), e.getY());
 			}
 
-			protected void highlightRow(MouseEvent e) {
+			public void highlightRow(MouseEvent e) {
 				JTable table = (JTable) e.getSource();
 				Point point = e.getPoint();
 				int row = table.rowAtPoint(point);
@@ -870,7 +869,7 @@ public class GUI extends JFrame {
 
 			
 			
-			private ImageIcon getImageIcon(MouseEvent event)
+			public ImageIcon getImageIcon(MouseEvent event)
 			{
 				Point point = event.getPoint();
 				int column = table.columnAtPoint(point);
@@ -1152,7 +1151,8 @@ public class GUI extends JFrame {
 
 				/* insert Panel with general header information for this database */
 				TreePath tpr = getPath(rjNode);
-				RollbackPropertyPanel rpanel = new RollbackPropertyPanel();
+				FileInfo rinfo = new FileInfo(file.getAbsolutePath()+"-journal");
+				RollbackPropertyPanel rpanel = new RollbackPropertyPanel(rinfo);
 				tables.put(tpr, rpanel);
 
 				updateTableUI();
@@ -1175,7 +1175,8 @@ public class GUI extends JFrame {
 
 				/* insert Panel with general header information for this database */
 				TreePath tpw = getPath(walNode);
-				WALPropertyPanel wpanel = new WALPropertyPanel();
+				FileInfo winfo = new FileInfo(file.getAbsolutePath()+"-wal");
+				WALPropertyPanel wpanel = new WALPropertyPanel(winfo,this);
 				tables.put(tpw, wpanel);
 
 				updateTableUI();
@@ -1365,16 +1366,19 @@ public class GUI extends JFrame {
 	 * @param tp
 	 * @param data
 	 */
-	protected void update_table(TreePath tp, String[] data) {
+	protected void update_table(TreePath tp, String[] data, boolean isWALTable) {
 		String tablename = data[0];
 
 		JTable tb = null;
 		try {
+			
 			tb = (JTable) tables.get(tp);
+			
 		} catch (Exception err) {
 			return;
 		}
-
+		
+		
 		if (tb == null) {
 			doLog(">>>> Unkown tablename" + tablename);
 			return;
@@ -1383,20 +1387,46 @@ public class GUI extends JFrame {
 		Vector<String> v = new Vector<String>();
 		CustomTableModel ctm = ((CustomTableModel) tb.getModel());
 
-		for (int i = 1; i < data.length; i++) {
-
-			String header = "";
-
-			if (i == data.length - 1) {
-				String lastcol = data[i];
-				int hh = lastcol.indexOf("##header##");
-				if (hh >= 0) {
-					header = lastcol.substring(hh);
-					data[i] = data[i].substring(0, hh);
-					/* add header string to table model */
-					ctm.addHeader(header.substring(10));
-				}
+		String[] waldata = new String[5];
+		
+		int last = data.length-1;
+		
+		String walframe = "";
+		
+		if(isWALTable)
+		{
+			String lastcol = data[last];
+			
+			/* WALframe information ? */
+			int ff = lastcol.indexOf("#walframe#");
+			if (ff > 0)
+			{
+				walframe = lastcol.substring(ff+10);
+				lastcol = lastcol.substring(0, ff);	
+				waldata = walframe.split(",");		
+				data[last] = data[last].substring(0, ff);
 			}
+			
+		}
+		
+		/* Extract header information */
+		String header = "";
+		
+		
+		String lastcol = data[last];
+			
+		/* Header fingerprint ? */
+		int hh = lastcol.indexOf("##header##");
+		if (hh >= 0) {
+			header = lastcol.substring(hh);	
+			data[last] = data[last].substring(0, hh);
+			/* add header string to table model */
+			ctm.addHeader(header.substring(10));
+		}
+	
+		
+		for (int i = 1; i < data.length; i++) {
+			
 			if (i == 2) {
 				try
 				{
@@ -1406,23 +1436,37 @@ public class GUI extends JFrame {
 				{
 					v.add(data[2]);
 				}
+				
+				if(isWALTable)
+				{
+					v.add(waldata[0]);
+					v.add(waldata[1]);
+					v.add(waldata[2]);
+					v.add(waldata[3]);
+					v.add(waldata[4]);
+					
+				}
 			} 
+			
+			
+			
 			else
 			{
-				//if (data[i].length() > 100)
-				//{
-					// long data field - possible image ???
-					//if (BLOBCarver.isJPEG(data[i]))
-					//{
-						//v.add("<BLOB>JPEG");
-					//}
-				//}
-				//else
-					v.add(data[i]);
+			    v.add(data[i]);
 			}
 		}
+		
+			
 		ctm.addRow(v);
 
+	}
+
+	public Hashtable<Object, Color> getRowcolors() {
+		return rowcolors;
+	}
+
+	public void setRowcolors(Hashtable<Object, Color> rowcolors) {
+		this.rowcolors = rowcolors;
 	}
 
 }

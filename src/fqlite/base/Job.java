@@ -29,6 +29,7 @@ import javax.swing.JOptionPane;
 import javax.swing.SwingWorker;
 import javax.swing.tree.TreePath;
 
+import fqlite.base.WALReader.WALFrame;
 import fqlite.descriptor.AbstractDescriptor;
 import fqlite.descriptor.IndexDescriptor;
 import fqlite.descriptor.TableDescriptor;
@@ -164,6 +165,23 @@ public class Job extends Base {
 	/* this is a multi-threaded program -> all data are saved to the list first*/
 	ConcurrentLinkedQueue<String> ll = new ConcurrentLinkedQueue<String>();
 	
+	/* header fields */
+	
+	byte ffwversion;
+	byte ffrversion;
+	byte reservedspace;
+	byte maxpayloadfrac;
+	byte minpayloadfrac;
+	byte leafpayloadfrac;
+	long filechangecounter; 
+	long sizeinpages;
+	long schemacookie;
+	long schemaformatnumber;
+	long defaultpagecachesize;
+	long userversion;
+	long vacuummode;
+	long versionvalidfornumber;
+	
 	/* Virtual Tables */
 	public Map<String,TableDescriptor> virtualTables = new HashMap<String,TableDescriptor>();
 	
@@ -254,18 +272,99 @@ public class Job extends Base {
 	
 	public String[][] getHeaderProperties()
 	{
-		String [][] prop = {{"","Path",path},{"","File Size (in Bytes)",String.valueOf(totalbytes)},{"","Number of Pages",String.valueOf(numberofpages)},{"16","Page Size",String.valueOf(ps)},{"32","Page number of the first freelist trunk page.",String.valueOf(fphead)},{"36","Total number of freelist pages.\n"
-				+ "",String.valueOf(fpnumber)},{"52","Auto-Vacuum",String.valueOf(autovacuum)},    {"56","Database Encoding",db_encoding.displayName()}, {"96","SQLITE_VERSION_NUMBER",sqliteversion}};
+		String [][] prop = {{"0","The header string",this.MAGIC_HEADER_STRING},
+				{"18","File format write version",String.valueOf(ffwversion)},
+				{"19","File format read version",String.valueOf(ffrversion)},
+				{"20","Unused reserved space at the end of each page ",String.valueOf(reservedspace)},
+				{"21","Maximum embedded payload fraction. Must be 64.",String.valueOf(maxpayloadfrac)},
+				{"22","Minimum embedded payload fraction. Must be 32.",String.valueOf(minpayloadfrac)},
+				{"23","Leaf payload fraction. Must be 32.",String.valueOf(leafpayloadfrac)},
+				{"24","File change counter.",String.valueOf(filechangecounter)},
+				{"28","Size of the database file in pages. The \"in-header database size\"",String.valueOf(sizeinpages)},
+				{"32","Page number of the first freelist trunk page.",String.valueOf(fphead)},
+				{"36","Total number of freelist pages.",String.valueOf(fpnumber)},
+				{"40","The schema cookie.",String.valueOf(schemacookie)},
+				{"44","The schema format number. Supported schema formats are 1, 2, 3, and 4.",String.valueOf(schemaformatnumber)},
+				{"48","Default page cache size.",String.valueOf(defaultpagecachesize)},
+				{"52","The page number of the largest root b-tree page when in auto-vacuum or incremental-vacuum modes, or zero otherwise.",String.valueOf(autovacuum)},
+				{"56","The database text encoding.",String.valueOf(db_encoding.displayName())},
+				{"60","The \"user version\"",String.valueOf(userversion)},
+				{"64","True (non-zero) for incremental-vacuum mode. False (zero) otherwise.",String.valueOf(vacuummode)},
+				{"92","The version-valid-for number.",String.valueOf(versionvalidfornumber)},
+				{"96","SQLITE_VERSION_NUMBER",String.valueOf(sqliteversion)}};
 		
+		
+		
+		
+		
+	
 		return prop;
 	}
 	
 	public String[][] getWALHeaderProperties()
 	{
-		String [][] prop = {{"","Path",wal.path}};
+		String [][] prop = {{"0","HeaderString",wal.headerstring},
+				{"4","File format version",String.valueOf(wal.ffversion)},
+				{"8","Database page size",String.valueOf(wal.ps)},
+				{"12","Checkpoint sequence number",String.valueOf(wal.csn)},
+				{"16","Salt-1",String.valueOf(wal.hsalt1)},
+				{"20","Salt-2",String.valueOf(wal.hsalt2)},
+				{"24","Checksum1",String.valueOf(wal.hchecksum1)},
+				{"28","Checksum2",String.valueOf(wal.hchecksum2)}};
 		
 		return prop;
 	}
+	
+	public String[][] getRollbackHeaderProperties()
+	{
+		String [][] prop = {{"0","HeaderString",RollbackJournalReader.MAGIC_HEADER_STRING},
+				{"8","number of pages",String.valueOf(rol.pagecount)},
+				{"12","nounce for checksum",String.valueOf(rol.nounce)},
+				{"16","pages",String.valueOf(rol.pages)},
+				{"20","sector size ",String.valueOf(rol.sectorsize)},
+				{"24","journal page size",String.valueOf(rol.journalpagesize)}};
+		
+		return prop;
+	}
+	
+	public String[][] getCheckpointProperties()
+	{
+		ArrayList<String []> prop = new ArrayList<String []>();
+		
+		Set<Long> data = wal.checkpoints.descendingKeySet();
+		
+		Iterator<Long> it = data.iterator();
+		
+		while (it.hasNext())
+		{
+			Long salt1 = it.next();
+			
+			LinkedList<WALFrame> list = wal.checkpoints.get(salt1);
+			
+			Iterator<WALFrame> frames = list.iterator();
+			
+			while (frames.hasNext())
+			{
+				WALFrame current = frames.next();
+				
+			    String[] line = new String[5];
+			    line[0] = String.valueOf(current.salt1);
+			    line[1] = String.valueOf(current.salt2);
+			    line[2] = String.valueOf(current.framenumber);
+			    line[3] = String.valueOf(current.pagenumber);
+			    line[4] = String.valueOf(current.committed);
+			    
+			    prop.add(line);
+			    
+			}
+		}
+		
+		String[][] result = new String[prop.size()][5];
+		prop.toArray(result);
+		
+		return result;
+	}
+	
 	
 	public String[][] getSchemaProperties()
 	{
@@ -296,6 +395,12 @@ public class Job extends Base {
 		return prop;
 	}
 
+	
+	public void updateRollbackPanel()
+	{
+		rolpanel.initHeaderTable(this.getRollbackHeaderProperties());	
+	}
+	
 	public void updatePropertyPanel()
 	{
 		panel.initHeaderTable(getHeaderProperties());
@@ -305,6 +410,7 @@ public class Job extends Base {
 	public void updateWALPanel()
 	{
 		walpanel.initHeaderTable(getWALHeaderProperties());
+		walpanel.initCheckpointTable(getCheckpointProperties());
 	}
 	
 	/**
@@ -347,6 +453,36 @@ public class Job extends Base {
 			// set filepointer to begin of the file
 			buffer.flip();
 
+			/* The first 100 bytes of the database file comprise the database file header. 
+			 * The database file header is divided into fields as shown by the table below. 
+			 * All multibyte fields in the database file header are stored with the must 
+			 * significant byte first (big-endian).
+			 * 
+			 * 0	16	The header string: "SQLite format 3\000"
+			 * 16	 2	The database page size in bytes. Must be a power of two between 512 and 32768 inclusive, or the value 1 representing a page size of 65536.
+			 * 18    1	File format write version. 1 for legacy; 2 for WAL.
+		     * 19  	 1	File format read version. 1 for legacy; 2 for WAL.
+			 * 20    1	Bytes of unused "reserved" space at the end of each page. Usually 0.
+			 * 21	 1	Maximum embedded payload fraction. Must be 64.
+			 * 22 	 1	Minimum embedded payload fraction. Must be 32.
+			 * 23 	 1	Leaf payload fraction. Must be 32.
+			 * 24  	 4	File change counter.
+			 * 28 	 4	Size of the database file in pages. The "in-header database size".
+			 * 32  	 4	Page number of the first freelist trunk page.
+			 * 36	 4	Total number of freelist pages.
+			 * 40 	 4	The schema cookie.
+			 * 44 	 4	The schema format number. Supported schema formats are 1, 2, 3, and 4.
+			 * 48	 4	Default page cache size.
+			 * 52	 4	The page number of the largest root b-tree page when in auto-vacuum or incremental-vacuum modes, or zero otherwise.
+			 * 56	 4	The database text encoding. A value of 1 means UTF-8. A value of 2 means UTF-16le. A value of 3 means UTF-16be.
+			 * 60	 4	The "user version" as read and set by the user_version pragma.
+			 * 64	 4	True (non-zero) for incremental-vacuum mode. False (zero) otherwise.
+			 * 68	24	Reserved for expansion. Must be zero.
+			 * 92	 4	The version-valid-for number.
+			 * 96	 4	SQLITE_VERSION_NUMBER
+			 */
+			
+			
 			/********************************************************************/
 
 			byte header[] = new byte[16];
@@ -362,6 +498,58 @@ public class Job extends Base {
 				return -1;
 			}
 
+			
+			
+			ffwversion = buffer.get();
+			info(" File format write version. 1 for legacy; 2 for WAL. " + ffwversion);
+
+			ffrversion = buffer.get();
+			info(" File format read version. 1 for legacy; 2 for WAL. " + ffrversion);
+
+		    reservedspace = buffer.get();
+			info(" Bytes of unused \"reserved\" space at the end of each page. Usually 0. " + reservedspace);
+
+			maxpayloadfrac = buffer.get();
+			info(" Maximum embedded payload fraction. Must be 64." + maxpayloadfrac);
+
+			minpayloadfrac = buffer.get();
+			info(" Minimum embedded payload fraction. Must be 32." + maxpayloadfrac);
+
+			leafpayloadfrac = buffer.get();
+			info("  Leaf payload fraction. Must be 32.  " + leafpayloadfrac);
+
+			filechangecounter = Integer.toUnsignedLong(buffer.getInt());
+			info("  File change counter " + filechangecounter);
+
+			sizeinpages = Integer.toUnsignedLong(buffer.getInt());
+			info("  Size of the database file in pages " + sizeinpages);
+
+			buffer.position(40);
+			schemacookie = Integer.toUnsignedLong(buffer.getInt());
+			info(" The schema cookie. (offset 40) " + schemacookie);
+
+		    schemaformatnumber = Integer.toUnsignedLong(buffer.getInt());
+			info(" The schema format number. (offset 44) " + schemaformatnumber);
+ 
+			defaultpagecachesize = Integer.toUnsignedLong(buffer.getInt());
+			info("  Default page cache size. (offset 48) " + defaultpagecachesize);
+ 
+			buffer.position(60);
+			
+			userversion = Integer.toUnsignedLong(buffer.getInt());
+			info("  User version (offset 60) " + userversion);
+ 
+			 
+			vacuummode = Integer.toUnsignedLong(buffer.getInt());
+			info("  Incremential vacuum-mode (offset 64) " + vacuummode);
+ 
+			buffer.position(92);
+
+			versionvalidfornumber = Integer.toUnsignedLong(buffer.getInt());
+			info(" The version-valid-for number.  " + versionvalidfornumber);
+ 
+			
+					
 			/********************************************************************/
 
 			is_default = true;
@@ -728,6 +916,8 @@ public class Job extends Base {
 				if (signature != null && signature.length() > 0)
 					tblSig.put(td.getSignature(), td.tblname);
 
+				
+				
 				/* update treeview in UI - skip this step in console modus */
 				if (null != gui) {
 
@@ -736,8 +926,23 @@ public class Job extends Base {
 					lastpath = path;
 
 					if (readWAL) {
-
-						TreePath walpath = gui.add_table(this, td.tblname, td.columnnames, td.getColumntypes(), true, false,0);
+						
+						List<String> cnames = td.columnnames;
+						cnames.add(0,"commit");
+						cnames.add(1,"dbpage");
+						cnames.add(2,"walframe");
+						cnames.add(3,"salt1");
+						cnames.add(4,"salt2");
+						
+						List<String> ctypes = td.columntypes;
+						ctypes.add(0,"INT");
+						ctypes.add(1,"INT");
+						ctypes.add(2,"INT");
+						ctypes.add(3,"INT");
+						ctypes.add(4,"INT");
+						
+						
+						TreePath walpath = gui.add_table(this, td.tblname, cnames, ctypes, true, false,0);
 						guiwaltab.put(td.tblname, walpath);
 						setWALPath(walpath.toString());
 
@@ -784,7 +989,25 @@ public class Job extends Base {
 					lastpath = path;
 
 					if (readWAL) {
-						TreePath walpath = gui.add_table(this, id.idxname, id.columnnames, id.columntypes, true, false,1);
+						
+						
+						List<String> cnames = id.columnnames;
+						cnames.add(0,"commit");
+						cnames.add(1,"dbpage");
+						cnames.add(2,"walframe");
+						cnames.add(3,"salt1");
+						cnames.add(4,"salt2");
+						
+						List<String> ctypes = id.columntypes;
+						ctypes.add(0,"INT");
+						ctypes.add(1,"INT");
+						ctypes.add(2,"INT");
+						ctypes.add(3,"INT");
+						ctypes.add(4,"INT");
+						
+						
+						
+						TreePath walpath = gui.add_table(this, id.idxname, cnames, ctypes, true, false,1);
 						guiwaltab.put(id.idxname, walpath);
 						setWALPath(walpath.toString());
 
@@ -1024,7 +1247,7 @@ public class Job extends Base {
 					String[] data = line.split(";");
 
 					path = guitab.get(data[0]);
-					gui.update_table(path, data);
+					gui.update_table(path, data, false);
 				}
 
 				SwingWorker<Boolean, Void> backgroundProcess = new HexViewCreator(this, path, file, this.path, 0);
@@ -1393,8 +1616,12 @@ public class Job extends Base {
 	 * @return  A <code>ByteBuffer</code> object containing the page content. 
 	 */
 	public ByteBuffer readPageWithNumber(int pagenumber, int pagesize) {
-		if (pagenumber*pagesize < 0)
+		
+		if (pagenumber < 0)
+		{
 		   System.out.println("Interesting "  +  pagenumber + " " + pagesize);
+		   return null;
+		}
 		return readPageWithOffset(pagenumber*pagesize,pagesize);
 	}
 

@@ -110,7 +110,7 @@ public class FileInfo {
 	
     public void computeHashes(String path)
     {
-    	 MessageDigest md;
+    	// MessageDigest md;
 		try {
 			//md = MessageDigest.getInstance("SHA-256");
 			sha256hash = new DigestUtils(org.apache.commons.codec.digest.MessageDigestAlgorithms.SHA_256).digestAsHex(new File(path));

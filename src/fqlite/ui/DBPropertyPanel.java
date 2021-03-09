@@ -1,10 +1,7 @@
 package fqlite.ui;
 
 import java.awt.BorderLayout;
-import java.awt.EventQueue;
 import java.awt.Font;
-import java.io.File;
-
 import javax.swing.JLabel;
 import javax.swing.JPanel;
 import javax.swing.JScrollPane;
@@ -33,7 +30,6 @@ public class DBPropertyPanel extends JPanel {
 	public DBPropertyPanel(FileInfo info)
 	{
 		this.info = info;
-		System.out.println(info.toString());
 	}
 	
 	
@@ -49,9 +45,10 @@ public class DBPropertyPanel extends JPanel {
 		
 		
 		JTextArea headerinfo = new JTextArea();
+		PopupFactory.createPopup(headerinfo);
 		headerinfo.setColumns(85);
 		headerinfo.setAlignmentX(CENTER_ALIGNMENT);
-		add(headerinfo,BorderLayout.NORTH);
+		//add(headerinfo,BorderLayout.NORTH);
 		Font font = new Font("Courier", Font.BOLD, 12);
 	    headerinfo.setFont(font);
 	    headerinfo.setText(info.toString());
@@ -59,7 +56,8 @@ public class DBPropertyPanel extends JPanel {
 			
 		String column[]={"Offset","Property","Value"};         
 		JTable jt=new JTable(data,column);    
-		
+		PopupFactory.createPopup(jt);
+
 		
 		JTableHeader th = jt.getTableHeader();
 		th.setFont(new Font("Serif", Font.BOLD, 15));
@@ -89,7 +87,8 @@ public class DBPropertyPanel extends JPanel {
 		
 		String column[]={"Type","Tablename","Root","SQL-Statement","Virtual","ROWID"};         
 		JTable jt=new JTable(data,column);    
-		
+		PopupFactory.createPopup(jt);
+
 		
 		JTableHeader th = jt.getTableHeader();
 		th.setFont(new Font("Serif", Font.BOLD, 15));

@@ -61,7 +61,9 @@ public class HexView extends JDialog {
 		taddress.append(soffset);
 		taddress.setFont(new java.awt.Font("Courier New", java.awt.Font.BOLD, 18));
 		taddress.setEditable(false);
-
+		PopupFactory.createPopup(taddress);
+		
+		
 		LimitlessPlainDocument contentp = new LimitlessPlainDocument(Integer.MAX_VALUE);
 
 		thex = new JTextArea(contentp);
@@ -69,6 +71,8 @@ public class HexView extends JDialog {
 		// thex.setLineWrap(true);
 		thex.setFont(new java.awt.Font("Courier New", java.awt.Font.PLAIN, 18));
 		thex.setEditable(false);
+		PopupFactory.createPopup(thex);
+
 
 		/**
 		 * Attetion: We do linewrapping manualy
@@ -92,6 +96,8 @@ public class HexView extends JDialog {
 		LimitlessPlainDocument contenttext = new LimitlessPlainDocument(Integer.MAX_VALUE);
 
 		ttext = new JTextArea(contenttext);
+		PopupFactory.createPopup(ttext);
+
 		ttext.setColumns(16);
 		// ttext.setLineWrap(true); don't use this!!! - application freezes when opening
 		// larger files
