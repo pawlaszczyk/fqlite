@@ -29,14 +29,22 @@ To run the tool you need at least a Java Runtime Environment 1.8 or higher.
 
 # Example Usage
 
-To run the *FQLite* in GUI mode the executable jar can normally be started with a double-click on the jar-archive file. If this does not work, since *javaw* is not linked correctly to *.jar* files, you can use the command line as well:
+To run the FQLite in GUI mode the executable jar can normally be started with a double-click on the jar-archive file. If this does not work, since javaw is not linked correctly to .jar files, you can use the command line as well:
 
-  $>java -jar fqlite<versionnumber>.jar 
+$ java -jar fqlite<version>.jar
 
 
-To run the *FQLite* from the command line you can use the following command:
+To run the FQLite from the command line you can use the following command:
 
-  $>java -cp fqlite<versionnumber>.jar fqlite.base.MAIN <database.db>
+$ java -jar fqlite<version>.jar nogui <database.db>
+
+Here is a more complex example with parameters:
+
+$ java -jar fqlite<version>.jar nogui --threads:4 --loglevel:ERROR <database.db>
+
+   nogui                     ->    start program in command line mode
+--threads:4                ->    use 4 threads to analyze the data records
+--loglevel:ERROR   ->    print only ERROR messages to standard output
 
 
 # Licence and Author
