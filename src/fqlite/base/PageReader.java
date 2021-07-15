@@ -689,9 +689,9 @@ public class PageReader extends Base {
 		 * are reserved for the (possible) next overflow page offset
 		 **/
 		byte[] current = new byte[job.ps - 4];
-		System.out.println("current ::" + current.length);
-		System.out.println("bytes:: " + (job.ps -4));
-		System.out.println("overflowpage :: " + overflowpage.limit());
+		//System.out.println("current ::" + current.length);
+		//System.out.println("bytes:: " + (job.ps -4));
+		//System.out.println("overflowpage :: " + overflowpage.limit());
 		
 		overflowpage.position(4);
 		overflowpage.get(current, 0, job.ps - 4);
@@ -780,7 +780,7 @@ public class PageReader extends Base {
 	 * @return
 	 */
 	private SqliteElement[] get(byte[] header) {
-		// there are several varint values in the columntypes header
+		// there are several varint values in the serialtypes header
 		int[] columns = Auxiliary.readVarInt(header);
 		if (null == columns)
 			return null;

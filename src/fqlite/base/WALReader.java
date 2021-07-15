@@ -10,24 +10,17 @@ import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.Arrays;
 import java.util.BitSet;
-import java.util.Enumeration;
-import java.util.Hashtable;
 import java.util.Iterator;
 import java.util.LinkedList;
 import java.util.List;
-import java.util.Map;
 import java.util.Map.Entry;
 import java.util.Set;
-import java.util.SortedMap;
 import java.util.TreeMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.Future;
 
-import javax.swing.JComponent;
-import javax.swing.JTable;
 import javax.swing.SwingUtilities;
 import javax.swing.SwingWorker;
-import javax.swing.table.TableModel;
 import javax.swing.tree.DefaultMutableTreeNode;
 import javax.swing.tree.DefaultTreeModel;
 import javax.swing.tree.TreeModel;
@@ -38,7 +31,6 @@ import fqlite.descriptor.AbstractDescriptor;
 import fqlite.descriptor.TableDescriptor;
 import fqlite.pattern.SerialTypeMatcher;
 import fqlite.types.CarverTypes;
-import fqlite.ui.CustomTableModel;
 import fqlite.ui.DBTable;
 import fqlite.ui.HexView;
 import fqlite.ui.NodeObject;
@@ -533,7 +525,8 @@ public class WALReader extends Base {
 			buffer.get(fboffset);
 
 		}
-
+		
+		int ccrstart = job.ps;
 
 		// found Data-Page - determine number of cell pointers at offset 3-4 of this
 		// page
@@ -546,7 +539,8 @@ public class WALReader extends Base {
 		buffer.position(5);
 
 		ByteBuffer contentregionstart = ByteBuffer.wrap(ccr);
-		Auxiliary.TwoByteBuffertoInt(contentregionstart);
+		ccrstart = Auxiliary.TwoByteBuffertoInt(contentregionstart);
+
 
 		/* mark as visited */
 		visit.set(2, 8);
@@ -606,7 +600,7 @@ public class WALReader extends Base {
 			
 			String info = frame.committed + "," + frame.pagenumber + "," + frame.framenumber + "," + frame.salt1 + "," +  frame.salt2;
 			rc = rc + "#walframe#" + info;
-			System.out.println("***********  " + rc);
+			//System.out.println("***********  " + rc);
 					
 			// add new line to output
 			if (null != rc && rc.length() > 0) {
@@ -622,7 +616,7 @@ public class WALReader extends Base {
 						 * we use the xxx_node shadow component to construct the virtual component
 						 */
 						String BLOB = rc.substring(p1);
-						System.out.println(BLOB);
+						//System.out.println(BLOB);
 
 						/*
 						 * skip the first information -> go directly to the 5th element of the data
@@ -684,9 +678,100 @@ public class WALReader extends Base {
 		
 		debug("finished STEP2 -> cellpoint array completed");
 		
-		
-		return 0;
+	try 
+	{	
 
+		/***************************************************************
+		 * STEP 3:
+		 * 
+		 * Scan unallocated space between header and  the cell
+		 * content region 
+		 * 
+		 ***************************************************************/
+		
+		/* before we go to the free blocks an gaps let us first check the area between the header and 
+		   the start byte of the cell content region */
+		
+		buffer.position(headerend);
+		
+		/* 	Although we have already reached the official end of the cell pointer array, 
+		 *  there may be more pointers startRegion deleted records. They do not belong to the
+		 *  official content region. We have to skip them, before we can search for more 
+		 *  artifacts in the unallocated space. 
+		 */
+		
+		byte garbage[] = new byte[2];
+		
+		int garbageoffset = -1;
+		do
+		{
+			
+			buffer.get(garbage);
+			ByteBuffer ignore = ByteBuffer.wrap(garbage);
+			garbageoffset = Auxiliary.TwoByteBuffertoInt(ignore);
+			//System.out.println("garbage bytes " + buffer.position());
+		} while (buffer.position() < ps && garbageoffset > 0);
+		
+		
+		/*  Now, skip all zeros - no information to recover just empty space */
+		byte zerob = 0;
+		while(buffer.position() < ps && zerob == 0)
+		{
+			zerob = buffer.get();
+		}
+		
+		/* mark the region startRegion the end of page header till end of zero space as visited */
+		visit.set(headerend,buffer.position());
+		
+		/* go back one byte */
+		buffer.position(buffer.position()-1);
+	
+		//System.out.println("First none-zero Byte " + zerob);
+		
+		//System.out.println("Cell Content Region start offset : " + ccrstart);
+		//System.out.println("First none zero byte in unallocated space : " + buffer.position());
+		
+		/* only if there is a significant number of bytes in the unallocated area, evaluate it more closely. */
+		if (ccrstart - buffer.position() > 3)
+		{
+			/* try to read record as usual */
+			String rc;
+			
+			/* Tricky thing : data record could be partly overwritten with a new data record!!!  */
+			/* We should read until the end of the unallocated area and not above! */
+			rc = ct.readRecord(buffer.position(), buffer, ps, visit, type, ccrstart - buffer.position(),firstcol,withoutROWID,-1);
+			
+			// add new line to output
+			if (null != rc) { // && rc.length() > 0) {
+				
+				int idx = rc.indexOf(";");
+				rc = rc.substring(0, idx) + ";" + Global.DELETED_RECORD_IN_PAGE  + rc.substring(idx+1);
+				   					
+				
+				//if (job.doublicates.add(rc.hashCode()))
+				job.ll.add(rc);
+			}
+			
+		}
+		
+		
+		/***************************************************************
+		 * STEP 4:
+		 * 
+		 * if there are still gaps, go for it and carve it  
+		 * 
+		 ***************************************************************/
+		
+		/* now we are ready to carve the rest of the page */
+		carve(content,null);
+		
+	} catch (Exception err) {
+		err.printStackTrace();
+		return -1;
+	}
+
+	return 0;
+		
 	}
 
 	/**
@@ -780,7 +865,7 @@ public class WALReader extends Base {
 			tab.add(tdesc);
 			debug(" added tdsec ");
 		} else {
-			warning(" No component description!");
+			warning(" No component description!" + content);
 			tab = tables;
 		}
 
@@ -898,7 +983,7 @@ public class WALReader extends Base {
 		if (job.gui != null) {
 			
 			
-			info("Number of records recovered: " + output.size());
+			info("Number of records recovered: " + output.size() + output.toString());
 
 			String[] lines = output.toArray(new String[0]);
 			Arrays.sort(lines);

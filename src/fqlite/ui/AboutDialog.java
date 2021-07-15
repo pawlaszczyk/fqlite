@@ -2,6 +2,7 @@ package fqlite.ui;
 
 import static javax.swing.GroupLayout.Alignment.CENTER;
 
+import java.awt.Color;
 import java.awt.Container;
 import java.awt.Frame;
 import java.awt.event.ActionEvent;
@@ -113,7 +114,8 @@ public class AboutDialog extends JDialog {
 		Container pane = getContentPane();
 		GroupLayout gl = new GroupLayout(pane);
 		pane.setLayout(gl);
-
+	    pane.setBackground(Color.WHITE);
+		
 		JScrollPane jp = new JScrollPane();
 		jp.setAutoscrolls(true);
 

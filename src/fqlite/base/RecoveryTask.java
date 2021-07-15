@@ -235,7 +235,7 @@ public class RecoveryTask extends Base implements Runnable {
 							 * virtual component
 							 */
 							String BLOB = rc.substring(p);
-							System.out.println(BLOB);
+							//System.out.println(BLOB);
 							
 							/* skip the first information -> go directly to the 5th element
 							 * of the data record line, i.e. go to the BLOB with the row data
@@ -352,7 +352,7 @@ public class RecoveryTask extends Base implements Runnable {
 			//System.out.println("First none zero byte in unallocated space : " + buffer.position());
 			
 			/* only if there is a significant number of bytes in the unallocated area, evaluate it more closely. */
-			if (ccrstart - buffer.position() > 10)
+			if (ccrstart - buffer.position() > 3)
 			{
 				/* try to read record as usual */
 				String rc;
@@ -416,7 +416,7 @@ public class RecoveryTask extends Base implements Runnable {
 	 * @return
 	 */
 	public LinkedList<Gap> findGaps() {
-		LinkedList<Gap> gaps = new LinkedList<Gap>();
+		LinkedList <Gap> gaps = new LinkedList<Gap>();
 
 		int from = 0;
 
@@ -432,7 +432,7 @@ public class RecoveryTask extends Base implements Runnable {
 					to++;
 				}
 
-				if (to - from > 10) {
+				if (to - from >= 4) {
 
 					/* check for zero bytes */
 					boolean isNull = false;
@@ -447,10 +447,11 @@ public class RecoveryTask extends Base implements Runnable {
 					if (isNull)
 						visit.set(from, to);
 					else {
+						Gap g = new Gap(from, to);
+						if (!gaps.contains(g))
 						debug("ohne match : " + (job.ps * (pagenumber - 1) + from) + " - "
 								+ (job.ps * (pagenumber - 1) + to) + " Bytes");
-
-						gaps.add(new Gap(from, to));
+						gaps.add(g);
 					}
 				}
 				from = i;
@@ -458,7 +459,8 @@ public class RecoveryTask extends Base implements Runnable {
 			}
 
 		} // end of finding gaps in BitSet
-
+	
+		
 		return gaps;
 	}
 
@@ -502,7 +504,9 @@ public class RecoveryTask extends Base implements Runnable {
 			tab = tables;
 		}
 		
-		LinkedList<Gap> gaps = findGaps();
+		List<Gap> gaps = findGaps();
+
+		System.out.println("gaps.size()" + gaps.size());
 		if (gaps.size() == 0)
 		{
 			debug("no gaps anymore. Stopp search");
@@ -530,7 +534,7 @@ public class RecoveryTask extends Base implements Runnable {
 				Gap next = gaps.get(a);
 
 				
-				if (next.to - next.from > 10)
+				if (next.to - next.from > 5)
 					/* do we have at least one match ? */
 					if (c.carve(next.from+4,next.to, stm, CarverTypes.NORMAL, tab.get(n),firstcol)) {
 						debug("*****************************  STEP NORMAL finished with matches");
@@ -602,7 +606,6 @@ public class RecoveryTask extends Base implements Runnable {
 				/* one last try with 4+1 instead of 4 Bytes */
 				c.carve(next.from+4+1,next.to, stm, CarverTypes.FIRSTCOLUMNMISSING, tab.get(n),firstcol); 
 				
-			
 			}
 			
 

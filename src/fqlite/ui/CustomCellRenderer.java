@@ -5,6 +5,7 @@ import java.awt.Component;
 import java.awt.Font;
 import java.awt.Toolkit;
 import javax.swing.ImageIcon;
+import javax.swing.JLabel;
 import javax.swing.JTable;
 import javax.swing.table.DefaultTableCellRenderer;
 import fqlite.base.GUI;
@@ -38,17 +39,20 @@ public class CustomCellRenderer extends DefaultTableCellRenderer {
 
 		
 		Component rendererComp = super.getTableCellRendererComponent(table, value, isSelected, hasFocus, row, column);
-		if (column < 2)
+		if (column < 3)
 			rendererComp.setFont(offsetFont);
-		else {
+		else 
+		{
 			if (GUI.ttfFont != null)
 				rendererComp.setFont(GUI.ttfFont);
 			else
-				rendererComp.setFont(defaultFont);
+				rendererComp.setFont(defaultFont);			
 		}
 		
-		if (column > 1)
+		if (column > 2)
 		{ 
+
+			
 			if (value instanceof String)
 			{	
 				String v = (String)value;
@@ -67,36 +71,50 @@ public class CustomCellRenderer extends DefaultTableCellRenderer {
 		
 			}
 		}
-		if (column == 0)
+		
+		if (column < 2)
+			this.setHorizontalAlignment(JLabel.LEFT);
+
+			
+		if (column == 1)
 		{
 			String v = (String)value;
-			
-			if (v.contains(Global.FREELIST_ENTRY))
-			{	this.setIcon(icon_trash);
-			    this.setValue("");
+						
+			if (v.startsWith(Global.FREELIST_ENTRY))
+			{	
+				this.setIcon(icon_trash);
 			}
-			else if (v.contains(Global.DELETED_RECORD_IN_PAGE))
+			else if (v.startsWith(Global.DELETED_RECORD_IN_PAGE))
 			{
+				System.out.println("Set Icon " + icon_deleted);
 				this.setIcon(icon_deleted);
-			    this.setValue("");
 			}
-			else if (v.contains(Global.UNALLOCATED_SPACE))
+			else if (v.startsWith(Global.UNALLOCATED_SPACE))
 			{	
 				this.setIcon(icon_deleted);
-				this.setValue("");
 			}
 		}	
 		else
 		{
 			this.setIcon(null);
 		}
+		
+		
+		if (column == 0)
+		{
+			setText(Integer.toString(row));
+			rendererComp.setBackground(Color.LIGHT_GRAY);
+			this.setHorizontalAlignment(JLabel.RIGHT);
+		}
+		
+		
+	
 
 		
 		
 		if(walnode)
 		{
-			Object salt = table.getValueAt(row,5);
-			//int vrow = table.convertRowIndexToView(row);
+			Object salt = table.getValueAt(row,6);
 			
 			Component cell = super.getTableCellRendererComponent(table, value, isSelected, hasFocus, row, column);
 
@@ -108,15 +126,18 @@ public class CustomCellRenderer extends DefaultTableCellRenderer {
 		{
 			if (! isSelected)
 			{	
-				if ((row % 2) == 0) {
-					rendererComp.setBackground(rowcol);
-				} else
-					rendererComp.setBackground(Color.WHITE);
-		
-				if (column > 1)
-					rendererComp.setForeground(Color.BLUE);
-				else
-					rendererComp.setForeground(Color.BLACK);
+				if (column >0)
+				{	
+					if ((row % 2) == 0) {
+						rendererComp.setBackground(rowcol);
+					} else
+						rendererComp.setBackground(Color.WHITE);
+			
+					if (column > 2)
+						rendererComp.setForeground(Color.BLUE);
+					else
+						rendererComp.setForeground(Color.BLACK);
+				}
 			}
 			
 		}

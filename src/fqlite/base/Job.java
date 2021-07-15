@@ -19,10 +19,12 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Hashtable;
 import java.util.Iterator;
+import java.util.LinkedHashMap;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.TreeSet;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.*;
 import javax.swing.JOptionPane;
@@ -167,13 +169,15 @@ public class Job extends Base {
 	
 	/* header fields */
 	
+	String headerstring;
 	byte ffwversion;
 	byte ffrversion;
 	byte reservedspace;
 	byte maxpayloadfrac;
 	byte minpayloadfrac;
 	byte leafpayloadfrac;
-	long filechangecounter; 
+	long filechangecounter;
+	long inheaderdbsize;
 	long sizeinpages;
 	long schemacookie;
 	long schemaformatnumber;
@@ -181,6 +185,7 @@ public class Job extends Base {
 	long userversion;
 	long vacuummode;
 	long versionvalidfornumber;
+	long avacc;
 	
 	/* Virtual Tables */
 	public Map<String,TableDescriptor> virtualTables = new HashMap<String,TableDescriptor>();
@@ -189,10 +194,9 @@ public class Job extends Base {
 	
 	Hashtable<String, String> tblSig;
 	boolean is_default = false;
-	public List<TableDescriptor> headers = new LinkedList<TableDescriptor>();
+	public Set<TableDescriptor> headers = new TreeSet<TableDescriptor>();
 	public List<IndexDescriptor> indices = new LinkedList<IndexDescriptor>();
 	public AtomicInteger runningTasks = new AtomicInteger();
-	int numberofThreads = 1;
 	int tablematch = 0;
 	int indexmatch = 0; 
 	
@@ -251,7 +255,39 @@ public class Job extends Base {
 	}
 	
 	
-	
+	private ByteBuffer readWALIntoBuffer(String walpath) throws IOException {
+		
+		Path p = Paths.get(walpath);
+
+		/* First - try to analyze the db-schema */
+		/*
+		 * we have to do this before we open the database because of the concurrent
+		 * access
+		 */
+
+		/* try to open the wal-file in read-only mode */
+		file = AsynchronousFileChannel.open(p, StandardOpenOption.READ);
+		
+		if(null == file)
+			return null;
+		
+		/* read the complete file into a ByteBuffer */
+		size = file.size();
+		
+		ByteBuffer bb = ByteBuffer.allocateDirect((int) size);
+		
+		Future<Integer> result = file.read(bb, 0); // position = 0
+
+		while (!result.isDone()) {
+
+			// we can do something in between or we can do nothing ;-).
+		}
+
+		// set file pointer to begin of the file
+		bb.position(0);
+
+		return bb;
+	}
 	
 	public void setPropertyPanel(DBPropertyPanel p)
 	{
@@ -272,7 +308,8 @@ public class Job extends Base {
 	
 	public String[][] getHeaderProperties()
 	{
-		String [][] prop = {{"0","The header string",this.MAGIC_HEADER_STRING},
+		String [][] prop = {{"0","The header string",headerstring},
+				{"16","The database page size in bytes",String.valueOf(ps)},
 				{"18","File format write version",String.valueOf(ffwversion)},
 				{"19","File format read version",String.valueOf(ffrversion)},
 				{"20","Unused reserved space at the end of each page ",String.valueOf(reservedspace)},
@@ -280,16 +317,16 @@ public class Job extends Base {
 				{"22","Minimum embedded payload fraction. Must be 32.",String.valueOf(minpayloadfrac)},
 				{"23","Leaf payload fraction. Must be 32.",String.valueOf(leafpayloadfrac)},
 				{"24","File change counter.",String.valueOf(filechangecounter)},
-				{"28","Size of the database file in pages. The \"in-header database size\"",String.valueOf(sizeinpages)},
+				{"28","Size of the database file in pages. ",String.valueOf(sizeinpages)},
 				{"32","Page number of the first freelist trunk page.",String.valueOf(fphead)},
 				{"36","Total number of freelist pages.",String.valueOf(fpnumber)},
 				{"40","The schema cookie.",String.valueOf(schemacookie)},
 				{"44","The schema format number. Supported schema formats are 1, 2, 3, and 4.",String.valueOf(schemaformatnumber)},
 				{"48","Default page cache size.",String.valueOf(defaultpagecachesize)},
-				{"52","The page number of the largest root b-tree page when in auto-vacuum or incremental-vacuum modes, or zero otherwise.",String.valueOf(autovacuum)},
+				{"52","The page number of the largest root b-tree page when in auto-vacuum or incremental-vacuum modes, or zero otherwise.",String.valueOf(avacc)+" (" + (avacc > 0 ? true : false) + ")"},
 				{"56","The database text encoding.",String.valueOf(db_encoding.displayName())},
 				{"60","The \"user version\"",String.valueOf(userversion)},
-				{"64","True (non-zero) for incremental-vacuum mode. False (zero) otherwise.",String.valueOf(vacuummode)},
+				{"64","True (non-zero) for incremental-vacuum mode. False (zero) otherwise.",String.valueOf(vacuummode)+" (" + (vacuummode > 0 ? true : false) + ")"},
 				{"92","The version-valid-for number.",String.valueOf(versionvalidfornumber)},
 				{"96","SQLITE_VERSION_NUMBER",String.valueOf(sqliteversion)}};
 		
@@ -365,6 +402,75 @@ public class Job extends Base {
 		return result;
 	}
 	
+	public LinkedHashMap<String,String[][]> getTableColumnTypes() 
+	{
+		
+		Iterator<TableDescriptor> it1 = headers.iterator();
+		LinkedHashMap<String,String[][]> ht = new LinkedHashMap<String,String[][]>();
+		
+		
+		while (it1.hasNext())
+		{
+			TableDescriptor td = it1.next();
+		    String[] names = (String[])td.columnnames.toArray(new String[0]);
+		    String[] types = (String[])td.serialtypes.toArray(new String[0]);
+		    String[] sqltypes = (String[])td.sqltypes.toArray(new String[0]);
+		    String[] tableconstraints = null;
+		    String[] constraints = null;
+		    
+			/* check, if there exists global constraints to the table */
+		    if (null != td.tableconstraints)
+	    	{	
+	    		tableconstraints = (String[])td.tableconstraints.toArray(new String[0]);	    		
+	    	}
+		    /* check, if there are constraints on one of the columns */
+		    if (null != td.constraints)
+		    {
+		    	constraints = (String[])td.constraints.toArray(new String[0]);    			    	
+		    }
+		    
+		    String[][] row = null;
+		    if(null != tableconstraints && null != constraints)
+		    {
+			    row = new String[][]{names,types,sqltypes,constraints,tableconstraints};
+		    		    	
+		    }
+		    else if (null != tableconstraints)
+		    {
+		       	row = new String[][]{names,types,sqltypes,tableconstraints};
+				 
+		    }
+		    else if (null != constraints)
+		    {
+		       	row = new String[][]{names,types,sqltypes,constraints};
+				    	
+		    }
+		    else
+		    {
+		    	row = new String[][]{names,types,sqltypes};
+		    }
+		    
+			ht.put(td.tblname,row);
+		}
+		
+		Iterator<IndexDescriptor> it2 = indices.iterator();
+		
+		while (it2.hasNext())
+		{
+			IndexDescriptor id = it2.next();
+			String[] names = (String[])id.columnnames.toArray(new String[0]);
+			String[] types = (String[])id.columntypes.toArray(new String[0]);
+		    
+		    String[][] row = null;
+	    	row = new String[][]{names,types};
+
+			ht.put("idx:" + id.idxname,row);
+		}	
+
+		return ht;
+	}
+	
+
 	
 	public String[][] getSchemaProperties()
 	{
@@ -405,6 +511,7 @@ public class Job extends Base {
 	{
 		panel.initHeaderTable(getHeaderProperties());
 		panel.initSchemaTable(getSchemaProperties());
+		panel.initColumnTypesTable(getTableColumnTypes());
 	}
 
 	public void updateWALPanel()
@@ -487,11 +594,26 @@ public class Job extends Base {
 
 			byte header[] = new byte[16];
 			buffer.get(header);
+			headerstring = Auxiliary.bytesToHex(header);
+			char charArray[] = new char[16];
+			
+			int cn = 0;
+			for (byte b: header)
+			{
+				charArray[cn] = (char)b;
+				cn++;
+			}
+			String txt = new String(charArray);
+			
+			headerstring = txt + " (" + "0x" + headerstring + ")";
+			
 			if (Auxiliary.bytesToHex(header).equals(MAGIC_HEADER_STRING)) // we currently
+			{
 				// support
 				// sqlite 3 data
 				// bases
 				info("header is okay. seems to be an sqlite database file.");
+		    }
 			else {
 				info("sorry. doesn't seem to be an sqlite file. Wrong header.");
 				err("Doesn't seem to be an valid sqlite file. Wrong header");
@@ -499,54 +621,63 @@ public class Job extends Base {
 			}
 
 			
-			
+			buffer.position(18);
 			ffwversion = buffer.get();
-			info(" File format write version. 1 for legacy; 2 for WAL. " + ffwversion);
+			info("File format write version. 1 for legacy; 2 for WAL. " + ffwversion);
 
+			buffer.position(19);
 			ffrversion = buffer.get();
-			info(" File format read version. 1 for legacy; 2 for WAL. " + ffrversion);
+			info("File format read version. 1 for legacy; 2 for WAL. " + ffrversion);
 
+			buffer.position(20);
 		    reservedspace = buffer.get();
-			info(" Bytes of unused \"reserved\" space at the end of each page. Usually 0. " + reservedspace);
+			info("Bytes of unused \"reserved\" space at the end of each page. Usually 0. " + reservedspace);
 
 			maxpayloadfrac = buffer.get();
-			info(" Maximum embedded payload fraction. Must be 64." + maxpayloadfrac);
+			info("Maximum embedded payload fraction. Must be 64." + maxpayloadfrac);
 
 			minpayloadfrac = buffer.get();
-			info(" Minimum embedded payload fraction. Must be 32." + maxpayloadfrac);
+			info("Minimum embedded payload fraction. Must be 32." + maxpayloadfrac);
 
 			leafpayloadfrac = buffer.get();
-			info("  Leaf payload fraction. Must be 32.  " + leafpayloadfrac);
+			info("Leaf payload fraction. Must be 32.  " + leafpayloadfrac);
 
+			buffer.position(16);
+			inheaderdbsize = Integer.toUnsignedLong(buffer.getInt());
+			if (inheaderdbsize == 1)
+				inheaderdbsize = 65536;
+			
+			buffer.position(24);
 			filechangecounter = Integer.toUnsignedLong(buffer.getInt());
-			info("  File change counter " + filechangecounter);
+			info("File change counter " + filechangecounter);
 
+			buffer.position(28);
 			sizeinpages = Integer.toUnsignedLong(buffer.getInt());
-			info("  Size of the database file in pages " + sizeinpages);
+			info("Size of the database file in pages " + sizeinpages);
 
 			buffer.position(40);
 			schemacookie = Integer.toUnsignedLong(buffer.getInt());
-			info(" The schema cookie. (offset 40) " + schemacookie);
+			info("The schema cookie. (offset 40) " + schemacookie);
 
 		    schemaformatnumber = Integer.toUnsignedLong(buffer.getInt());
-			info(" The schema format number. (offset 44) " + schemaformatnumber);
+			info("The schema format number. (offset 44) " + schemaformatnumber);
  
 			defaultpagecachesize = Integer.toUnsignedLong(buffer.getInt());
-			info("  Default page cache size. (offset 48) " + defaultpagecachesize);
+			info("Default page cache size. (offset 48) " + defaultpagecachesize);
  
 			buffer.position(60);
 			
 			userversion = Integer.toUnsignedLong(buffer.getInt());
-			info("  User version (offset 60) " + userversion);
+			info("User version (offset 60) " + userversion);
  
 			 
 			vacuummode = Integer.toUnsignedLong(buffer.getInt());
-			info("  Incremential vacuum-mode (offset 64) " + vacuummode);
+			info("Incremential vacuum-mode (offset 64) " + vacuummode);
  
 			buffer.position(92);
 
 			versionvalidfornumber = Integer.toUnsignedLong(buffer.getInt());
-			info(" The version-valid-for number.  " + versionvalidfornumber);
+			info("The version-valid-for number.  " + versionvalidfornumber);
  
 			
 					
@@ -558,12 +689,10 @@ public class Job extends Base {
 			info("found unkown sqlite-database.");
 
 			/********************************************************************/
-
-			byte avacuum[] = new byte[4];
+			
 			buffer.position(52);
-			buffer.get(avacuum);
-
-			if (Auxiliary.bytesToHex(avacuum).equals(NO_AUTO_VACUUM)) {
+			avacc = Integer.toUnsignedLong(buffer.getInt());
+			if (avacc == 0) {
 				info("Seems to be no AutoVacuum db. Nice :-).");
 				autovacuum = true;
 			} else
@@ -698,128 +827,278 @@ public class Job extends Base {
 
 			}
 
+			
+	
+			
 			/* we looking for the key word <table> of the type column */
 			/* the mark the start of an entry for the sqlmaster_table */
 			ByteSeqSearcher bsearch = new ByteSeqSearcher(tpattern);
+			
+			boolean again = false;
+			int round = 0;
+			ByteBuffer bb = db;
+			
+			/**
+			 * Step into loop
+			 * 
+			 * 1. iteration:  Try to read table and index information from normal database
+			 * 
+			 * 2. iteration:  No information found but a WAL archive in place - try to get the
+			 *                missing information in a second look from the WAL archive
+			 * 
+			 */
+			do
+			{
+				round++;
+				
+				if (round == 2 && !readWAL)
+					break;
+				
+				int index = bsearch.indexOf(bb, 0);
+	
+				/* search as long as we can find further table keywords */
+				while (index != -1) {
+					/* get Header */
+					byte mheader[] = new byte[40];
+					bb.position(index - goback);
+					bb.get(mheader);
+					String headerStr = Auxiliary.bytesToHex(mheader);
+	
+					/**
+					 * case 1: seems to be a dropped table data set
+					 *
+					 **/
+					if (headerStr.startsWith("17") || headerStr.startsWith("21")) {
+	
+						headerStr = "07" + headerStr; // put the header length byte in front
+						// note: for a dropped component this information is lost!!!
+	
+						tablematch++;
+						/* try to get table master schema */
+						if (round==1)
+							readSchema(bb,index,headerStr, false);
+						else
+							readSchema(bb,index,headerStr, true);
+							
+					} 
+					/**
+					 *  case 2: Normal (possible) intact table with intact header
+					 *
+					 **/
+					else if (headerStr.startsWith("0617")) {
+						
+						tablematch++;
+						
+						Auxiliary c = new Auxiliary(this);
+						headerStr = headerStr.substring(0, 14);
+	
+						// compute offset
+						int starthere = index % ps;
+						int pagenumber = index / ps;
+	
+						ByteBuffer bbb = null;
+						if (round == 1)
+							bbb = readPageWithNumber(pagenumber, ps);
+						else
+						{
+							
+							starthere = (index - 32) % (ps + 24);
 
-			int index = bsearch.indexOf(db, 0);
+							
+							byte [] pp = new byte[ps];
+							bb.position(32 + 24 + index/ps);
+							bb.get(pp,0,ps);
+							bbb = ByteBuffer.wrap(pp);
+							starthere = (index-32) % (ps+24);
 
-			/* search as long as we can find further table keywords */
-			while (index != -1) {
-				/* get Header */
-				byte mheader[] = new byte[40];
-				db.position(index - goback);
-				db.get(mheader);
-				String headerStr = Auxiliary.bytesToHex(mheader);
-
-				/* normal component */
-				if (headerStr.startsWith("17") || headerStr.startsWith("21")) {
-
-					headerStr = "07" + headerStr; // put the header length byte in front
-					// note: for a dropped component this information is lost!!!
-
-					tablematch++;
-					Auxiliary c = new Auxiliary(this);
-					headerStr = headerStr.substring(0, 14);
-
-					// compute offset
-					int starthere = index % ps;
-					int pagenumber = index / ps;
-
-					ByteBuffer bbb = readPageWithNumber(pagenumber, ps);
-
-					if (db_encoding == StandardCharsets.UTF_8)
-						c.readMasterTableRecord(this, starthere - 13, bbb, headerStr);
-					else if (db_encoding == StandardCharsets.UTF_16LE)
-						c.readMasterTableRecord(this, starthere - 17, bbb, headerStr);
-					else if (db_encoding == StandardCharsets.UTF_16BE)
-						c.readMasterTableRecord(this, starthere - 18, bbb, headerStr);
-				} else if (headerStr.startsWith("0617")) {
-					tablematch++;
-					Auxiliary c = new Auxiliary(this);
-					headerStr = headerStr.substring(0, 14);
-
-					// compute offset
-					int starthere = index % ps;
-					int pagenumber = index / ps;
-
-					ByteBuffer bbb = readPageWithNumber(pagenumber, ps);
-
-					if (db_encoding == StandardCharsets.UTF_8)
-						c.readMasterTableRecord(this, starthere - 13, bbb, headerStr);
-					else
-						c.readMasterTableRecord(this, starthere - 17, bbb, headerStr);
-
-				} else {
-					// false-positive match for <component> since no column type 17 (UTF-8) resp. 21
-					// (UTF-16) was found
+						}
+	
+						if (db_encoding == StandardCharsets.UTF_8)
+							c.readMasterTableRecord(this, starthere - 13, bbb, headerStr);
+						else
+							c.readMasterTableRecord(this, starthere - 17, bbb, headerStr);
+	
+					} else {
+						// false-positive match for <component> since no column type 17 (UTF-8) resp. 21
+						// (UTF-16) was found
+					}
+					/* search for more component entries */
+					index = bsearch.indexOf(bb, index + 2);
 				}
-				/* search for more component entries */
-				index = bsearch.indexOf(db, index + 2);
-			}
+	
+				
+				/**
+				 *  Last but not least: Start Index-Search.
+				 */
+				
+				/* we looking for the key word <index> */
+				/* to mark the start of an indices entry for the sqlmaster_table */
+				ByteSeqSearcher bisearch = new ByteSeqSearcher(ipattern);
+	
+				int index2 = bisearch.indexOf(bb, 0);
+	
+				/* search as long as we can find further index keywords */
+				while (index2 != -1) {
+	
+					/* get Header */
+					byte mheader[] = new byte[40];
+					bb.position(index2 - goback);
+					bb.get(mheader);
+					String headerStr = Auxiliary.bytesToHex(mheader);
+	
+					System.out.println(headerStr);
+	
+					/**
+					 * case 3: seems to be a dropped index data set
+					 *
+					 **/					
+					 if (headerStr.startsWith("17") || headerStr.startsWith("21")) {
+	
+						headerStr = "07" + headerStr; // put the header length byte in front
+						// note: for a dropped indices this information is lost!!!
+	
+						indexmatch++;
+						Auxiliary c = new Auxiliary(this);
+						headerStr = headerStr.substring(0, 14);
+	
+						// compute offset
+						int starthere = index2 % ps;
+						int pagenumber = index2 / ps;
+	
+						ByteBuffer bbb = null;
+						if (round == 1)
+						{	
+							bbb = readPageWithNumber(pagenumber, ps);
+							System.out.println("starthere 1st round " + starthere);
 
-			/* we looking for the key word <index> */
-			/* to mark the start of an indices entry for the sqlmaster_table */
-			ByteSeqSearcher bisearch = new ByteSeqSearcher(ipattern);
+						}
+						else
+						{
+							
+							int pagebegin = 0;
+							// first page ?
+							if (index2 < (ps + 56))
+							{
+								// skip WAL header (32 Bytes) and frame header (24 Bytes)
+								pagebegin = 56;
+								starthere  = index2 - 56;
+							}
+							else
+							{
+							    pagebegin = ((index2 - 32) / (ps + 24)) * (ps + 24) - 24 + 32;     
+								starthere = (index2 - 32) % (ps + 24) + 24;			
+							}
+							
+							byte [] pp = new byte[ps];
+							/* go to frame start */
+					
+							bb.position(pagebegin);
+							bb.get(pp,0,ps);
+							bbb = ByteBuffer.wrap(pp);
+							
+							System.out.println("index match " + index2);
 
-			int index2 = bisearch.indexOf(db, 0);
+							System.out.println("ReaderWAL is true -> page begin offset " + pagebegin );
 
-			/* search as long as we can find further index keywords */
-			while (index2 != -1) {
+							System.out.println("ReaderWAL is true -> offset in page " + starthere);
+							
+							System.out.println(" index - starthere - page begin " + (index2 - starthere - pagebegin));
 
-				/* get Header */
-				byte mheader[] = new byte[40];
-				db.position(index2 - goback);
-				db.get(mheader);
-				String headerStr = Auxiliary.bytesToHex(mheader);
+						}
+						
+	
+						if (db_encoding == StandardCharsets.UTF_8)
+							c.readMasterTableRecord(this, starthere - 13, bbb, headerStr);
+						else if (db_encoding == StandardCharsets.UTF_16LE)
+							c.readMasterTableRecord(this, starthere - 17, bbb, headerStr);
+						else if (db_encoding == StandardCharsets.UTF_16BE)
+							c.readMasterTableRecord(this, starthere - 18, bbb, headerStr);
+					
+					} 
+				    /**
+				     * case 4: seems to be a regular index data set
+				     * 
+				     **/
+					 
+					 else if ((headerStr.startsWith("0617"))) {
+						Auxiliary c = new Auxiliary(this);
+						headerStr = headerStr.substring(0, 14);
+	
+						// compute offset
+						int starthere = index2 % ps;
+						int pagenumber = index2 / ps;
+	
+						ByteBuffer bbb = null;
+						if (round == 1)
+						{	
+							bbb = readPageWithNumber(pagenumber, ps);
+						}
+						else
+						{
+							
+							int pagebegin = 0;
+							// first page ?
+							if (index2 < (ps + 56))
+							{
+								// skip WAL header (32 Bytes) and frame header (24 Bytes)
+								pagebegin = 56;
+								starthere  = index2 - 56;
+							}
+							else
+							{
+							    pagebegin = ((index2 - 32) / (ps + 24)) * (ps + 24) - 24 + 32;      
+								starthere = (index2 - 32) % (ps + 24) + 24;			
+							}
+							
+							byte [] pp = new byte[ps];
+							/* go to frame start */
+					
+							bb.position(pagebegin);
+							bb.get(pp,0,ps);
+							bbb = ByteBuffer.wrap(pp);
+							
+							System.out.println("index match " + index2);
 
-				System.out.println(headerStr);
+							System.out.println("ReaderWAL is true -> page begin offset " + pagebegin );
 
-				/* normal component */
-				if (headerStr.startsWith("17") || headerStr.startsWith("21")) {
-
-					headerStr = "07" + headerStr; // put the header length byte in front
-					// note: for a dropped indices this information is lost!!!
-
-					indexmatch++;
-					Auxiliary c = new Auxiliary(this);
-					headerStr = headerStr.substring(0, 14);
-
-					// compute offset
-					int starthere = index2 % ps;
-					int pagenumber = index2 / ps;
-
-					ByteBuffer bbb = readPageWithNumber(pagenumber, ps);
-
-					if (db_encoding == StandardCharsets.UTF_8)
-						c.readMasterTableRecord(this, starthere - 13, bbb, headerStr);
-					else if (db_encoding == StandardCharsets.UTF_16LE)
-						c.readMasterTableRecord(this, starthere - 17, bbb, headerStr);
-					else if (db_encoding == StandardCharsets.UTF_16BE)
-						c.readMasterTableRecord(this, starthere - 18, bbb, headerStr);
-				} else if ((headerStr.startsWith("0617"))) {
-					Auxiliary c = new Auxiliary(this);
-					headerStr = headerStr.substring(0, 14);
-
-					// compute offset
-					int starthere = index2 % ps;
-					int pagenumber = index2 / ps;
-
-					ByteBuffer bbb = readPageWithNumber(pagenumber, ps);
-
-					if (db_encoding == StandardCharsets.UTF_8)
-						c.readMasterTableRecord(this, starthere - 13, bbb, headerStr);
-					else
-						c.readMasterTableRecord(this, starthere - 17, bbb, headerStr);
-
-				} else {
-					// false-positive match for <component> since no column type 17 (UTF-8) resp. 21
-					// (UTF-16) was found
+							System.out.println("ReaderWAL is true -> offset in page " + starthere);
+							
+							System.out.println(" index - starthere - page begin " + (index2 - starthere - pagebegin));
+						}
+						
+						if (db_encoding == StandardCharsets.UTF_8)
+							c.readMasterTableRecord(this, starthere - 13, bbb, headerStr);
+						else
+							c.readMasterTableRecord(this, starthere - 17, bbb, headerStr);
+	
+					} else {
+						// false-positive match for <component> since no column type 17 (UTF-8) resp. 21
+						// (UTF-16) was found
+					}
+					/* search for more indices entries */
+					index2 = bisearch.indexOf(bb, index2 + 2);
+	
 				}
-				/* search for more indices entries */
-				index2 = bisearch.indexOf(db, index2 + 2);
-
+			
+				
+				/* Is there a table schema definition inside the main database file ???? */
+				System.out.println("headers:::: " + headers.size());
+				
+				if(headers.size()==0 && this.readWAL ==true)
+				{
+					// second try - maybe we could find a schema definition inside of the WAL-archive file instead?!
+					
+				    info("Could not find a schema definition inside the main db-file. Try to find something inside the WAL archive");
+				
+				    bb = readWALIntoBuffer(this.path+"-wal");
+				    
+				    if (null != bb)
+				    	again = true;
+					
+				}
+			
 			}
+			while(again && round < 2 && readWAL && !readRollbackJournal);
 
 			/*******************************************************************/
 
@@ -833,12 +1112,15 @@ public class Job extends Base {
 				IndexDescriptor id = itidx.next();
 				String tbn = id.tablename;
 
-				for (int i = 0; i < headers.size(); i++) {
+				Iterator<TableDescriptor> hdi = headers.iterator();
+				
+				while(hdi.hasNext()) {
 
-					if (tbn != null && tbn.equals(headers.get(i).tblname)) {
+					TableDescriptor desc = hdi.next();
+					if (tbn != null && tbn.equals(desc.tblname)) {
 
 						/* component for index could be found */
-						TableDescriptor td = headers.get(i);
+						TableDescriptor td = desc;
 
 						List<String> idname = id.columnnames;
 						List<String> tdnames = td.columnnames;
@@ -884,6 +1166,10 @@ public class Job extends Base {
 
 				}
 			}
+			
+			
+			
+			
 
 			/* prepare pre-compiled pattern objects */
 			Iterator<TableDescriptor> iter = headers.iterator();
@@ -921,7 +1207,7 @@ public class Job extends Base {
 				/* update treeview in UI - skip this step in console modus */
 				if (null != gui) {
 
-					TreePath path = gui.add_table(this, td.tblname, td.columnnames, td.getColumntypes(), false, false,0);
+					TreePath path = gui.add_table(this, td.tblname, td.columnnames, td.getColumntypes(), td.primarykeycolumns, false, false,0);
 					guitab.put(td.tblname, path);
 					lastpath = path;
 
@@ -934,7 +1220,7 @@ public class Job extends Base {
 						cnames.add(3,"salt1");
 						cnames.add(4,"salt2");
 						
-						List<String> ctypes = td.columntypes;
+						List<String> ctypes = td.serialtypes;
 						ctypes.add(0,"INT");
 						ctypes.add(1,"INT");
 						ctypes.add(2,"INT");
@@ -942,14 +1228,14 @@ public class Job extends Base {
 						ctypes.add(4,"INT");
 						
 						
-						TreePath walpath = gui.add_table(this, td.tblname, cnames, ctypes, true, false,0);
+						TreePath walpath = gui.add_table(this, td.tblname, cnames, ctypes, td.primarykeycolumns, true, false,0);
 						guiwaltab.put(td.tblname, walpath);
 						setWALPath(walpath.toString());
 
 					}
 
 					else if (readRollbackJournal) {
-						TreePath rjpath = gui.add_table(this, td.tblname, td.columnnames, td.getColumntypes(), false, true,0);
+						TreePath rjpath = gui.add_table(this, td.tblname, td.columnnames, td.getColumntypes(),td.primarykeycolumns, false, true,0);
 						guiroltab.put(td.tblname, rjpath);
 						setRollbackJournalPath(rjpath.toString());
 					}
@@ -983,7 +1269,7 @@ public class Job extends Base {
 
 				/* update treeview in UI - skip this step in console modus */
 				if (null != gui) {
-					TreePath path = gui.add_table(this, id.idxname, id.columnnames, id.columntypes, false, false,1);
+					TreePath path = gui.add_table(this, id.idxname, id.columnnames, id.columntypes, null, false, false,1);
 					System.out.println("id.idxname " + id.idxname);
 					guitab.put(id.idxname, path);
 					lastpath = path;
@@ -1007,25 +1293,26 @@ public class Job extends Base {
 						
 						
 						
-						TreePath walpath = gui.add_table(this, id.idxname, cnames, ctypes, true, false,1);
+						TreePath walpath = gui.add_table(this, id.idxname, cnames, ctypes, null, true, false,1);
 						guiwaltab.put(id.idxname, walpath);
 						setWALPath(walpath.toString());
 
 					}
 
 					else if (readRollbackJournal) {
-						TreePath rjpath = gui.add_table(this, id.idxname, id.columnnames, id.columntypes, false, true,1);
+						TreePath rjpath = gui.add_table(this, id.idxname, id.columnnames, id.columntypes, null, false, true,1);
 						guiroltab.put(id.idxname, rjpath);
 						setRollbackJournalPath(rjpath.toString());
 					}
 
 					if (null != lastpath) {
-						System.out.println("Expend Path" + lastpath);
 						GUI.tree.expandPath(lastpath);
 					}
 				}
 
 			}
+		
+			
 
 			/*******************************************************************/
 
@@ -1043,32 +1330,31 @@ public class Job extends Base {
 					col.add("TEXT");
 					names.add("col" + (i + 1));
 				}
-				TableDescriptor tdefault = new TableDescriptor("__UNASSIGNED", "", col, names, null, false);
+				TableDescriptor tdefault = new TableDescriptor("__UNASSIGNED", "",col, col, names, null, null, null, false);
 				headers.add(tdefault);
 
 				/* update treeview in UI - skip this step in console modus */
 				if (null != gui) {
 					TreePath path = gui.add_table(this, tdefault.tblname, tdefault.columnnames,
-							tdefault.getColumntypes(), false, false,0);
+							tdefault.getColumntypes(), null, false, false,0);
 					guitab.put(tdefault.tblname, path);
 					lastpath = path;
 
 					if (readWAL) {
 						TreePath walpath = gui.add_table(this, tdefault.tblname, tdefault.columnnames,
-								tdefault.getColumntypes(), true, false,0);
+								tdefault.getColumntypes(), null, true, false,0);
 						guiwaltab.put(tdefault.tblname, walpath);
 						setWALPath(walpath.toString());
 					}
 
 					else if (readRollbackJournal) {
 						TreePath rjpath = gui.add_table(this, tdefault.tblname, tdefault.columnnames,
-								tdefault.getColumntypes(), false, true,0);
+								tdefault.getColumntypes(),null, false, true,0);
 						guiroltab.put(tdefault.tblname, rjpath);
 						setRollbackJournalPath(rjpath.toString());
 					}
 
 					if (null != lastpath) {
-						System.out.println("Expend Path" + lastpath);
 						GUI.tree.expandPath(lastpath);
 					}
 				}
@@ -1116,7 +1402,7 @@ public class Job extends Base {
 				// seeking file pointer to the first free page entry
 
 				/* create a new threadpool to analyze the freepages */
-				ThreadPoolExecutor executor = (ThreadPoolExecutor) Executors.newFixedThreadPool(numberofThreads);
+				ThreadPoolExecutor executor = (ThreadPoolExecutor) Executors.newFixedThreadPool(Global.numberofThreads);
 
 				/* a list can extend over several memory pages. */
 				boolean morelistpages = false;
@@ -1322,6 +1608,7 @@ public class Job extends Base {
 			DateTimeFormatter df;
 			df = DateTimeFormatter.ISO_DATE_TIME; // 2020-01-31T20:07:07.095
 			String date = df.format(now);
+			date = date.replace(":","_");
 
 			filename = "results" + name + date + ".csv";
 		}
@@ -1345,6 +1632,70 @@ public class Job extends Base {
 		} catch (IOException e) {
 			e.printStackTrace();
 		}
+
+	}
+	
+	
+	private void readSchema(ByteBuffer bb, int index, String headerStr, boolean readWAL) throws IOException
+	{
+		
+		System.out.println("Entering readSchema()");
+		
+		/* we need a utility method for parsing the Mastertable */
+		Auxiliary c = new Auxiliary(this);
+		
+		// compute offset
+		int starthere = index % ps;
+		int pagenumber = index / ps;
+
+		ByteBuffer bbb = null;
+		/* first try to read the db schema from the main db file */
+		if (!readWAL)
+		{
+			bbb = readPageWithNumber(pagenumber, ps);
+		}
+		/* No schema was found? Try reading the WAL file instead */
+		else
+		{
+			int pagebegin = 0;
+			// first page ?
+			if (index < (ps + 56))
+			{
+				// skip WAL header (32 Bytes) and frame header (24 Bytes)
+				pagebegin = 56;
+				starthere  = index - 56;
+			}
+			else
+			{
+			    pagebegin = ((index - 32) / (ps + 24)) * (ps + 24) - 24 + 32;      //32 + (ps+24)*index/(ps+24) + 24;
+				starthere = (index - 32) % (ps + 24) + 24;			
+			}
+			
+			byte [] pp = new byte[ps];
+			/* go to frame start */
+	
+			bb.position(pagebegin);
+			bb.get(pp,0,ps);
+			bbb = ByteBuffer.wrap(pp);
+			
+			System.out.println("index match " + index);
+
+			System.out.println("ReaderWAL is true -> page begin offset " + pagebegin );
+
+			System.out.println("ReaderWAL is true -> offset in page " + starthere);
+			
+			System.out.println(" index - starthere - page begin " + (index - starthere - pagebegin));
+		}
+		
+		/* start reading the schema string from the correct position */
+		if (db_encoding == StandardCharsets.UTF_8)
+			c.readMasterTableRecord(this, starthere - 13, bbb, headerStr);
+		else if (db_encoding == StandardCharsets.UTF_16LE)
+			c.readMasterTableRecord(this, starthere - 17, bbb, headerStr);
+		else if (db_encoding == StandardCharsets.UTF_16BE)
+			c.readMasterTableRecord(this, starthere - 18, bbb, headerStr);
+	
+		System.out.println("Leave readSchema()");
 
 	}
 
@@ -1406,14 +1757,14 @@ public class Job extends Base {
 	public void scan(int number, int ps) {
 		info("Start with scan...");
 		/* create a new threadpool to analyze the freepages */
-		ThreadPoolExecutor executor = (ThreadPoolExecutor) Executors.newFixedThreadPool(numberofThreads);
+		ThreadPoolExecutor executor = (ThreadPoolExecutor) Executors.newFixedThreadPool(Global.numberofThreads);
 
 		long begin = System.currentTimeMillis();
 		
 		/* first start scan of regular pages */
 	
-		Worker[] worker = new Worker[numberofThreads]; 
-        for (int i = 0; i < numberofThreads; i++)
+		Worker[] worker = new Worker[Global.numberofThreads]; 
+        for (int i = 0; i < Global.numberofThreads; i++)
         {
         	worker[i] = new Worker(this);
         }
@@ -1423,7 +1774,7 @@ public class Job extends Base {
 			if (null == pages[cc]) 
 			{
 				debug("page " + cc + " is no regular leaf page component. Maybe a indices or overflow or dropped component page.");
-				System.out.println("page " + cc + " offset " + ((cc-1)*ps) + " is no regular leaf page component. Maybe a indices or overflow or dropped component page.");
+				//System.out.println("page " + cc + " offset " + ((cc-1)*ps) + " is no regular leaf page component. Maybe a indices or overflow or dropped component page.");
 			} 
 			else 
 			{
@@ -1434,12 +1785,12 @@ public class Job extends Base {
 
 				//System.out.println("************************ pagenumber " + cc + " " + offset);
 
-				RecoveryTask task = new RecoveryTask(worker[cc % numberofThreads].util,this, offset, cc, ps, false);
-				worker[cc % numberofThreads].addTask(task);
+				RecoveryTask task = new RecoveryTask(worker[cc % Global.numberofThreads].util,this, offset, cc, ps, false);
+				worker[cc % Global.numberofThreads].addTask(task);
 				runningTasks.incrementAndGet();
 			}
 		}
-		debug("Task total: " + runningTasks.intValue() + " worker threads " + numberofThreads);
+		debug("Task total: " + runningTasks.intValue() + " worker threads " + Global.numberofThreads);
 		
 		int c = 1;
 		/* start executing the work threads */
@@ -1447,12 +1798,12 @@ public class Job extends Base {
 		{	
 			System.out.println(" Start worker thread" + c++);
 			/* add new task to executor queue */
-			executor.execute(w);			
-
+			//executor.execute(w);			
+            w.run();
 		}
 
 		try {
-		    System.out.println("attempt to shutdown executor");
+		    // System.out.println("attempt to shutdown executor");
 		    executor.shutdown();
 		
 		    int remaining = 0;
@@ -1461,7 +1812,7 @@ public class Job extends Base {
 		    {
 		    	remaining = runningTasks.intValue();
 		    	i++;
-		    	System.out.println(" Still running tasks " + remaining);
+		        //System.out.println(" Still running tasks " + remaining);
 		        Thread.currentThread();
 				Thread.sleep(100);
 		    }while(i < 50 && remaining > 0);
@@ -1482,14 +1833,14 @@ public class Job extends Base {
 		}
 		
 		// wait for Threads to finish the tasks
-		//while (runningTasks.intValue() != 0) {
-		//	try {
-		//		TimeUnit.MILLISECONDS.sleep(1000);
-		//		System.out.println("warte....");
-		//	} catch (InterruptedException e) {
-		//		e.printStackTrace();
-		//	}
-		//}
+		while (runningTasks.intValue() != 0) {
+			try {
+				TimeUnit.MILLISECONDS.sleep(2000);
+				System.out.println("warte....");
+			} catch (InterruptedException e) {
+				e.printStackTrace();
+			}
+		}
 
 		long ende = System.currentTimeMillis();
 		info("Duration of scanning all pages in ms : " + (ende-begin));
@@ -1551,7 +1902,7 @@ public class Job extends Base {
 	 *	 
 	 */
 	public Job() {
-		Base.LOGLEVEL = Base.INFO;
+		Base.LOGLEVEL = Global.LOGLEVEL;
 	}
 
 
@@ -1619,11 +1970,12 @@ public class Job extends Base {
 		
 		if (pagenumber < 0)
 		{
-		   System.out.println("Interesting "  +  pagenumber + " " + pagesize);
 		   return null;
 		}
 		return readPageWithOffset(pagenumber*pagesize,pagesize);
 	}
+	
+
 
 	/**
 	 * The B-tree , or, more specifically, the B+-tree, 
@@ -1686,7 +2038,7 @@ public class Job extends Base {
 			/* now we have to read the cell pointer list with offsets for the other pages */
 
 			/* read the complete internal page into buffer */
-			System.out.println(" read internal page at offset " + ((root-1)*ps));
+			//System.out.println(" read internal page at offset " + ((root-1)*ps));
 			ByteBuffer buffer = readPageWithNumber(root - 1, ps);
 
 			byte[] numberofcells = new byte[2];
@@ -1705,13 +2057,8 @@ public class Job extends Base {
 			ByteBuffer size = ByteBuffer.wrap(cpn);
 			int cp = Auxiliary.TwoByteBuffertoInt(size);
 
-			System.out.println(" cell offset start: " + cp);
-			System.out.println(" root is " + root + " number of elements: " + e);
-			
-			if (e > ps)
-			{
-				System.out.println("Intesting");
-			}	
+			//System.out.println(" cell offset start: " + cp);
+			//System.out.println(" root is " + root + " number of elements: " + e);
 			
 
 			/* go on with the cell pointer array */

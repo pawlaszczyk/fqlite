@@ -1,7 +1,9 @@
 package fqlite.descriptor;
 
 import java.util.Iterator;
+import java.util.LinkedList;
 import java.util.List;
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import fqlite.pattern.HeaderPattern;
 import fqlite.util.Auxiliary;
@@ -16,12 +18,17 @@ import fqlite.util.Auxiliary;
  * @author pawlaszc
  *
  */
-public class TableDescriptor extends AbstractDescriptor {
+public class TableDescriptor extends AbstractDescriptor implements Comparable<TableDescriptor>  {
 
 	String regex = "";
 	String delregex = "";
-	public List<String> columntypes;
+	public List<String> serialtypes;
 	public List<String> columnnames;
+	public List<String> sqltypes;
+	public List<String> constraints; // constraint for each column
+	public List<String> tableconstraints; // constraints on table level
+	public List<String> primarykeycolumns;
+	
 	int size = 0;
 	int numberofmultibytecolumns = 0;
 	String fingerprint = ""; // the regex expression
@@ -54,7 +61,7 @@ public class TableDescriptor extends AbstractDescriptor {
 			
 			boolean valid = true;
 	
-			// check columntypes, only if all columntypes are valid the match is also valid
+			// check serialtypes, only if all serialtypes are valid the match is also valid
 			for (int i = 1; i < values.length; i++) {
 				/* get next column */
 				String type = getColumntypes().get(i - 1);
@@ -92,7 +99,7 @@ public class TableDescriptor extends AbstractDescriptor {
 					break;
 				}
 	
-				/* as soon as one of the columntypes is not valid -> discard the match */
+				/* as soon as one of the serialtypes is not valid -> discard the match */
 				if (!valid)
 					return false;
 			}
@@ -133,7 +140,7 @@ public class TableDescriptor extends AbstractDescriptor {
 			signature += iter.next();
 		}
 
-		System.out.println("Signature::" + signature + " Table:: " + tblname );
+	//	System.out.println("Signature::" + signature + " Table:: " + tblname );
 	
 	}
 
@@ -141,16 +148,84 @@ public class TableDescriptor extends AbstractDescriptor {
 		return signature;
 	}
 
-	public TableDescriptor(String tblname, String stmt, List<String> col, List<String> names, HeaderPattern pattern, boolean withoutROWID) {
+	/**
+	 * Constructor.
+	 * 
+	 * @param tblname			name of the table
+	 * @param stmt				sql-statement
+	 * @param sqltypes			List with all SQL types from the statement
+	 * @param col				List with serial types matching the SQL types
+	 * @param names				List with column names
+	 * @param constraints		List with column constraints
+	 * @param tableconstraints  List with table constraints
+	 * @param pattern			pattern for matching the table header
+	 * @param withoutROWID		true, if the table has no ROWID
+	 */
+	public TableDescriptor(String tblname, String stmt, List<String> sqltypes, List<String> col, List<String> names, List<String> constraints, List<String> tableconstraints, HeaderPattern pattern, boolean withoutROWID) {
 
 		setHpattern(pattern);
 		setColumntypes(col);
 		signature(col);
+		
+		this.sqltypes = sqltypes;
+		this.constraints = constraints;
+		this.tableconstraints = tableconstraints;
 		columnnames = names;
 		ROWID = !withoutROWID;
 		sql = stmt;
 		
 		this.tblname = tblname;
+		
+		primarykeycolumns = new LinkedList<String>();
+		
+		
+		/* find the primary key by checking the column constraint */ 
+		for(int i=0; i < names.size(); i++)
+		{
+			if (null != constraints)
+				System.out.println("tname" + tblname);
+			
+			if (tblname.equals("__UNASSIGNED"))
+				break;
+				/* we look for the keyword PRIMARYKEY */
+				if (constraints.get(i).contains("PRIMARYKEY"))
+				{
+					this.primarykeycolumns.add(names.get(i));
+				}
+			
+		}
+		
+		
+		/* check, if there is a PRIMARYKEY definition in the table constraints */
+		if (null != tableconstraints)
+			for (int i=0; i<tableconstraints.size();i++)
+			{
+				 
+				String constraint = tableconstraints.get(i);
+				
+				Matcher m = Pattern.compile("PRIMARYKEY\\((.*?)\\)").matcher(constraint);
+				while (m.find()) {
+					String key = m.group(1);
+				    System.out.println("Table Constraint Key "  + key);
+				    if (!key.contains(","))
+				    {
+				    	// simple key like 'id'
+				    	this.primarykeycolumns.add(key);
+				    }
+				    else
+				    {
+				    	// composite key like 'name,birthdate'
+				    	String[] parts = key.split(",");
+				        for(String c: parts)
+				        {
+					    	this.primarykeycolumns.add(c);
+				        }
+				    }
+				}
+			}
+		
+		
+		/* create a table fingerprint for later search */
 		Iterator<String> iter = getColumntypes().iterator();
 		while (iter.hasNext()) {
 			size++;
@@ -185,7 +260,7 @@ public class TableDescriptor extends AbstractDescriptor {
 
 	/**
 	 * case 2: Returns the regex header without header length byte but with all
-	 * columntypes. This pattern should match all records startRegion a component, where parts
+	 * serialtypes. This pattern should match all records startRegion a component, where parts
 	 * of the header information has been overwritten.
 	 * 
 	 * @return regex
@@ -208,7 +283,7 @@ public class TableDescriptor extends AbstractDescriptor {
 	}
 
 	/**
-	 * Returns a regex for only some columntypes of the component.
+	 * Returns a regex for only some serialtypes of the component.
 	 * 
 	 * @param startcolumn
 	 * @param endcolumn
@@ -361,12 +436,12 @@ public class TableDescriptor extends AbstractDescriptor {
 
 
 	public List<String> getColumntypes() {
-		return columntypes;
+		return serialtypes;
 	}
 
 
 	public void setColumntypes(List<String> columntypes) {
-		this.columntypes = columntypes;
+		this.serialtypes = columntypes;
 	}
 
 
@@ -377,5 +452,11 @@ public class TableDescriptor extends AbstractDescriptor {
 
 	public void setHpattern(HeaderPattern hpattern) {
 		this.hpattern = hpattern;
+	}
+
+
+	@Override
+	public int compareTo(TableDescriptor o) {
+		return tblname.compareTo(o.tblname);	
 	}
 }

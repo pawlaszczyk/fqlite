@@ -70,7 +70,11 @@ public class Carver extends Base {
 			mat.setMatchingMode(MatchingMode.NO1stCOL);
 			break;
 		}
+		
 
+		if((toidx - fromidx) <= 4)
+			return match;
+		
 		/* set search region */
 		mat.region(fromidx, toidx);
 
@@ -79,10 +83,11 @@ public class Carver extends Base {
 
 		/* find every match within the given region */
 		while (mat.find()){
+			
 			/* get the hex-presentation of the match */
 			String m = mat.group2Hex();
 			/* skip stupid matches - remember - it is just a heuristic */
-			if ((m.length() < 8) || (m.startsWith("00000000")))
+			if ((m.length() < 2) || (m.startsWith("00000000")))
 				  continue;
 			//System.out.println("Breich: " + ((pagenumber - 1) * job.ps + fromidx) + " "
 			//		+ ((pagenumber - 1) * job.ps + toidx));

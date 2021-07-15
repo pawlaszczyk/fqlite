@@ -150,8 +150,9 @@ public class SerialTypeMatcher {
 
 		start = pos;
 		end = buffer.position();
-		if (end < start)
+		if (end <= start)
 			return false;
+		
 		return true; // byte number of the match
 	}
 
@@ -166,7 +167,6 @@ public class SerialTypeMatcher {
 		byte[] match = new byte[(end) - start];
 		buffer.position(start);
 		buffer.get(match, 0, (end - start));
-		//System.out.println(Arrays.toString(match));
 		return ByteBuffer.wrap(match);
 	}
 

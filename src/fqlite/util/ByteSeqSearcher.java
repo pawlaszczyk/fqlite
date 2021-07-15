@@ -107,6 +107,6 @@ public class ByteSeqSearcher{
 	            borders_[++i] = ++j;
 	        }
 	    }
-
-	
+	    
+	  
 }

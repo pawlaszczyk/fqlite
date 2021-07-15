@@ -47,7 +47,7 @@ public class IndexDescriptor extends AbstractDescriptor{
 			
 			boolean valid = true;
 	
-			// check columntypes, only if all columntypes are valid the match is valid too
+			// check serialtypes, only if all serialtypes are valid the match is valid too
 			for (int i = 1; i < values.length; i++) {
 				/* get next column */
 				String type = columntypes.get(i - 1);
@@ -85,7 +85,7 @@ public class IndexDescriptor extends AbstractDescriptor{
 					break;
 				}
 	
-				/* as soon as one of the columntypes is not valid -> discard the match */
+				/* as soon as one of the serialtypes is not valid -> discard the match */
 				if (!valid)
 					return false;
 			}
@@ -113,7 +113,7 @@ public class IndexDescriptor extends AbstractDescriptor{
 	
 
 	/**
-	 * Returns a regex for only some columntypes of the indices.
+	 * Returns a regex for only some serialtypes of the indices.
 	 * 
 	 * @param startcolumn
 	 * @param endcolumn
@@ -234,6 +234,19 @@ public class IndexDescriptor extends AbstractDescriptor{
 
 	public void setSql(String sql) {
 		this.sql = sql;
+	}
+	
+	@Override
+	public boolean equals(Object o)
+	{
+		if (o instanceof IndexDescriptor)
+		{
+			IndexDescriptor c = (IndexDescriptor)o;
+			return this.idxname.equals(c.idxname);
+		}
+			
+		return false;
+		
 	}
 
 	

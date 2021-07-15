@@ -2,17 +2,19 @@ package fqlite.base;
 
 import java.awt.BorderLayout;
 import java.awt.Color;
-import java.awt.Component;
 import java.awt.Desktop;
 import java.awt.Dimension;
 import java.awt.EventQueue;
 import java.awt.Font;
 import java.awt.FontFormatException;
 import java.awt.GraphicsEnvironment;
-import java.awt.Image;
 import java.awt.Point;
 import java.awt.SystemColor;
 import java.awt.Toolkit;
+import java.awt.datatransfer.DataFlavor;
+import java.awt.dnd.DnDConstants;
+import java.awt.dnd.DropTarget;
+import java.awt.dnd.DropTargetDropEvent;
 import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
 import java.awt.event.KeyEvent;
@@ -21,6 +23,7 @@ import java.awt.event.MouseEvent;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.RandomAccessFile;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.net.URL;
@@ -38,8 +41,6 @@ import java.util.Vector;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
-
-import javax.swing.BorderFactory;
 import javax.swing.ImageIcon;
 import javax.swing.JButton;
 import javax.swing.JComponent;
@@ -69,7 +70,6 @@ import javax.swing.border.EmptyBorder;
 import javax.swing.event.TreeSelectionEvent;
 import javax.swing.event.TreeSelectionListener;
 import javax.swing.filechooser.FileNameExtensionFilter;
-import javax.swing.table.DefaultTableCellRenderer;
 import javax.swing.table.TableColumnModel;
 import javax.swing.table.TableRowSorter;
 import javax.swing.text.DefaultHighlighter;
@@ -212,6 +212,9 @@ public class GUI extends JFrame {
 	ImageIcon questionIcon;
 	ImageIcon warningIcon;
 
+	
+	
+	
 	/**
 	 * Launch the graphic front-end with this method.
 	 */
@@ -297,13 +300,10 @@ public class GUI extends JFrame {
 		mainwindow = this;
 		
 		
-		Image ii = Toolkit.getDefaultToolkit().getImage(GUI.class.getResource("/find.png"));
-		setIconImage(ii);
 		setTitle("FQLite Carving Tool");
 		setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
 		URL url = GUI.class.getResource("/find.png");
 		findIcon = new ImageIcon(url);
-		setIconImage(findIcon.getImage());
 		// available size of the screen
 		Dimension screenSize = Toolkit.getDefaultToolkit().getScreenSize();
 		this.setSize((int) (screenSize.width * 0.8), (int) (screenSize.height * 0.8));
@@ -321,7 +321,7 @@ public class GUI extends JFrame {
 		mntopen.setMnemonic(KeyEvent.VK_O);
 		mntopen.addActionListener(new ActionListener() {
 			public void actionPerformed(ActionEvent e) {
-				open_db();
+				open_db(null);
 			}
 		});
 		mnFiles.add(mntopen);
@@ -389,11 +389,6 @@ public class GUI extends JFrame {
 		mntmHelp.addActionListener(new ActionListener() {
 			public void actionPerformed(ActionEvent e) {
 
-				//HelpDialog d = new HelpDialog(mainwindow);
-				//d.setVisible(true);
-				
-				//HelpWindow.show(GUI.app);
-
 				// Create Desktop object
 			    Desktop d = Desktop.getDesktop();
 
@@ -436,11 +431,10 @@ public class GUI extends JFrame {
 		head.add(new JLabel("Filter:"));
 		table_panel_with_filter.add(head, BorderLayout.NORTH);
 		
-		
+	
 		
 		prepare_table_default();
 
-		//tree.setPreferredSize(new Dimension(300, 4000));
 		tree.setMinimumSize(new Dimension(300,4000));
 		tree.setAutoscrolls(true);
 
@@ -470,7 +464,7 @@ public class GUI extends JFrame {
 		JButton btnOeffne = new JButton("");
 		btnOeffne.addActionListener(new ActionListener() {
 			public void actionPerformed(ActionEvent e) {
-				open_db();
+				open_db(null);
 			}
 		});
 
@@ -601,6 +595,25 @@ public class GUI extends JFrame {
 		url = GUI.class.getResource("/warning-48.png");
 		warningIcon = new ImageIcon(url);
 
+		
+		this.getContentPane().setDropTarget(new DropTarget() {
+		
+			private static final long serialVersionUID = 1L;
+
+			@SuppressWarnings("unchecked")
+			public synchronized void drop(DropTargetDropEvent evt) {
+		        try {
+		            evt.acceptDrop(DnDConstants.ACTION_COPY);
+		            List<File> droppedFiles = (List<File>)evt.getTransferable().getTransferData(DataFlavor.javaFileListFlavor);
+		            for (File file : droppedFiles) {
+		            		
+		            	open_db(file);
+		            }
+		        } catch (Exception ex) {
+		            ex.printStackTrace();
+		        }
+		    }
+		});
 	}
 
 	/**
@@ -608,7 +621,6 @@ public class GUI extends JFrame {
 	 */
 	public void closeAll() {
 
-		// GUI.tabpane.removeAll();
 		DefaultMutableTreeNode root = (DefaultMutableTreeNode) tree.getModel().getRoot();
 
 		@SuppressWarnings("unchecked")
@@ -626,7 +638,6 @@ public class GUI extends JFrame {
 		root.removeAllChildren();
 		tables.clear();
 		updateTreeUI();
-		// scrollpane_tables.setViewportView(null);
 	}
 
 	/**
@@ -648,38 +659,7 @@ public class GUI extends JFrame {
 		export_table(no);
 	}
 
-	@SuppressWarnings("unused")
-	private void searchFor() {
 
-		TreePath path = tree.getSelectionPath();
-
-		if (null == path) {
-
-			JOptionPane.showMessageDialog(this, "Please select a component first.", "Information",
-					JOptionPane.INFORMATION_MESSAGE, facewink);
-			return;
-
-		}
-		Logger.out.debug(path.toString());
-
-		JComponent cp = tables.get(path);
-		if (null == cp) {
-			JOptionPane.showMessageDialog(this, "Please select a component first.", "Information",
-					JOptionPane.INFORMATION_MESSAGE, facewink);
-			return;
-		}
-		if (cp instanceof JTable) {
-
-			String searchterm = (String) JOptionPane.showInputDialog(this, "Enter search term:", "find in component",
-					JOptionPane.QUESTION_MESSAGE, findIcon, null, null);
-
-			if (searchterm == null) {
-				return;
-			}
-
-			search(searchterm);
-		}
-	}
 	
 	 public void SetIcon(JTable table, int col_index, ImageIcon icon,String name){
 		  table.getTableHeader().getColumnModel().getColumn(col_index).setHeaderRenderer
@@ -697,12 +677,13 @@ public class GUI extends JFrame {
 	 * @param columns
 	 * @return
 	 */
-	TreePath add_table(Job job, String tablename, List<String> columns, List<String> columntypes, boolean walnode,
+	TreePath add_table(Job job, String tablename, List<String> columns, List<String> columntypes, List<String> PK, boolean walnode,
 			boolean rjnode, int db_object) {
 
 		NodeObject o = null;
 
 		CustomTableModel model = new CustomTableModel();
+		model.addColumn(" ");
 		model.addColumn(Global.STATUS_CLOMUN);
 		model.addColumn("Offset");
 		for (String colname : columns) {
@@ -721,13 +702,31 @@ public class GUI extends JFrame {
 		table.setRowSelectionAllowed(true);
 		table.setCellSelectionEnabled(true);
 		table.setColumnSelectionAllowed(true);
-
+		
 		
 		ImageIcon imageIcon = new ImageIcon(Toolkit.getDefaultToolkit().getImage(GUI.class.getResource("/icon_status.png")));
-		SetIcon(table, 0, imageIcon,"");
+		SetIcon(table, 1, imageIcon,"");
 		
-		//table.addColumnSelectionInterval(0,model.getColumnCount());
-			
+		/* add icon to PRIMARYKEY columns */
+		if (null != PK)
+		{
+			Iterator<String> it = PK.iterator();
+			while(it.hasNext())
+			{
+				String pkcol = it.next();
+				for (int c = 0; c < model.getColumnCount(); c++)
+				{
+					if (pkcol.equals(model.getColumnName(c)))
+					{
+						// there is a column with this name -> set PK icon
+						ImageIcon pkIcon = new ImageIcon(Toolkit.getDefaultToolkit().getImage(GUI.class.getResource("/key-icon.png")));
+						SetIcon(table, c, pkIcon,model.getColumnName(c));
+					
+					}	
+				}
+			}
+		}
+		
 		
 		if (walnode)
 			o = new NodeObject(tablename, table, columns.size(), FileTypes.WriteAheadLog, db_object); // wal file
@@ -755,8 +754,12 @@ public class GUI extends JFrame {
 
 		TableColumnModel columnModel = table.getColumnModel();
 		columnModel.getColumn(0).setPreferredWidth(20);
-		columnModel.getColumn(0).setMinWidth(30);
+		columnModel.getColumn(0).setMinWidth(20);
 		columnModel.getColumn(0).setMaxWidth(150);
+		
+		columnModel.getColumn(1).setPreferredWidth(20);
+		columnModel.getColumn(1).setMinWidth(20);
+		columnModel.getColumn(1).setMaxWidth(150);
 		table.setName(tablename);
 		table.setColumnSelectionAllowed(true);
 		table.setRowSelectionAllowed(true);
@@ -819,26 +822,8 @@ public class GUI extends JFrame {
 				ImageIcon ico = getImageIcon(e);
 				if (null != ico)
 				{
-
-//					SwingUtilities.invokeLater(
-//						new Runnable(){
-//							public void run()
-//							{
-//								JOptionPane test = new JOptionPane();
-//								test.setIcon(ico);
-//								
-//								preview = test.createDialog(GUI.app,"Preview");
-//								preview.toFront();
-//								preview.setVisible(true);
-//								
-//								
-//							}
-//					});
 				    
-					JOptionPane.showMessageDialog(GUI.app,
-				        "Found Image-BLOB.",
-				        "Preview",
-				        JOptionPane.INFORMATION_MESSAGE,ico);
+					JOptionPane.showMessageDialog(GUI.app, "Found Image-BLOB.",  "Preview",  JOptionPane.INFORMATION_MESSAGE,ico);
 				}
 			}
 
@@ -889,14 +874,7 @@ public class GUI extends JFrame {
 				    	if (BLOBCarver.isGraphic(v))
 						{
 				    		byte[] b = CustomCellRenderer.hexStringToByteArray(v.toUpperCase());
-							try {
-							   out = new ImageIcon(b,"test");
 								
-							} catch (Exception e) {
-								
-								e.printStackTrace();
-							}
-							
 						}	
 				    	
 				    	
@@ -1028,122 +1006,90 @@ public class GUI extends JFrame {
 		});
 	}
 
-	/**
-	 * Implements search functionality for the tables.
-	 */
-	@SuppressWarnings("unused")
-	private void search(String value) {
-
-		JTable table = null;
-
-		TreePath path = tree.getSelectionPath();
-		Logger.out.debug(path.toString());
-
-		if (null == path)
-			return;
-
-		JComponent cp = tables.get(path);
-		if (null == cp)
-			return;
-
-		if (cp instanceof JTable) {
-			table = (JTable) cp;
-			Logger.out.debug("Search for value:" + value);
-
-			int answer = -1;
-			boolean match;
-
-			do {
-				match = false;
-				int row = table.getSelectedRow();
-				int col = 0;
-
-				if (row < 0)
-					row = 0;
-				else
-					row++;
-
-				search: for (; row <= table.getRowCount() - 1; row++) {
-
-					for (; col <= table.getColumnCount() - 1; col++) {
-
-						if (null == table.getValueAt(row, col))
-							continue;
-
-						String celvalue = (String) table.getValueAt(row, col);
-						if (celvalue.contains(value)) {
-							match = true;
-							table.scrollRectToVisible(table.getCellRect(row, 0, true));
-							table.setRowSelectionInterval(row, row);
-
-							for (int i = 0; i <= table.getColumnCount() - 1; i++) {
-
-								table.getColumnModel().getColumn(i).setCellRenderer(new LineRenderer());
-								boolean toggle = false;
-								boolean extend = true;
-								table.changeSelection(row, col, toggle, extend);
-							}
-							table.repaint();
-							updateTableUI();
-							break search;
-						}
-					}
-					col = 0;
-				}
-
-				if (match)
-					answer = JOptionPane.showConfirmDialog(null, "Continue search?", "Question",
-							JOptionPane.YES_NO_OPTION, JOptionPane.QUESTION_MESSAGE, questionIcon);
-
-			} while (answer == JOptionPane.OK_OPTION && match);
-
-			if (!match)
-				JOptionPane.showMessageDialog(table, "No further matches. Reached end of component.", "Information",
-						JOptionPane.INFORMATION_MESSAGE, infoIcon);
-
-		}
-	}
+	
 
 	/**
 	 * Show an open dialog and import <code>sqlite</code>-file.
 	 * 
 	 */
-	public void open_db() {
-		JFileChooser chooser = new JFileChooser();
-		if (lastDir == null)
-			chooser.setCurrentDirectory(new File(System.getProperty("user.home")));
-		else
-			chooser.setCurrentDirectory(lastDir);
-		chooser.setDialogTitle("open database");
-		chooser.setName("open database");
-		FileNameExtensionFilter filter = new FileNameExtensionFilter("Sqlite & DB Files (*.sqlite,*.db)", "sqlite",	"db");
-		chooser.setFileFilter(filter);
-		int returnVal = chooser.showOpenDialog(this);
+	public void open_db(File f) {
+		File file = f;
 		
-		if (returnVal == JFileChooser.APPROVE_OPTION) {
-			File file = chooser.getSelectedFile();
-			// System.out.println(" Path :: " +
-			// chooser.getCurrentDirectory().getAbsolutePath());
-			lastDir = chooser.getCurrentDirectory();
-						
-			FileInfo info = new FileInfo(file.getAbsolutePath());
-         
-			DBPropertyPanel panel = new DBPropertyPanel(info);
+		if (file == null)
+		{	
+			JFileChooser chooser = new JFileChooser();
+			if (lastDir == null)
+				chooser.setCurrentDirectory(new File(System.getProperty("user.home")));
+			else
+				chooser.setCurrentDirectory(lastDir);
+			chooser.setDialogTitle("open database");
+			chooser.setName("open database");
+			FileNameExtensionFilter filter = new FileNameExtensionFilter("Sqlite & DB Files (*.sqlite,*.db)", "sqlite",	"db");
+			chooser.setFileFilter(filter);
+			int returnVal = chooser.showOpenDialog(this);
+			if (returnVal == JFileChooser.APPROVE_OPTION) {
+				file = chooser.getSelectedFile();
+				lastDir = chooser.getCurrentDirectory();
+			}
+		}
 			
-			NodeObject o = new NodeObject(file.getName(), null, -1, FileTypes.SQLiteDB, 99);
-			dbNode = new FTreeNode(o);
-			root.add(dbNode);
+		if (file == null)
+			return;
+			
+		/* check file size - the size has to be at least 512 Byte */
+		if (file.length() < 512)
+		{
+			JOptionPane.showMessageDialog(GUI.app, "File size is smaller than 512 bytes. Import stopped",  "Error",  JOptionPane.ERROR_MESSAGE,null);
+			return;
+		}
+		
+		RandomAccessFile raf = null;
+		boolean abort = false;
+		/* check header string for magic number to match */
+		try 
+		{
+			raf = new RandomAccessFile(file,"r");
+			byte h[] = new byte[16];
+			raf.read(h);
+			if (!Auxiliary.bytesToHex(h).equals(Job.MAGIC_HEADER_STRING)) // we currently
+			{
+				abort = true;
+				JOptionPane.showMessageDialog(GUI.app, "Couldn't find a valid SQLite3 magic. Import stopped",  "Error",  JOptionPane.ERROR_MESSAGE,null);
+			}
+		}
+		catch(Exception err)
+		{
+			JOptionPane.showMessageDialog(GUI.app, "IO-Exception. Cloud not open file.",  "Error",  JOptionPane.ERROR_MESSAGE,null);
+			abort = true;
+		}
+		finally		
+		{
+			try { raf.close(); } catch(IOException err){}
+		}
+	    /* no valid file or no permissions -> cancel import */
+		if (abort)
+			return;
+		
+		FileInfo info = new FileInfo(file.getAbsolutePath());
+		
+		 
+		
+		DBPropertyPanel panel = new DBPropertyPanel(info);
+			
+		NodeObject o = new NodeObject(file.getName(), null, -1, FileTypes.SQLiteDB, 99);
+		dbNode = new FTreeNode(o);
+		root.add(dbNode);
 
-			/* insert Panel with general header information for this database */
-			TreePath tp = getPath(dbNode);
+		/* insert Panel with general header information for this database */
+		TreePath tp = getPath(dbNode);
 			
-			Job job = new Job();
-			tables.put(tp, panel);
-			updateTableUI();
+		Job job = new Job();
+		tables.put(tp, panel);
+		updateTableUI();
 			
 			
-			/* Does a companion RollbackJournal exist ? */
-			if (doesRollbackJournalExist(file.getAbsolutePath()) > 0) {
+		/* Does a companion RollbackJournal exist ? */
+		if (doesRollbackJournalExist(file.getAbsolutePath()) > 0) {
 				NodeObject ro = new NodeObject(file.getName() + "-journal", null, -1,
 						FileTypes.RollbackJournalLog, 100);
 				rjNode = new FTreeNode(ro);
@@ -1161,44 +1107,42 @@ public class GUI extends JFrame {
 				ro.job.readRollbackJournal = true;
 				ro.job.readWAL = false;
 
-			}
+		}
 
 			/* Does a companion WAL-archive exist ? */
 			else if (doesWALFileExist(file.getAbsolutePath()) > 0) {
 
-				NodeObject wo = new NodeObject(file.getName() + "-wal", null, -1, FileTypes.WriteAheadLog, 101);
-				walNode = new FTreeNode(wo);
-				root.add(walNode);
+			NodeObject wo = new NodeObject(file.getName() + "-wal", null, -1, FileTypes.WriteAheadLog, 101);
+			walNode = new FTreeNode(wo);
+			root.add(walNode);
 
-				// JOptionPane.showMessageDialog(this, "Found WAL-Archive for data base.\n" +
-				// file.getName() + "-wal");
 
-				/* insert Panel with general header information for this database */
-				TreePath tpw = getPath(walNode);
-				FileInfo winfo = new FileInfo(file.getAbsolutePath()+"-wal");
-				WALPropertyPanel wpanel = new WALPropertyPanel(winfo,this);
-				tables.put(tpw, wpanel);
+			/* insert Panel with general header information for this database */
+			TreePath tpw = getPath(walNode);
+			FileInfo winfo = new FileInfo(file.getAbsolutePath()+"-wal");
+			WALPropertyPanel wpanel = new WALPropertyPanel(winfo,this);
+			tables.put(tpw, wpanel);
 
-				updateTableUI();
-				job.setWALPropertyPanel(wpanel);
-				wo.job = job;
-				wo.job.readWAL = true;
-				wo.job.readRollbackJournal = false;
+			updateTableUI();
+			job.setWALPropertyPanel(wpanel);
+			wo.job = job;
+			wo.job.readWAL = true;
+			wo.job.readRollbackJournal = false;
 
-			}
-
-			DefaultTreeModel model = (DefaultTreeModel) tree.getModel();
-			model.reload(root);
-
-			job.setPropertyPanel(panel);
-			job.setGUI(this);
-			job.setPath(file.getAbsolutePath());
-			ProgressBar.createAndShowGUI(this, file.getAbsolutePath(), job);
-			o.job = job;
-
-			
-			
 		}
+
+		DefaultTreeModel model = (DefaultTreeModel) tree.getModel();
+		model.reload(root);
+
+		job.setPropertyPanel(panel);
+		
+		
+		
+		
+		job.setGUI(this);
+		job.setPath(file.getAbsolutePath());
+		ProgressBar.createAndShowGUI(this, file.getAbsolutePath(), job);
+		o.job = job;	
 
 	}
 
@@ -1367,6 +1311,8 @@ public class GUI extends JFrame {
 	 * @param data
 	 */
 	protected void update_table(TreePath tp, String[] data, boolean isWALTable) {
+		
+		
 		String tablename = data[0];
 
 		JTable tb = null;
@@ -1387,6 +1333,11 @@ public class GUI extends JFrame {
 		Vector<String> v = new Vector<String>();
 		CustomTableModel ctm = ((CustomTableModel) tb.getModel());
 
+		
+		// add line number 
+		v.add(String.valueOf(ctm.getRowCount()+1));
+		
+		
 		String[] waldata = new String[5];
 		
 		int last = data.length-1;
@@ -1472,35 +1423,6 @@ public class GUI extends JFrame {
 }
 
 
-/**
- *  The customized renderer is used to display the table cells 
- *  containing table rows. 
- *  
- *  Will use an internal JTree object to paint the nodes. 
- * 
- * @author pawlaszc
- *
- */
-@SuppressWarnings("serial")
-class LineRenderer extends DefaultTableCellRenderer {
-
-	@Override
-	public Component getTableCellRendererComponent(JTable table, Object value, boolean isSelected, boolean hasFocus,
-			int row, int column) {
-
-		super.getTableCellRendererComponent(table, value, isSelected, hasFocus, row, column);
-
-		// change look a the selected row
-		if (row == table.getSelectedRow()) {
-
-			// this will customize that kind of border that will be use to highlight a row
-			setBorder(BorderFactory.createMatteBorder(2, 1, 2, 1, Color.BLACK));
-			setBackground(Color.YELLOW);
-		}
-
-		return this;
-	}
-}
 
 /**
  * A mouse listener class which is used to handle mouse clicking event on column
@@ -1557,7 +1479,7 @@ class TableMouseListener extends MouseAdapter {
 //		}
 		
 		/* When the address column is clicked, the HexView is automatically generated.*/
-		if (column == 1 && lastclickrow != row) {
+		if (column == 2 && lastclickrow != row) {
 
 			SwingWorker<Boolean, Void> backgroundProcess = new SwingWorker<Boolean, Void>() {
 
@@ -1588,7 +1510,7 @@ class TableMouseListener extends MouseAdapter {
 
 								String text = hv.thex.getText();
 
-								String status = (String) table.getModel().getValueAt(row, 0);
+								String status = (String) table.getModel().getValueAt(row, 2);
 
 								if (status.contains(Global.DELETED_RECORD_IN_PAGE)) {
 									/* a removed entry - skip the first two bytes */

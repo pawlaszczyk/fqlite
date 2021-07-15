@@ -1,16 +1,11 @@
 package fqlite.ui;
 
-import java.io.BufferedInputStream;
 import java.io.File;
-import java.io.FileInputStream;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.security.DigestInputStream;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.util.Date;
 import java.util.Map;
 
@@ -23,6 +18,8 @@ public class FileInfo {
 	StringBuilder sb;
 	String sha256hash = "";
 	String md5hash = "";
+	String filename = "";
+	
 	
 	/**
 	 * Constructs a StringBuilder object informations about 
@@ -40,12 +37,11 @@ public class FileInfo {
 		Path p = Paths.get(path);
 		try {
 			computeHashes(path);
-			System.out.println("Davor");
 			
 			Map<String,Object> attributes = Files.readAttributes(p,"*", LinkOption.NOFOLLOW_LINKS);
 		   	int i = 1;	 
 			
-		   	System.out.println("Danach");
+		   	filename = p.getFileName().toString();
 		   	
 		    sb.append("--------------------------------------------------------------------------------\n");
 
@@ -73,13 +69,9 @@ public class FileInfo {
 		    printRow("" + i++, "size",attributes.get("size"), "in bytes" );
 		
 		    sb.append("\n");
-	          
-		   	System.out.println("Vor hash");
-
-		    
-		    MessageDigest md;
+	           
 			try {
-				 md = MessageDigest.getInstance("MD5");
+			  	 //MessageDigest md = MessageDigest.getInstance("MD5");
 				 String hexMD5 = md5hash; //checksum(path, md);
 				 printRowShort("" + i++, "md5 ",hexMD5);
 
@@ -88,17 +80,16 @@ public class FileInfo {
 				 //String hexSHA1 = ""; //checksum(path, md);
 				 //printRowShort("" + i++, "sha1 ",hexSHA1);
 
-				 md = MessageDigest.getInstance("SHA-256");
+				 //md = MessageDigest.getInstance("SHA-256");
 				 String hex = sha256hash; //checksum(path, md);
 				 printRowShort("" + i++, "sha256 ",hex);
 
 				 
-			} catch (NoSuchAlgorithmException e) {
+			} catch (Exception e) {
 				// TODO Auto-generated catch block
 				e.printStackTrace();
 			} //SHA, MD2, MD5, SHA-256, SHA-384...
 	  
-		   	System.out.println("Nach hash");
 		
 		
 		} catch (IOException e) {
@@ -135,28 +126,7 @@ public class FileInfo {
 	private void printRow(String c0, String c1, Object c2, Object c3 ) {
 	    sb.append(String.format("%s %-20s %-25s %-20s%n", c0, c1, String.valueOf(c2), c3 instanceof Integer ? "$" + c3 : c3));
 	}
-	
-	private static String checksum(String filepath, MessageDigest md) throws IOException {
-
-        // file hashing with DigestInputStream
-        try (DigestInputStream dis = new DigestInputStream(new BufferedInputStream(new FileInputStream(filepath)), md)) {
-            System.out.println("Before get hash()");
-        	while (dis.read() != -1) ; //empty loop to clear the data
-            md = dis.getMessageDigest();
-            System.out.println("After get hash()");
-        }
-        
-       
-
-        // bytes to hex
-        StringBuilder result = new StringBuilder();
-        for (byte b : md.digest()) {
-            result.append(String.format("%02x", b));
-        }
-        return result.toString();
-
-    }
-	
+		
 	public StringBuilder getReport()
 	{
 		return sb;

@@ -59,7 +59,7 @@ public class CustomTreeCellRenderer extends DefaultTreeCellRenderer {
 				
 				if (null != no.table) {
 					DBTable t = no.table;
-					if (t.getModel().getRowCount() > 1) {
+					if (t.getModel().getRowCount() > 0) {
 						String text = String.format(SPAN_FORMAT, "blue", no.name);
 						setText("<html>" + text + "</html>");
 						

@@ -108,11 +108,11 @@ public class SQLiteSchemaParser {
 				tds.tblname = tablename;
 				tds.ROWID = rowid;  // this flag indicates weather there is a ROWID or not 
 				/* avoid double entries */
-				//if (!job.headers.contains(tds))
-				//{	
+				if (!job.headers.contains(tds))
+				{	
 					job.headers.add(tds);
 					tds.root = root;
-				//}
+				}
 			}
 		}
 		else if (sql.contains("CREATE INDEX"))
@@ -121,9 +121,11 @@ public class SQLiteSchemaParser {
 			
 			if (null == ids.idxname)
 				return;
-			ids.root = root;
-			//if (!job.indexList.contains(ids))
+			if (!job.indices.contains(ids))
+			{	
 				job.indices.add(ids);         
+				ids.root = root;
+			}	
 		}
 
 		index = -1;

@@ -41,7 +41,7 @@ public class PopUpMenu extends JPopupMenu{
 		mntopen.setMnemonic(KeyEvent.VK_O);
 		mntopen.addActionListener(new ActionListener() {
 			public void actionPerformed(ActionEvent e) {
-				gui.open_db();
+				gui.open_db(null);
 			}
 		});
 		add(mntopen);

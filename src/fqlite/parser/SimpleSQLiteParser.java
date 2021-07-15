@@ -63,7 +63,10 @@ public class SimpleSQLiteParser {
 	
 	/* prepare data fields */
 	List<String> coltypes = new ArrayList<String>();
+	List<String> sqltypes = new ArrayList<String>();
+	List<String> colconstraints = new ArrayList<String>();
 	List<String> colnames = new ArrayList<String>();
+	List<String> tableconstraint = new ArrayList<String>();
 	Map<Integer,String> constraints = new HashMap<Integer,String>();
 	HeaderPattern pattern = new HeaderPattern();
 
@@ -210,7 +213,7 @@ public class SimpleSQLiteParser {
         	
         },tree);
 	
-		tds = new TableDescriptor(tablename,stmt,coltypes,colnames,null,stmt.contains("WITHOUT ROWID"));
+		tds = new TableDescriptor(tablename,stmt,sqltypes,coltypes,colnames,colconstraints,tableconstraint,null,stmt.contains("WITHOUT ROWID"));
 		
 		tds.setVirtual(true);
 		if (null!=modulname)
@@ -306,56 +309,143 @@ public class SimpleSQLiteParser {
         	
         	@Override public void enterTable_name(SQLiteParser.Table_nameContext ctx) 
         	{
+        		isTableConstraint = false;
         		tablename = ctx.getText();
         		tablename = trim(tablename);
         		if (tablename.length()==0)
         			tablename = "<no name>";
         		System.out.println("Tablename "  + tablename);
         	}
+        	
+        	boolean tblconstraint = false;
 
+        	
+        	
         	@Override public void enterColumn_name(SQLiteParser.Column_nameContext ctx) 
         	{
+        		if(inForeignTable)
+        		{
+        			inForeignTable = false;
+        			return;
+        		}
+        		if(isTableConstraint)
+        		{
+        			return;
+        		}
+        		cons="";
+        		
         		String colname = ctx.getText();
+        		
+        		System.out.println("enterColumn_name()::colname =" + colname);
+        		
         		if (!colname.equals("CONSTRAINT"))
         		{
         			colname = trim(colname);
         			colnames.add(colname);
-        		
         			
         			System.out.println("Columnname " + colname);
         		}
+        		else
+        		{
+        			System.out.println("aha!!!");
+        			tblconstraint = true;
+        		}	
+        		
+        		
         	}
+        	
+        	boolean inForeignTable = false;
+        	
+        	/**
+        	 * Enter a parse tree produced by {@link SQLiteParser#foreign_table}.
+        	 * @param ctx the parse tree
+        	 */
+        	@Override public void enterForeign_table(SQLiteParser.Foreign_tableContext ctx)
+        	{
+        		System.out.println("Enter foreign Table!!!");
+        		inForeignTable = true;
+        	}
+        	
+        	@Override public void exitForeign_table(SQLiteParser.Foreign_tableContext ctx)
+        	{
+        		System.out.println("Exit foreign Table!!!");
+        		
+        	}
+        	
         	
         	@Override public void enterType_name(SQLiteParser.Type_nameContext ctx) 
         	{ 
-        		String type = ctx.getText();
-        		type = getType(type);
-        		if (type.length()>0)
+        		String value = ctx.getText();
+        	    value = value.trim();
+        		
+        		/* the CONSTRAINT key word is mistakenly identified a type */
+        		if (tblconstraint)
         		{
-        			coltypes.add(type);
-        			System.out.println("Typename " + trim(type));
-            		
+        			System.out.println("Table Constraint: " + value);
+        			tableconstraint.add(value);
+        			tblconstraint = false;
         		}
+        		else
+        		{
+	        		sqltypes.add(value);
+	        		System.out.println("SQLType::" + value);
+	        		String type = getType(value);
+	        		if (type.length()>0)
+	        		{
+	        			coltypes.add(type);
+	        			System.out.println("Typename " + trim(type));
+	            		
+	        		}
+        		}
+        		
         	}
+        	
+        	@Override public void enterKeyword(SQLiteParser.KeywordContext ctx)
+        	{
+        		System.out.println("Enter keyword ");
+        	}
+        	
+        	@Override public void exitKeyword(SQLiteParser.KeywordContext ctx)
+        	{
+        		System.out.println("Exit keyword ");
+            }
+        	
+        
+        	String cons = "";
         	
         	@Override public void enterColumn_constraint(SQLiteParser.Column_constraintContext ctx)
         	{ 
         		String constraint = ctx.getText();
+        		
         		if (constraint.contains("NOTNULL"))
         			constraints.put(column,constraint);
+        		
+        	}
+        	
+        	@Override public void exitColumn_constraint(SQLiteParser.Column_constraintContext ctx)
+        	{ 
+        		String constraint = ctx.getText();
+        		
         		System.out.println("Columnconstraint " + constraint);
+        		cons += constraint + " ";
         	}
         	
         
         	
         	@Override public void exitColumn_def(SQLiteParser.Column_defContext ctx) 
         	{ 
+       	        System.out.println("adding cons:" + cons);
+        		colconstraints.add(cons);
         		column++;
         	}
+        	
+        	boolean isTableConstraint = false;
 
         	@Override public void enterTable_constraint(SQLiteParser.Table_constraintContext ctx) 
         	{ 
+        		isTableConstraint = true;
         		System.out.println("Table_constraint :: " +ctx.getText());
+        		tableconstraint.add(ctx.getText());
         	}
 	
         	
@@ -404,7 +494,7 @@ public class SimpleSQLiteParser {
         		}
 	        		
     	
-        		tds = new TableDescriptor(tablename,stmt,coltypes,colnames,pattern,stmt.contains("WITHOUT ROWID"));
+        		tds = new TableDescriptor(tablename,stmt,sqltypes,coltypes,colnames,colconstraints,tableconstraint,pattern,stmt.contains("WITHOUT ROWID"));
         		System.out.println("PATTTERN: " + pattern);
         		
         	}
@@ -432,8 +522,7 @@ public class SimpleSQLiteParser {
 		{
 			type="INT";
 		}	
-		else
-		if (stringContainsItemFromList(s, texttypes))
+		else if (stringContainsItemFromList(s, texttypes))
 		{
 			type="TEXT";
 		}

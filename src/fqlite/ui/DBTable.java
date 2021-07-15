@@ -31,6 +31,7 @@ public class DBTable extends JTable {
 		}
 	}	
 	
+	
 	public DBTable(TableModel dm) {
 	   super(dm);
 	   setSelectionMode(ListSelectionModel.MULTIPLE_INTERVAL_SELECTION);
@@ -90,10 +91,16 @@ public class DBTable extends JTable {
 
 		int rowIndex = rowAtPoint(p);
 		int colIndex = columnAtPoint(p);
+	
+	
 		
-		if (colIndex == 0)
+		if (colIndex == 1)
 		{
-			String status = (String)this.getModel().getValueAt(rowIndex,0);
+	
+			
+			String status = (String)this.getModel().getValueAt(rowIndex,1);
+	
+			System.out.println(">>> [" +  status +"]");
 			
 			tip = "<html>";
 			

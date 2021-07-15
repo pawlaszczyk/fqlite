@@ -109,7 +109,7 @@ public class Auxiliary extends Base {
 	 * @param header
 	 * @throws IOException
 	 */
-	public void readMasterTableRecord(Job job, int start, ByteBuffer buffer, String header) throws IOException {
+	public boolean readMasterTableRecord(Job job, int start, ByteBuffer buffer, String header) throws IOException {
 
 		SqliteElement[] columns;
 
@@ -118,57 +118,65 @@ public class Auxiliary extends Base {
 		columns = toColumns(header);
 
 		if (null == columns)
-			return;
+			return false;
 
 		// use the header information to reconstruct
 		int pll = computePayloadLength(header);
 
 		int so = computePayload(pll);
 
-		int overflow = -1;
-
-		if (so < pll) {
-			int phl = header.length() / 2;
-
-			int last = buffer.position();
-			debug(" spilled payload ::" + so);
-			debug(" pll payload ::" + pll);
-			buffer.position(buffer.position() + so - phl - 1);
-
-			overflow = buffer.getInt();
-			debug(" overflow::::::::: " + overflow + " " + Integer.toHexString(overflow));
-			buffer.position(last);
-
-			/*
-			 * we need to increment page number by one since we start counting with zero for
-			 * page 1
-			 */
-			byte[] extended = readOverflow(overflow - 1);
-
-			byte[] c = new byte[pll + job.ps];
-
-			buffer.position(0);
-
-			/* method array() cannot be called, since we backed an array */
-			byte[] originalbuffer = new byte[job.ps];
-			for (int bb = 0; bb < job.ps; bb++) {
-				originalbuffer[bb] = buffer.get(bb);
-			}
-
-			buffer.position(last);
-
-			/* copy spilled overflow of current page into extended buffer */
-			System.arraycopy(originalbuffer, buffer.position(), c, 0, so - phl);
-			/* append the rest startRegion the overflow pages to the buffer */
-			System.arraycopy(extended, 0, c, so - phl - 1, extended.length); // - so);
-			ByteBuffer bf = ByteBuffer.wrap(c);
-
-			buffer = bf;
-
-			// set original buffer pointer to the end of the spilled payload
-			// just before the next possible record
-			buffer.position(0);
-		}
+//		int overflow = -1;
+//		if (so < pll) {
+//			int phl = header.length() / 2;
+//
+//			int last = buffer.position();
+//			debug(" spilled payload ::" + so);
+//			debug(" pll payload ::" + pll);
+//			
+//			if ((buffer.position() + so - phl - 1) > buffer.limit())
+//				return false;
+//			
+//			buffer.position(buffer.position() + so - phl - 1);
+//
+//			overflow = buffer.getInt();
+//			debug(" overflow::::::::: " + overflow + " " + Integer.toHexString(overflow));
+//			/* regular overflow or rubbish value? */
+//			if (overflow >job.file.size())
+//				return false;
+//			buffer.position(last);
+//
+//			/*
+//			 * we need to increment page number by one since we start counting with zero for
+//			 * page 1
+//			 */
+//			byte[] extended = readOverflow(overflow - 1);
+//
+//			byte[] c = new byte[pll + job.ps];
+//
+//			buffer.position(0);
+//
+//			/* method array() cannot be called, since we backed an array */
+//			byte[] originalbuffer = new byte[job.ps];
+//			for (int bb = 0; bb < job.ps; bb++) {
+//				originalbuffer[bb] = buffer.get(bb);
+//			}
+//
+//			buffer.position(last);
+//
+//			/* copy spilled overflow of current page into extended buffer */
+//			System.arraycopy(originalbuffer, buffer.position(), c, 0, so - phl);
+//			
+//			/* append the rest startRegion the overflow pages to the buffer */
+//			if (null != extended)
+//				System.arraycopy(extended, 0, c, so - phl - 1, extended.length); // - so);
+//			ByteBuffer bf = ByteBuffer.wrap(c);
+//
+//			buffer = bf;
+//
+//			// set original buffer pointer to the end of the spilled payload
+//			// just before the next possible record
+//			buffer.position(0);
+//		}
 
 		int con = 0;
 
@@ -190,8 +198,15 @@ public class Auxiliary extends Base {
 			else
 				value = new byte[en.length];
 
-			buffer.get(value);
-
+			try
+			{
+				buffer.get(value);
+			}
+			catch(BufferUnderflowException bue)
+			{
+				return false;
+			}
+			
 			/* column 3 ? -> tbl_name TEXT */
 			if (con == 3) {
 				tablename = en.toString(value);
@@ -220,6 +235,7 @@ public class Auxiliary extends Base {
 		// finally, we have all information in place to parse the CREATE statement
 		SQLiteSchemaParser.parse(job, tablename, rootpage, statement);
 
+		return true;
 	}
 
 	/**
@@ -483,7 +499,7 @@ public class Auxiliary extends Base {
 		int pll = readUnsignedVarInt(buffer);
 		debug("Length of payload int : " + pll + " as hex : " + Integer.toHexString(pll));
 
-		if (pll < 10)
+		if (pll < 4)
 			return null;
 
 		int rowid = 0;
@@ -554,13 +570,14 @@ public class Auxiliary extends Base {
 		int co = 0;
 		try {
 			if (unkown) {
-				/* this is only neccessesary, when component name is unkown */
+				
 				TableDescriptor td = matchTable(columns);
 
+				/* this is only neccessesary, when component name is unkown */
 				if (null == td)
 					lineUTF.append("__UNASSIGNED" + ";");
 				else {
-					lineUTF.append(td.tblname + ";");
+					lineUTF.append(td.tblname + ";");					
 					job.pages[pagenumber_db] = td;
 				}
 
@@ -984,7 +1001,7 @@ public class Auxiliary extends Base {
 	 * @return
 	 */
 	private static SqliteElement[] get(byte[] header) {
-		// there are several varint values in the columntypes header
+		// there are several varint values in the serialtypes header
 		int[] columns = readVarInt(header);
 		if (null == columns)
 			return null;
@@ -1035,7 +1052,8 @@ public class Auxiliary extends Base {
 				{
 					// BLOB with the length (N-12)/2
 					column[i] = new SqliteElement(SerialTypes.BLOB, StorageClasses.BLOB, (columns[i] - 12) / 2);
-				} else // odd
+				} 
+				else // odd
 				{
 					// String in database encoding (N-13)/2
 					column[i] = new SqliteElement(SerialTypes.STRING, StorageClasses.TEXT, (columns[i] - 13) / 2);
@@ -1128,15 +1146,6 @@ public class Auxiliary extends Base {
 		
 		
 		return ByteBuffer.wrap(ret).getInt();
-		
-		//short v = b.getShort();
-		// value
-		//int iv = v >= 0 ? v : 0x10000 + v; // we have to convert
-		// an unsigned short
-		// value to an
-		// integer
-
-		//return iv;
 	}
 
 	private void checkROWID(int co, SqliteElement en, int rowid, StringBuffer lineUTF) {

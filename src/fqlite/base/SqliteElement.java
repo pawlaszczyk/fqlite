@@ -28,6 +28,7 @@ public class SqliteElement {
 	}
 
 	public final String toString(byte[] value) {
+				
 		if (type == SerialTypes.INT0)
 			return String.valueOf(0);
 		else if (type == SerialTypes.INT1)
@@ -138,15 +139,15 @@ public class SqliteElement {
 		
 		double d = bf.getDouble();
 		
-		if(d > 600000000)
-		{
-			System.out.println("MAC-Time gefunden " + d);
-		}
+		//if(d > 600000000)
+		//{
+			//System.out.println("MAC-Time gefunden " + d);
+		//}
 		String fp64 = DatetimeConverter.isMacAbsoluteTime(d);
 		if (null == fp64)
 			return String.format("%.8f", d);
 		// return bf.getDouble();
-		System.out.println("Rückgabe :: " + fp64);
+		// System.out.println("Rückgabe :: " + fp64);
 		return fp64;
 	}
 

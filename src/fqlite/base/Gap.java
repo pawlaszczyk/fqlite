@@ -15,5 +15,11 @@ public class Gap {
 		from = fromIdx;
 		to = toIdx;
 	}
+	
+	
+	public boolean equals(Gap g)
+	{
+		return (this.from == g.from && this.to == g.to);
+	}
 
 }
