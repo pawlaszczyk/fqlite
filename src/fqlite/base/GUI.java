@@ -41,8 +41,11 @@ import java.util.Vector;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+
+import javax.swing.DefaultCellEditor;
 import javax.swing.ImageIcon;
 import javax.swing.JButton;
+import javax.swing.JComboBox;
 import javax.swing.JComponent;
 import javax.swing.JDialog;
 import javax.swing.JFileChooser;
@@ -62,7 +65,9 @@ import javax.swing.JTextField;
 import javax.swing.JTextPane;
 import javax.swing.JToolBar;
 import javax.swing.JTree;
+import javax.swing.JWindow;
 import javax.swing.KeyStroke;
+import javax.swing.SwingConstants;
 import javax.swing.SwingUtilities;
 import javax.swing.SwingWorker;
 import javax.swing.UIManager;
@@ -70,6 +75,7 @@ import javax.swing.border.EmptyBorder;
 import javax.swing.event.TreeSelectionEvent;
 import javax.swing.event.TreeSelectionListener;
 import javax.swing.filechooser.FileNameExtensionFilter;
+import javax.swing.table.TableColumn;
 import javax.swing.table.TableColumnModel;
 import javax.swing.table.TableRowSorter;
 import javax.swing.text.DefaultHighlighter;
@@ -220,6 +226,53 @@ public class GUI extends JFrame {
 	 */
 	public static void main(String[] args) {
 
+	
+		/**
+		  * This is needed because only one main class can be called in an
+		  * executable jar archive. 
+		  * 
+		  **/
+		if (args.length > 0)
+		{	
+		   // There is a least one parameter -> check, if nogui-option is set
+            String option = args[0];
+			if (args[0].contains(option))
+			try {
+				// switch to CLI mode instead
+				System.out.println("[nogui] option is set => starting in CLI-mode...\n");
+				MAIN.main(args);
+			} catch (Exception e) {
+				System.out.println("ERROR while running MANI.main(). Leave program now.");
+			}
+		    // do not call the UI and leave right now.
+		    return;
+		}
+		
+		
+		JWindow window = new JWindow();
+		window.setLayout(new BorderLayout());
+        window.getContentPane().add(
+                new JLabel("", new ImageIcon(GUI.class.getResource("/fqlite_logo_small.png"),BorderLayout.CENTER), SwingConstants.CENTER)).setBackground(Color.WHITE);
+        window.getContentPane().setBackground(Color.WHITE);
+        window.getContentPane().add(new JLabel("<html><h3>V."+ Global.FQLITE_VERSION + "</h3></html>"),BorderLayout.SOUTH);
+        //Set the window's bounds, centering the window
+        int width = 400;
+        int height = 300;
+        Dimension screen = Toolkit.getDefaultToolkit().getScreenSize();
+        int x = (screen.width - width) / 2;
+        int y = (screen.height - height) / 2;
+        window.setBounds(x, y, width, height);
+
+        window.setVisible(true);
+        try {
+            Thread.sleep(3000);
+        } catch (InterruptedException e) {
+            e.printStackTrace();
+        }
+  
+
+		
+		
 		EventQueue.invokeLater(new Runnable() {
 			public void run() {
 				try {
@@ -694,6 +747,7 @@ public class GUI extends JFrame {
 		}
 		
 		DBTable table = new DBTable(model, walnode, this);
+		
 			
 		TableRowSorter<CustomTableModel> sorter = new TableRowSorter<CustomTableModel>();
 		table.setRowSorter(sorter);
@@ -890,6 +944,15 @@ public class GUI extends JFrame {
 
 		tables.put(tp, table);
 
+	    TableColumn testColumn = table.getColumnModel().getColumn(2);
+	    JComboBox<String> comboBox = new JComboBox<>();
+	    comboBox.addItem("default");
+	    comboBox.addItem("hex2UTF");
+	    comboBox.addItem("int2time");
+	    comboBox.addItem("float2time");
+	    testColumn.setCellEditor(new DefaultCellEditor(comboBox));
+
+		
 		SwingUtilities.invokeLater(new Runnable() {
 			public void run() {
 				// Here, we can safely update the GUI

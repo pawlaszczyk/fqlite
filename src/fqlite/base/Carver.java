@@ -54,38 +54,43 @@ public class Carver extends Base {
 	 *
 	 */
 
-	public boolean carve(int fromidx, int toidx, SerialTypeMatcher mat, int headertype, TableDescriptor tbd,
-			StringBuffer firstcol) {
+	public int carve(int fromidx, int toidx, SerialTypeMatcher mat, int headertype, TableDescriptor tbd,
+			StringBuffer firstcol) 
+	{
 		Auxiliary c = new Auxiliary(job);
-		boolean match = false;
-
-		switch (headertype) {
-		case CarverTypes.NORMAL:
-			mat.setMatchingMode(MatchingMode.NORMAL);
-			break;
-		case CarverTypes.COLUMNSONLY:
-			mat.setMatchingMode(MatchingMode.NOHEADER);
-			break;
-		case CarverTypes.FIRSTCOLUMNMISSING:
-			mat.setMatchingMode(MatchingMode.NO1stCOL);
-			break;
+	
+		switch (headertype) 
+		{
+			case CarverTypes.NORMAL:
+				mat.setMatchingMode(MatchingMode.NORMAL);
+				break;
+			case CarverTypes.COLUMNSONLY:
+				mat.setMatchingMode(MatchingMode.NOHEADER);
+				break;
+			case CarverTypes.FIRSTCOLUMNMISSING:
+				mat.setMatchingMode(MatchingMode.NO1stCOL);
+				break;
 		}
 		
 
+		/* gap is to small for a regular record? */
 		if((toidx - fromidx) <= 4)
-			return match;
+			return -1;
 		
 		/* set search region */
 		mat.region(fromidx, toidx);
 
 		/* set pattern to search for */
 		mat.setPattern(tbd.getHpattern());
+		
+		System.out.println("header pattern: " + tbd.getHpattern());
 
 		/* find every match within the given region */
 		while (mat.find()){
 			
 			/* get the hex-presentation of the match */
 			String m = mat.group2Hex();
+			
 			/* skip stupid matches - remember - it is just a heuristic */
 			if ((m.length() < 2) || (m.startsWith("00000000")))
 				  continue;
@@ -109,7 +114,7 @@ public class Carver extends Base {
 			debug("Match (0..NORMAL, 1..NOLENGTH, 2..FIRSTCOLMISSING) : " + headertype);
 			debug("found " + m);
 			debug("Match: " + m + " on pos:" + ((pagenumber - 1) * job.ps + from));
-			match = true;
+			
 			
 	
 			if (headertype == CarverTypes.NORMAL) {
@@ -125,13 +130,27 @@ public class Carver extends Base {
 			}
 
 			if (headertype == CarverTypes.FIRSTCOLUMNMISSING) {
+				
+				/* check first column  - if it is set to type <00> we can leave the value as it is*/
 				if (null != firstcol && firstcol.length()>2 && !firstcol.subSequence(0,2).equals("00")) {
+					
+					// first column type is not <00> -> remove the header column type
 					m = firstcol.substring(0,2) + m; 
-		
+					
 				} 
+				/* Note: This has to be reworked for a ROWID-TABLE where first col corresponds to the rowid  -> m = "00"*/
 				else
-					m = "02" + m;
-
+				{
+					/* is the first column a integer colum or something else?*/
+					if (tbd.primarykeycolumns != null)
+					  m = "00" + m;
+					else
+					{
+					  m = "02" + m;
+					} 
+				}
+				
+				/* note  [headerlength|type 1st col|type 2nd col|...] */
 				m = addHeaderByte(m);
 			}
 
@@ -162,13 +181,14 @@ public class Carver extends Base {
 
 				} catch (Exception err) {
 					warning("Could not read record" + err.toString());
-					return false;
+					return -1;
 				}
 			}
 
 		}
 
-		return match;
+		
+		return 0;
 	}
 
 	private String addHeaderByte(String s) {

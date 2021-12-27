@@ -40,6 +40,8 @@ public class TableDescriptor extends AbstractDescriptor implements Comparable<Ta
 	public boolean virtual = false;
 	public String modulname = null;
 	public String sql = "";
+	
+	public String rowidcolumn = null;
 
 	public boolean checkMatch(String match) {
 		
@@ -163,7 +165,6 @@ public class TableDescriptor extends AbstractDescriptor implements Comparable<Ta
 	 */
 	public TableDescriptor(String tblname, String stmt, List<String> sqltypes, List<String> col, List<String> names, List<String> constraints, List<String> tableconstraints, HeaderPattern pattern, boolean withoutROWID) {
 
-		setHpattern(pattern);
 		setColumntypes(col);
 		signature(col);
 		
@@ -182,18 +183,21 @@ public class TableDescriptor extends AbstractDescriptor implements Comparable<Ta
 		/* find the primary key by checking the column constraint */ 
 		for(int i=0; i < names.size(); i++)
 		{
+			
 			if (null != constraints)
-				System.out.println("tname" + tblname);
+				System.out.println("tblname: " + tblname);
 			
 			if (tblname.equals("__UNASSIGNED"))
 				break;
-				/* we look for the keyword PRIMARYKEY */
-				if (constraints.get(i).contains("PRIMARYKEY"))
-				{
-					this.primarykeycolumns.add(names.get(i));
-				}
+			/* we look for the keyword PRIMARYKEY */
+			if (constraints.get(i).contains("PRIMARYKEY"))
+			{
+				
+				this.primarykeycolumns.add(names.get(i));
+			}
 			
 		}
+		
 		
 		
 		/* check, if there is a PRIMARYKEY definition in the table constraints */
@@ -225,6 +229,38 @@ public class TableDescriptor extends AbstractDescriptor implements Comparable<Ta
 			}
 		
 		
+		/*
+		 *  With one exception noted below, if a rowid table has 
+		 *  a primary key that consists of a <single column> and the 
+		 *  declared type of that column is "INTEGER" in any mixture 
+		 *  of upper and lower case, then the column becomes an alias 
+		 *  for the rowid. 
+		 *  Such a column is usually referred to as an "integer primary key". 
+		 *  A PRIMARY KEY column only becomes an integer primary key if the
+		 *  declared type name is exactly "INTEGER". 
+		 *  
+		 *  [source: https://www.sqlite.org/lang_createtable.html#rowid]	
+		 */
+		if (primarykeycolumns.size()==1)
+		{	
+			int i = names.indexOf(primarykeycolumns.get(0));
+			if(sqltypes.get(i).toUpperCase().equals("INTEGER"))
+			{
+				if(!constraints.get(i).toUpperCase().contains("DESC"))
+				{
+					System.out.println("Attention! integer primary key: " + names.get(i));
+					/* Note: this column has the columntype "00" */
+					rowidcolumn = names.get(i);
+					pattern.change2RowID(i);
+				}
+			}	
+		}
+		
+		
+		
+		setHpattern(pattern);
+		
+	
 		/* create a table fingerprint for later search */
 		Iterator<String> iter = getColumntypes().iterator();
 		while (iter.hasNext()) {

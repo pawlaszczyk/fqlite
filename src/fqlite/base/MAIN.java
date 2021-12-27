@@ -1,4 +1,4 @@
-package fqlite.base;
+ package fqlite.base;
 
 import java.lang.reflect.InvocationTargetException;
 import java.util.concurrent.ExecutionException;
@@ -22,7 +22,7 @@ import java.util.concurrent.ExecutionException;
 * 
 * 
 * @author Dirk Pawlaszczyk
-* @version 1.5
+* @version 1.5.6
 */
 public class MAIN {
 
@@ -39,6 +39,17 @@ public class MAIN {
 		System.out.println("**************************************************************");
 
 		
+		System.out.println("       *                         ");
+		System.out.println("      /|\\                       ");       
+		System.out.println("     /*|O\\                      ");
+		System.out.println("    /*/|\\*\\                    ");
+		System.out.println("   /X/O|*\\X\\                   ");
+		System.out.println("  /*/X/|\\X\\*\\                 ");
+	    System.out.println(" /O/*/X|*\\O\\X\\                ");             
+	   	System.out.println("/*/O/X/|\\X\\O\\*\\              ");
+	   	System.out.println("      |X|                        ");      
+	   	System.out.println("      |X|     <Christmas Edition>");
+	   	System.out.println(" \n\n\n                          ");
 	 	  
 		/* create a new job-object to process database file */
 		/* Note: There is a 1:1 connection between a database file and a job object */

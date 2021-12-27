@@ -4,6 +4,7 @@ import static javax.swing.GroupLayout.Alignment.CENTER;
 
 import java.awt.Color;
 import java.awt.Container;
+import java.awt.Font;
 import java.awt.Frame;
 import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
@@ -91,6 +92,23 @@ public class AboutDialog extends JDialog {
 		JLabel name = new JLabel("FQLite Retrieval Tool, Version " + Global.FQLITE_VERSION);
 		JLabel author = new JLabel("Author: Dirk Pawlaszczyk");
 		JLabel company = new JLabel("Mittweida University of Applied Sciences");
+		JTextArea greetings = new JTextArea(""+
+"                     *                   \n"+
+"                    /|\\                 \n"+
+"                   /*|O\\                \n"+
+"                  /*/|\\*\\              \n"+
+"                 /X/O|*\\X\\             \n"+
+"                /*/X/|\\X\\*\\           \n"+
+"               /O/*/X|*\\O\\X\\          \n"+
+"              /*/O/X/|\\X\\O\\*\\        \n"+
+"             /X/O/*/X|O\\X\\*\\O\\       \n"+
+"            /O/X/*/O/|\\X\\*\\O\\X\\     \n"+
+"                    |X|                  \n"+
+"                    |X|     <XMAS Edition> \n");
+	    greetings.setEnabled(false);
+	    greetings.setFont(new Font("Courier", Font.PLAIN, 14));
+		
+		
 		JButton btn = new JButton("   OK   ");
 		btn.addActionListener(new ActionListener() {
 
@@ -100,7 +118,7 @@ public class AboutDialog extends JDialog {
 			}
 		});
 
-		createLayout(name, label, author, company, btn);
+		createLayout(name, label, author, company, greetings, btn);
 
 		setModalityType(ModalityType.APPLICATION_MODAL);
 

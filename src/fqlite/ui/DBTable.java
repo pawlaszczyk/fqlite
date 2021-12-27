@@ -38,6 +38,8 @@ public class DBTable extends JTable {
        setColumnSelectionAllowed(false);
 	   setRowSelectionAllowed(true);
 	}
+	
+
 
 	@Override
 	public TableCellRenderer getCellRenderer(int row, int column) {

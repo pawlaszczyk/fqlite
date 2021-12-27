@@ -123,7 +123,8 @@ public class Auxiliary extends Base {
 		// use the header information to reconstruct
 		int pll = computePayloadLength(header);
 
-		int so = computePayload(pll);
+		int so;
+		so = computePayload(pll);
 
 //		int overflow = -1;
 //		if (so < pll) {
