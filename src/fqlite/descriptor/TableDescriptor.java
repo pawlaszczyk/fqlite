@@ -244,7 +244,8 @@ public class TableDescriptor extends AbstractDescriptor implements Comparable<Ta
 		if (primarykeycolumns.size()==1)
 		{	
 			int i = names.indexOf(primarykeycolumns.get(0));
-			if(sqltypes.get(i).toUpperCase().equals("INTEGER"))
+			System.out.println("Primary key column :: " + i);
+			if(i >= 0 && sqltypes.get(i).toUpperCase().equals("INTEGER"))
 			{
 				if(!constraints.get(i).toUpperCase().contains("DESC"))
 				{

@@ -92,19 +92,26 @@ public class AboutDialog extends JDialog {
 		JLabel name = new JLabel("FQLite Retrieval Tool, Version " + Global.FQLITE_VERSION);
 		JLabel author = new JLabel("Author: Dirk Pawlaszczyk");
 		JLabel company = new JLabel("Mittweida University of Applied Sciences");
-		JTextArea greetings = new JTextArea(""+
-"                     *                   \n"+
-"                    /|\\                 \n"+
-"                   /*|O\\                \n"+
-"                  /*/|\\*\\              \n"+
-"                 /X/O|*\\X\\             \n"+
-"                /*/X/|\\X\\*\\           \n"+
-"               /O/*/X|*\\O\\X\\          \n"+
-"              /*/O/X/|\\X\\O\\*\\        \n"+
-"             /X/O/*/X|O\\X\\*\\O\\       \n"+
-"            /O/X/*/O/|\\X\\*\\O\\X\\     \n"+
-"                    |X|                  \n"+
-"                    |X|     <XMAS Edition> \n");
+//		JTextArea greetings = new JTextArea(""+
+//"                     *                   \n"+
+//"                    /|\\                 \n"+
+//"                   /*|O\\                \n"+
+//"                  /*/|\\*\\              \n"+
+//"                 /X/O|*\\X\\             \n"+
+//"                /*/X/|\\X\\*\\           \n"+
+//"               /O/*/X|*\\O\\X\\          \n"+
+//"              /*/O/X/|\\X\\O\\*\\        \n"+
+//"             /X/O/*/X|O\\X\\*\\O\\       \n"+
+//"            /O/X/*/O/|\\X\\*\\O\\X\\     \n"+
+//"                    |X|                  \n"+
+//"                    |X|     <XMAS Edition> \n");
+		JTextArea greetings = new JTextArea("\n"
+				+ "*°*”˜˜”*°•.¸☆ ★ ☆¸.•°*”˜˜”*°•.¸☆\n"
+				+ "╔╗╔╦══╦═╦═╦╗╔╗ ★ ★ ★\n"
+				+ "║╚╝║══║═║═║╚╝║ ☆¸.•°*”˜˜”*°•.¸☆\n"
+				+ "║╔╗║╔╗║╔╣╔╩╗╔╝ ★ NEW YEAR ☆\n"
+				+ "╚╝╚╩╝╚╩╝╚╝═╚╝ ♥￥☆★☆★☆￥♥ ★☆❤♫❤♫❤\n"
+				+ ".•*¨`*•..¸☼ ¸.•*¨`*•.♫❤♫❤♫❤");
 	    greetings.setEnabled(false);
 	    greetings.setFont(new Font("Courier", Font.PLAIN, 14));
 		

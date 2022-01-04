@@ -169,7 +169,7 @@ import fqlite.util.Logger;
  * 
  * 
  * @author Dirk Pawlaszczyk
- * @version 1.5
+ * @version 1.5.7
  *
  */
 

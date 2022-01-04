@@ -829,12 +829,12 @@ public class PageReader extends Base {
 				if (columns[i] % 2 == 0) // even
 				{
 					// BLOB with the length (N-12)/2
-					column[i] = new SqliteElement(SerialTypes.BLOB,StorageClasses.INT, (columns[i] - 12) / 2);
+					column[i] = new SqliteElement(SerialTypes.BLOB,StorageClasses.BLOB, (columns[i] - 12) / 2);
 				} 
 				else // odd
 				{
 					// String in database encoding (N-13)/2
-					column[i] = new SqliteElement(SerialTypes.STRING,StorageClasses.INT, (columns[i] - 13) / 2);					
+					column[i] = new SqliteElement(SerialTypes.STRING,StorageClasses.TEXT, (columns[i] - 13) / 2);					
 				}
 
 			}
