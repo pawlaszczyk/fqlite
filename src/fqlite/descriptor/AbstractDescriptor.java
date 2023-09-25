@@ -13,6 +13,8 @@ package fqlite.descriptor;
 public abstract class AbstractDescriptor {
 
 	public boolean ROWID = true;
+	public int rowid_col = -1;
+
 	
 	/**
 	 * Return the name of the database object.

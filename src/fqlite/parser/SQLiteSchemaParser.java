@@ -74,14 +74,6 @@ public class SQLiteSchemaParser {
 
 		boolean rowid = true;
 		
-		int index;
-
-		int indextabledef = sql.indexOf("indexsqlite_autoindex_");
-		if (indextabledef != -1) {
-			Logger.out.debug(" internal indices component");
-			
-		}
-		
 		int indexrowid = sql.indexOf("WITHOUT ROWID");
 		if (indexrowid != -1) {
 			Logger.out.debug(" attention: component " + tablename + " is defined as WITHOUT ROWID");
@@ -95,6 +87,21 @@ public class SQLiteSchemaParser {
 		/* the component name and columns are extracted here */
 		TableParser p = new TableParser();
 
+		
+		if (sql.contains("VIRTUAL TABLE")) 
+		{
+			TableDescriptor tds = p.parseCREATETABLEStatement(sql);
+		    
+			/* save link to this component object within the virtual component list */
+			if(tds.isVirtual())
+				job.virtualTables.put(tds.tblname,tds);
+			
+			if (!job.headers.contains(tds))
+			{	
+				job.headers.add(tds);
+			}
+		}
+		
 		if (sql.contains("CREATE TABLE"))
 		{
 			TableDescriptor tds = p.parseCREATETABLEStatement(sql);
@@ -127,27 +134,21 @@ public class SQLiteSchemaParser {
 				ids.root = root;
 			}	
 		}
-
-		index = -1;
-		index = sql.indexOf("CREATE INDEX");
-
-		if (index > 0) {
-			int i = (byte) sql.charAt(index - 1);
-			Logger.out.info(" First root page of Index-Table: " + i);
-			roots.add(i);
-			return;
+		else if (sql.contains("CREATE UNIQUE INDEX"))
+		{
+			sql = sql.replace("CREATE UNIQUE INDEX","CREATE INDEX");
+			
+			IndexDescriptor ids = p.parseCREATEIndexStatement(sql);
+			
+			if (null == ids.idxname)
+				return;
+			if (!job.indices.contains(ids))
+			{	
+				job.indices.add(ids);         
+				ids.root = root;
+			}	
 		}
-
-		index = -1;
-		index = sql.indexOf("CREATE UNIQUE INDEX");
-
-		if (index > 0) {
-			int i = (byte) sql.charAt(index - 1);
-			Logger.out.info(" First root page of Index-Table: " + i);
-			roots.add(i);
-			return;
-		}
-
+			
 	}
 
 }

@@ -1,5 +1,7 @@
 package fqlite.util;
 
+import java.util.LinkedList;
+
 /**
  * Container class. It is used to return some result from 
  * carving back to the calling thread. 
@@ -12,11 +14,13 @@ public class CarvingResult {
 	public StringBuffer bf;
 	public int rcursor;
 	public int offset; 
+	public LinkedList<String> record;
 	
-	public CarvingResult(int rcursor,int offset, StringBuffer result)
+	public CarvingResult(int rcursor,int offset, StringBuffer result, LinkedList<String> record)
 	{
 		bf = result;
 		this.rcursor = rcursor;
 		this.offset  = offset;
+		this.record  = record;
 	}
 }

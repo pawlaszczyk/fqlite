@@ -6,7 +6,6 @@ import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.util.Date;
 import java.util.Map;
 
 import org.apache.commons.codec.digest.DigestUtils;
@@ -18,6 +17,7 @@ public class FileInfo {
 	StringBuilder sb;
 	String sha256hash = "";
 	String md5hash = "";
+	String sha1 = "";
 	String filename = "";
 	
 	
@@ -53,36 +53,37 @@ public class FileInfo {
 		    sb.append("--------------------------------------------------------------------------------\n");
 		    sb.append("\n");
 		 
-		    sb.append(center(" File: " + p.getFileName(),80));
+		    sb.append(" File: " + p.getFileName());
 		    sb.append("\n");
-		    sb.append(center(" Path:" + path,80));
+		    sb.append(" Path: " + path);
 		    sb.append("\n");
-		    sb.append("                     creation time " + new Date());
+		    sb.append(" Size: " + attributes.get("size") + " Bytes" );
+		    sb.append("\n");
+
 		    sb.append("\n\n");
             
-		    
-		    printRow(" " , "Key", "Value", "Remarks");
-		    printRow(" " , "--------------", "--------------", "--------------");
-		    printRow("" + i++, "creationTime", attributes.get("creationTime"), "of file on disk ");
-		    printRow("" + i++, "lastAccessTime", attributes.get("lastAccessTime"), "of file on disk ");
-		    printRow("" + i++, "lastModifiedTime", attributes.get("lastModifiedTime"), "of file on disk ");
-		    printRow("" + i++, "size",attributes.get("size"), "in bytes" );
-		
+		   		    
+		    //printRow(" " , "Key", "Value", "Remarks");
+		    sb.append("  Key                         Value                                         Remarks" + "\n");
+		    printRow(" " , "--------------", " ----------------------", "-----------------");
+		    printRow("" + i++, "creationTime    ", attributes.get("creationTime"), " of file on disk ");
+		    printRow("" + i++, "lastAccess        ", attributes.get("lastAccessTime"), " of file on disk ");
+		    printRow("" + i++, "lastModified     ", attributes.get("lastModifiedTime"), " of file on disk ");
 		    sb.append("\n");
 	           
 			try {
+			sb.append("Hashes \n");	
+				
 			  	 //MessageDigest md = MessageDigest.getInstance("MD5");
 				 String hexMD5 = md5hash; //checksum(path, md);
-				 printRowShort("" + i++, "md5 ",hexMD5);
+				 sb.append(" md5      " + hexMD5 + "\n");
+
+				 sb.append(" sha1     " + sha1 + "\n");
 
 				 
-				 //md = MessageDigest.getInstance("SHA-1");
-				 //String hexSHA1 = ""; //checksum(path, md);
-				 //printRowShort("" + i++, "sha1 ",hexSHA1);
-
 				 //md = MessageDigest.getInstance("SHA-256");
 				 String hex = sha256hash; //checksum(path, md);
-				 printRowShort("" + i++, "sha256 ",hex);
+				 sb.append(" sha256 " + hex + "\n");
 
 				 
 			} catch (Exception e) {
@@ -106,6 +107,7 @@ public class FileInfo {
 			//md = MessageDigest.getInstance("SHA-256");
 			sha256hash = new DigestUtils(org.apache.commons.codec.digest.MessageDigestAlgorithms.SHA_256).digestAsHex(new File(path));
 			md5hash = new DigestUtils(org.apache.commons.codec.digest.MessageDigestAlgorithms.MD5).digestAsHex(new File(path));
+			sha1 = new DigestUtils(org.apache.commons.codec.digest.MessageDigestAlgorithms.SHA_1).digestAsHex(new File(path));
 
 			
 			//checksum(path, md);
@@ -120,11 +122,11 @@ public class FileInfo {
     }
 	
 	private void printRowShort(String c0, String c1, Object c2) {
-	    sb.append(String.format("%s %-10s %-25s%n", c0, c1, String.valueOf(c2)));
+	    sb.append(String.format("%s %-10s %s%n", c0, c1, String.valueOf(c2)));
 	}
 
 	private void printRow(String c0, String c1, Object c2, Object c3 ) {
-	    sb.append(String.format("%s %-20s %-25s %-20s%n", c0, c1, String.valueOf(c2), c3 instanceof Integer ? "$" + c3 : c3));
+		sb.append(String.format("%s %s %-30s %-15s%n", c0, c1, String.valueOf(c2), c3 instanceof Integer ? "$" + c3 : c3));
 	}
 		
 	public StringBuilder getReport()
@@ -142,12 +144,12 @@ public class FileInfo {
         return String.format("%" + before + "s%-" + rest + "s", "", text);  
     }
 	
-	public static void main(String [] args)
-	{
-		FileInfo f = new FileInfo("/Users/pawlaszc/Desktop/FQLite/cookies.sqlite");
+	//public static void main(String [] args)
+	//{
+	//	FileInfo f = new FileInfo("/Users/pawlaszc/Desktop/FQLite/cookies.sqlite");
 		
-		System.out.println(f.sb);
-	}
+	//	System.out.println(f.sb);
+	//}
 	
 	public void print()
 	{

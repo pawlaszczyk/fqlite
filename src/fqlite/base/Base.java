@@ -9,12 +9,12 @@ package fqlite.base;
  */
 public abstract class Base {
 
-	static final int ALL = 0;
-	static final int DEBUG = 1;
-	static final int INFO = 2;
-	static final int WARNING = 3;
-	static final int ERROR = 4;
-	static int LOGLEVEL = ALL; 
+	public static final int ALL = 0;
+	public static final int DEBUG = 1;
+	public static final int INFO = 2;
+	public static final int WARNING = 3;
+	public static final int ERROR = 4;
+	public static int LOGLEVEL = ALL; 
 	
 			
 	public void debug(String message) {

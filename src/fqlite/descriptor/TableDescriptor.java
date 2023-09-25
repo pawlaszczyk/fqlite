@@ -1,5 +1,6 @@
 package fqlite.descriptor;
 
+import java.util.Hashtable;
 import java.util.Iterator;
 import java.util.LinkedList;
 import java.util.List;
@@ -7,6 +8,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import fqlite.pattern.HeaderPattern;
 import fqlite.util.Auxiliary;
+import fqlite.util.Logger;
 
 /**
  * Objects of this class are used to represent a component. 
@@ -28,6 +30,8 @@ public class TableDescriptor extends AbstractDescriptor implements Comparable<Ta
 	public List<String> constraints; // constraint for each column
 	public List<String> tableconstraints; // constraints on table level
 	public List<String> primarykeycolumns;
+	public List<String> boolcolumns;
+	public Hashtable<String,String> tooltiptypes = new Hashtable<String,String>();
 	
 	int size = 0;
 	int numberofmultibytecolumns = 0;
@@ -178,23 +182,33 @@ public class TableDescriptor extends AbstractDescriptor implements Comparable<Ta
 		this.tblname = tblname;
 		
 		primarykeycolumns = new LinkedList<String>();
+		boolcolumns = new LinkedList<String>();
+		
 		
 		
 		/* find the primary key by checking the column constraint */ 
 		for(int i=0; i < names.size(); i++)
 		{
 			
-			if (null != constraints)
-				System.out.println("tblname: " + tblname);
-			
 			if (tblname.equals("__UNASSIGNED"))
 				break;
+			if (constraints == null)
+				break;
 			/* we look for the keyword PRIMARYKEY */
-			if (constraints.get(i).contains("PRIMARYKEY"))
+			if (i < constraints.size() && constraints.get(i).contains("PRIMARYKEY"))
 			{
-				
+			    	
 				this.primarykeycolumns.add(names.get(i));
 			}
+			
+			if (sqltypes.size() > i && sqltypes.get(i).contains("BOOL"))
+			{
+				System.out.println("Bool-Spalte gefunden");
+				this.boolcolumns.add(names.get(i));
+			}
+			
+			if (sqltypes.size() > i )
+				tooltiptypes.put(names.get(i),sqltypes.get(i));
 			
 		}
 		
@@ -249,10 +263,12 @@ public class TableDescriptor extends AbstractDescriptor implements Comparable<Ta
 			{
 				if(!constraints.get(i).toUpperCase().contains("DESC"))
 				{
-					System.out.println("Attention! integer primary key: " + names.get(i));
+					System.out.println("Attention!!! integer primary key: " + names.get(i));
 					/* Note: this column has the columntype "00" */
 					rowidcolumn = names.get(i);
-					pattern.change2RowID(i);
+					pattern.change2RowID(i+1); // because there is a Header length constraint on index 0 (+1)
+				    Logger.out.debug("set rowid column for table " + tblname + " to " + i);
+					rowid_col = i;
 				}
 			}	
 		}
@@ -271,6 +287,12 @@ public class TableDescriptor extends AbstractDescriptor implements Comparable<Ta
 		
 		}
 	}
+	
+	
+	public String getToolTypeForColumn(String column){
+		return tooltiptypes.get(column);
+	}
+	
 	
 	public void setVirtual(boolean val)
 	{
@@ -480,7 +502,16 @@ public class TableDescriptor extends AbstractDescriptor implements Comparable<Ta
 	public void setColumntypes(List<String> columntypes) {
 		this.serialtypes = columntypes;
 	}
-
+	
+	public List<String> getBoolColumns()
+	{
+	    return boolcolumns;
+	}
+	
+	public boolean isBoolColumn(String name)
+	{
+		return boolcolumns.contains(name);
+	}
 
 	public HeaderPattern getHpattern() {
 		return hpattern;
@@ -492,7 +523,7 @@ public class TableDescriptor extends AbstractDescriptor implements Comparable<Ta
 	}
 
 
-	@Override
+	
 	public int compareTo(TableDescriptor o) {
 		return tblname.compareTo(o.tblname);	
 	}

@@ -18,10 +18,12 @@ public class SerialTypeMatcher {
 	int pos = 0;
 	int startRegion;
 	int endRegion;
-	int start;
+	public int start;
 	int end;
-	MatchingMode mode = MatchingMode.NORMAL;
-
+	MMode mode = MMode.NORMAL;
+    public String fallbackFor1stColumn = "02";
+	
+	
 	/**
 	 * Constructor.
 	 * 
@@ -40,11 +42,11 @@ public class SerialTypeMatcher {
 	 * 
 	 * @param newMode
 	 */
-	public void setMatchingMode(MatchingMode newMode) {
+	public void setMatchingMode(MMode newMode) {
 		mode = newMode;
 	}
 
-	public MatchingMode getMachtingMode() {
+	public MMode getMachtingMode() {
 		return mode;
 	}
 
@@ -99,57 +101,71 @@ public class SerialTypeMatcher {
 	 *         this matcher's pattern
 	 */
 	public boolean find() {
-		
-
+				
 		int idx = 0;
-		switch (mode) {
-		case NORMAL:
-			idx = 0;
-			break;
-
-		case NOHEADER:
-			idx = 1;
-			break;
-
-		case NO1stCOL:
-			idx = 2;
-			break;
+		switch (mode) 
+		{
+			case NORMAL:
+				idx = 0;
+				break;
+	
+			case NOHEADER:
+				idx = 1;
+				break;
+	
+			case NO1stCOL:
+				idx = 2;
+				break;
 		}
 		int i = idx;
 
 		/* check pattern constrain by constrain */
   
 		
-		while (i < pattern.size()) {
+		while (i < pattern.size()) 
+		{
+		
 			/* do not read out of bounds - stop before the end */
-			if (buffer.position() < (endRegion - 4)) {
-				/* remember the begin of a possible match */
-				int current = buffer.position();
-				if (i == idx)
-					pos = current;
-				/* read next value */
-				int value = readUnsignedVarInt();
+			if (buffer.position() > (endRegion - 4))
+			  return false;
+			
+							
+			/* remember the begin of a possible match */
+			int current = buffer.position();
+		
+				
+			if (i == idx)
+				pos = current;
+			
+			/* read next value */
+			int value = readUnsignedVarInt();
+			
+			
+			//System.out.println(";" + value + ";");
+				
 				// no varint OR costrain does not match -> skip this an go on with the next
 				// bytes
-				if (value == -1 || !pattern.get(i).match(value)) {
-					current++;
-					buffer.position(current);
-					/* and again, startRegion the beginning but with the next byte */
-					i = idx;
-					/* skip pattern matching step and try again */
-					continue;
+				if (value == -1 || !pattern.get(i).match(value)) 
+				{
+				    	buffer.position(pos+1);
+				    	/* and again, startRegion the beginning but with the next byte */
+				    	i = idx;
+				    	/* skip pattern matching step and try again */
+				    	continue;
+				    
 				}
-
+				//System.out.println(";" + value + ";");
+				
 				/* go ahead with next constrain */
+				
 				i++;
 
-			} else
-				return false; /* no match could be found */
-
+				
 		}
 
 		start = pos;
 		end = buffer.position();
+		
 		if (end <= start)
 			return false;
 		
@@ -221,8 +237,44 @@ public class SerialTypeMatcher {
 
 		// return a normalized integer value
 		return value | b;
+		
+		
 	}
 
+	public static void main(String[] args) 
+	{
+		String hexstring = "00000000 210A0603 151D0407 00C35A4C 75697348 6572726D 616E6E47 A0081441 EA353168 BAA2DB22 09";
+	    hexstring = hexstring.replaceAll(" ","");
+		byte[] barray = Auxiliary.hexStringToByteArray(hexstring);
+	    ByteBuffer buffer = ByteBuffer.wrap(barray);
+	    SerialTypeMatcher stm = new SerialTypeMatcher(buffer);
+	    HeaderPattern pattern = new HeaderPattern();
+	   
+	   // [06..10|01..06|>=13|>=13|00..06|07|]
+	    
+	    
+	    pattern.addHeaderConstraint(6,10);
+	    pattern.addIntegerConstraint(); //00..06
+	    pattern.addStringConstraint(); // >= 13 or Null
+	    pattern.addStringConstraint(); // >= 13 or Null
+	    pattern.addIntegerConstraint(); //00..06
+	    pattern.addFloatingConstraint(); // 07
+	    
+	    
+	    stm.setPattern(pattern);
+	    
+		//System.out.println("header pattern: " + pattern);
+
+		/* find every match within the given region */
+		while (stm.find()){
+			
+			/* get the hex-presentation of the match */
+			String m = stm.group2Hex();
+			
+			System.out.println("Got it! :: " + m);
+		}
+	    
+	}
 	
 
 }

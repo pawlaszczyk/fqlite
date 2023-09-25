@@ -1,5 +1,7 @@
 package fqlite.descriptor;
 
+import java.util.ArrayList;
+import java.util.Hashtable;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.regex.Pattern;
@@ -16,17 +18,20 @@ import fqlite.util.Auxiliary;
  * @author pawlaszc
  *
  */
-public class IndexDescriptor extends AbstractDescriptor{
+public class IndexDescriptor extends AbstractDescriptor implements Comparable{
 
 	public List<String> columntypes;
-	public List<String> columnnames;
+	public ArrayList<String> columnnames;
+	public List<String> boolcolumns;
 	int size = 0;
 	public String idxname = "";
     public String tablename = "";
 	public int root = -1;
     public HeaderPattern hpattern = null;	
     private String sql = "";
+	public Hashtable<String,String> tooltiptypes = new Hashtable<String,String>();
 
+       
     public boolean checkMatch(String match) {
 		
         try
@@ -101,7 +106,7 @@ public class IndexDescriptor extends AbstractDescriptor{
 	}
 
 
-	public IndexDescriptor(String idxname, String tablename, String stmt, List<String> names) {
+	public IndexDescriptor(String idxname, String tablename, String stmt, ArrayList<String> names) {
 
 		super.ROWID = false;
 		columnnames = names;
@@ -109,6 +114,23 @@ public class IndexDescriptor extends AbstractDescriptor{
 		this.tablename = tablename;
 		this.columntypes = new LinkedList<String>();
 		this.setSql(stmt);
+		this.boolcolumns = new LinkedList<String>();
+		
+		/* find the bool columns */ 
+		for(int i=0; i < names.size(); i++)
+		{
+		
+			if (columntypes.size()>i && columntypes.get(i).startsWith("BOOL"))
+			{
+				this.boolcolumns.add(names.get(i));
+			}
+		
+			if (columntypes.size() > i )
+				tooltiptypes.put(names.get(i),columntypes.get(i));
+			
+		}
+		
+		
 	}
 	
 
@@ -249,5 +271,20 @@ public class IndexDescriptor extends AbstractDescriptor{
 		
 	}
 
+	public String getToolTypeForColumn(String column){
+		return tooltiptypes.get(column);
+	}
+
+	
+	public int compareTo(IndexDescriptor o) {
+		return tablename.compareTo(o.tablename);
+	}
+
+
+	@Override
+	public int compareTo(Object o) {
+		return compareTo((IndexDescriptor)o);
+	}
+	
 	
 }

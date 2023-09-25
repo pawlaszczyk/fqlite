@@ -15,6 +15,9 @@ public class StringConstrain implements Constraint {
 	@Override
 	public boolean match(int value) {
 
+		/* Note: If the column is empty, then its value is set to 0. */
+		if (value == 0)
+				return true;
 		if (value > 13 && value % 2 != 0 && value <= max)
 				return true;
 		return false;

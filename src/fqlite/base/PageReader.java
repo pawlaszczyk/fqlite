@@ -3,11 +3,12 @@ package fqlite.base;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.BitSet;
+import java.util.LinkedList;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import fqlite.parser.SQLiteSchemaParser;
 import fqlite.types.SerialTypes;
-import fqlite.types.StorageClasses;
+import fqlite.types.StorageClass;
 import fqlite.util.Auxiliary;
 import fqlite.util.CarvingResult;
 /**
@@ -186,7 +187,7 @@ public class PageReader extends Base {
 			/* column 3 ? -> tbl_name TEXT */
 			if (con == 3)
 			{	
-				tablename = en.toString(value);
+				tablename = en.toString(value,true);
 			}
 				
 			/* column 4 ?  -> root page Integer */
@@ -199,7 +200,7 @@ public class PageReader extends Base {
 			
 			if (con == 5)
 			{	
-				statement = en.toString(value);				
+				statement = en.toString(value,true);				
 			}
 		
 			
@@ -226,6 +227,8 @@ public class PageReader extends Base {
 	public CarvingResult readDeletedRecord(Job job, int start, ByteBuffer buffer, String header, BitSet bs,
 			int pagenumber) throws IOException {
 
+		LinkedList<String> record = new LinkedList<String>();
+		
 		SqliteElement[] columns;
 
 		buffer.position(start);
@@ -237,7 +240,7 @@ public class PageReader extends Base {
 		if (null == columns)
 			return null;
 
-		StringBuffer lineUTF = new StringBuffer();
+		//StringBuffer lineUTF = new StringBuffer();
 		// String[] row = new String[columns.length]; // set to maximum page size
 		int co = 0;
 		String fp = null;
@@ -253,8 +256,9 @@ public class PageReader extends Base {
 
 		boolean error = false;
 
-		lineUTF.append(((pagenumber - 1) * job.ps + buffer.position()) + ";");
-
+		//lineUTF.append(((pagenumber - 1) * job.ps + buffer.position()) + ";");
+		record.add(((pagenumber - 1) * job.ps + buffer.position())+"");
+		
 		/* use the header information to reconstruct */
 		int pll = Auxiliary.computePayloadLengthS(header);
 
@@ -318,8 +322,9 @@ public class PageReader extends Base {
 
 				bf.get(value);
 
-				lineUTF.append(write(co, en, value));
-
+				//lineUTF.append(write(co, en, value));
+				record.add(en.toString(value,false));
+				
 				co++;
 			}
 
@@ -342,8 +347,8 @@ public class PageReader extends Base {
 				}
 				buffer.get(value);
 
-				lineUTF.append(write(co, en, value));
-
+				//lineUTF.append(write(co, en, value));
+                record.add(en.toString(value,false));
 				co++;
 
 			}
@@ -359,12 +364,12 @@ public class PageReader extends Base {
 		debug("Besucht :: " + (((pagenumber - 1) * job.ps) + recordstart) + " bis " + cursor);
         
 		
-		lineUTF.append("\n");
+		//lineUTF.append("\n");
 		
 		// if (!tables.containsKey(idxname))
 		// tables.put(idxname, new ArrayList<String[]>());
-		debug(lineUTF.toString());
-		return new CarvingResult(buffer.position(),cursor, lineUTF);
+		//debug(lineUTF.toString());
+		return new CarvingResult(buffer.position(),cursor, new StringBuffer(), record);
 	}
 
 	public static String convertToUTF8(String s) {
@@ -391,7 +396,7 @@ public class PageReader extends Base {
 		if (col > 0)
 			val.append(";");
 
-		val.append(en.toString(value));
+		val.append(en.toString(value,false));
 
 		return val;
 	}
@@ -597,7 +602,7 @@ public class PageReader extends Base {
 //			   and may not read beyond the content area start*/
 //			for (SqliteElement en : columns) {
 //				if (en == null) {
-//					//if (en.serial == StorageClasses.INT || en.serial == StorageClasses.FLOAT)
+//					//if (en.serial == StorageClass.INT || en.serial == StorageClass.FLOAT)
 //					//	lineUTF.append(";0");
 //					//else
 //						lineUTF.append(";");
@@ -665,7 +670,7 @@ public class PageReader extends Base {
 	 * @param pagenumber
 	 * @return all bytes that belong to the payload 
 	 */
-	private byte[] readOverflow(int pagenumber) {
+	public byte[] readOverflow(int pagenumber) {
 		byte[] part = null;
 
 		/* read the next overflow page startRegion file */
@@ -791,34 +796,34 @@ public class PageReader extends Base {
 
 			switch (columns[i]) {
 			case 0: // primary key or null value <empty> cell
-				column[i] = new SqliteElement(SerialTypes.PRIMARY_KEY,StorageClasses.INT, 0);
+				column[i] = new SqliteElement(SerialTypes.PRIMARY_KEY,StorageClass.INT, 0);
 				break;
 			case 1: // 8bit complement integer
-				column[i] = new SqliteElement(SerialTypes.INT8,StorageClasses.INT, 1);
+				column[i] = new SqliteElement(SerialTypes.INT8,StorageClass.INT, 1);
 				break;
 			case 2: // 16bit integer
-				column[i] = new SqliteElement(SerialTypes.INT16,StorageClasses.INT, 2);
+				column[i] = new SqliteElement(SerialTypes.INT16,StorageClass.INT, 2);
 				break;
 			case 3: // 24bit integer
-				column[i] = new SqliteElement(SerialTypes.INT24,StorageClasses.INT, 3);
+				column[i] = new SqliteElement(SerialTypes.INT24,StorageClass.INT, 3);
 				break;
 			case 4: // 32bit integer
-				column[i] = new SqliteElement(SerialTypes.INT32,StorageClasses.INT, 4);
+				column[i] = new SqliteElement(SerialTypes.INT32,StorageClass.INT, 4);
 				break;
 			case 5: // 48bit integer
-				column[i] = new SqliteElement(SerialTypes.INT48,StorageClasses.INT, 6);
+				column[i] = new SqliteElement(SerialTypes.INT48,StorageClass.INT, 6);
 				break;
 			case 6: // 64bit integer
-				column[i] = new SqliteElement(SerialTypes.INT64,StorageClasses.INT, 8);
+				column[i] = new SqliteElement(SerialTypes.INT64,StorageClass.INT, 8);
 				break;
 			case 7: // Big-endian floating point number
-				column[i] = new SqliteElement(SerialTypes.FLOAT64,StorageClasses.FLOAT, 8);
+				column[i] = new SqliteElement(SerialTypes.FLOAT64,StorageClass.FLOAT, 8);
 				break;
 			case 8: // Integer constant 0
-				column[i] = new SqliteElement(SerialTypes.INT0,StorageClasses.INT, 0);
+				column[i] = new SqliteElement(SerialTypes.INT0,StorageClass.INT, 0);
 				break;
 			case 9: // Integer constant 1
-				column[i] = new SqliteElement(SerialTypes.INT1,StorageClasses.INT, 0);
+				column[i] = new SqliteElement(SerialTypes.INT1,StorageClass.INT, 0);
 				break;
 			case 10: // not used ;
 
@@ -829,12 +834,12 @@ public class PageReader extends Base {
 				if (columns[i] % 2 == 0) // even
 				{
 					// BLOB with the length (N-12)/2
-					column[i] = new SqliteElement(SerialTypes.BLOB,StorageClasses.BLOB, (columns[i] - 12) / 2);
+					column[i] = new SqliteElement(SerialTypes.BLOB,StorageClass.BLOB, (columns[i] - 12) / 2);
 				} 
 				else // odd
 				{
 					// String in database encoding (N-13)/2
-					column[i] = new SqliteElement(SerialTypes.STRING,StorageClasses.TEXT, (columns[i] - 13) / 2);					
+					column[i] = new SqliteElement(SerialTypes.STRING,StorageClass.TEXT, (columns[i] - 13) / 2);					
 				}
 
 			}

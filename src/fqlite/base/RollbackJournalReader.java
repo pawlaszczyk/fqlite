@@ -8,32 +8,23 @@ import java.nio.file.Paths;
 import java.nio.file.StandardOpenOption;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
-import java.util.Arrays;
 import java.util.BitSet;
+import java.util.Enumeration;
+import java.util.Hashtable;
 import java.util.Iterator;
 import java.util.LinkedList;
 import java.util.List;
-import java.util.Set;
-import java.util.Map.Entry;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.Future;
-
-import javax.swing.SwingUtilities;
-import javax.swing.SwingWorker;
-import javax.swing.tree.DefaultMutableTreeNode;
-import javax.swing.tree.DefaultTreeModel;
-import javax.swing.tree.TreeNode;
-import javax.swing.tree.TreePath;
 
 import fqlite.descriptor.AbstractDescriptor;
 import fqlite.descriptor.TableDescriptor;
 import fqlite.pattern.SerialTypeMatcher;
 import fqlite.types.CarverTypes;
-import fqlite.ui.DBTable;
-import fqlite.ui.HexView;
-import fqlite.ui.NodeObject;
 import fqlite.util.Auxiliary;
 import fqlite.util.Logger;
+import javafx.collections.FXCollections;
+import javafx.collections.ObservableList;
 
 /**
  * The class analyses a Rollback Journal file and writes the found records into a file.
@@ -63,7 +54,7 @@ public class RollbackJournalReader extends Base {
 	long size;
 
 	/* pagesize */
-	int ps;
+	public int ps;
 
 	/* path to RollbackJournal-file */
 	String path;
@@ -101,9 +92,8 @@ public class RollbackJournalReader extends Base {
 	/* this is a multi-threaded program -> all data are saved to the list first */
 
 	/* outputlist */
-	ConcurrentLinkedQueue<String> output = new ConcurrentLinkedQueue<String>();
+	ConcurrentLinkedQueue<LinkedList<String>> output = new ConcurrentLinkedQueue<LinkedList<String>>();
 	
-	HexView hexview = null;
 
 	/* file pointer */
 	int journalpointer = 0;
@@ -210,9 +200,8 @@ public class RollbackJournalReader extends Base {
 		}
 		else 
 		{
-				info("sorry. doesn't seem to be an rollback journal file. Wrong header.");
-				err("Doesn't seem to be an valid rollback journal file. Wrong header.");
-			
+				info("This file does not contain a valid header.");
+				
 		}
 		
 		pagecount = Integer.toUnsignedLong(header.getInt());
@@ -250,7 +239,9 @@ public class RollbackJournalReader extends Base {
 		    pagenumber_maindb = rollbackjournal.getInt();
 			debug("pagenumber of journal-entry " + pagenumber_maindb);
 			
-	
+			//* offset of the journal page -> save it */
+			int pageoffset = rollbackjournal.position();
+			
 			/* now we can read the page - it follows immediately after the frame header */
 	
 			/* read the db page into buffer */
@@ -259,7 +250,7 @@ public class RollbackJournalReader extends Base {
 			numberofpages++;
 			pagenumber_rol = numberofpages;
 			
-			analyzePage();
+			analyzePage(pagenumber_maindb,pageoffset); // we need the original page number to compute the offset for the diff between journal and database
 			
 			/* set pointer to next journal record  -> currentpos + 4 Byte for the page number in mainDB + pagesize + 4 Byte for Checksum */ 
 			journalpointer += (4 + ps + 4);
@@ -286,7 +277,7 @@ public class RollbackJournalReader extends Base {
 	 * 
 	 * @return int success
 	 */
-	public int analyzePage() {
+	public int analyzePage(int originalpagenumber,int pageoffset) {
 
 		withoutROWID = false;
 		
@@ -342,7 +333,7 @@ public class RollbackJournalReader extends Base {
 		if (type < 0) {
 			info("No Data page. " + pagenumber_rol);
 			return -1;
-		} else if (type == 12) {
+		} else if (type == 5) {
 			info("Internal Table page " + pagenumber_rol);
 			return -1;
 		} else if (type == 10) {
@@ -430,80 +421,81 @@ public class RollbackJournalReader extends Base {
 			hls.trim();
 			
 			String rc = null;
-
+            LinkedList<String> record = null;
+			
 			try {
-				rc = ct.readRecord(celloff, buffer, pagenumber_maindb, visit, type, Integer.MAX_VALUE, firstcol, withoutROWID, journalpointer + 4);
+				record = ct.readRecord(celloff, buffer, pagenumber_maindb, visit, type, Integer.MAX_VALUE, firstcol, withoutROWID, Global.ROLLBACK_JOURNAL_FILE, pageoffset + celloff);
 			} catch (IOException e) {
 				e.printStackTrace();
 			}
 
 			// add new line to output
-			if (null != rc && rc.length() > 0) {
+			if (null != record && record.size() > 0) {
 
 				int p1;
-				if ((p1 = rc.indexOf("_node;")) > 0) {
-					String tbln = rc.substring(0, p1);
+//				if ((p1 = rc.indexOf("_node;")) > 0) {
+//					String tbln = rc.substring(0, p1);
+//
+//					if (job.virtualTables.containsKey(tbln)) {
+//						TableDescriptor tds = job.virtualTables.get(tbln);
+//
+//						/*
+//						 * we use the xxx_node shadow component to construct the virtual component
+//						 */
+//						String BLOB = rc.substring(p1);
+//						System.out.println(BLOB);
+//
+//						/*
+//						 * skip the first information -> go directly to the 5th element of the data
+//						 * record line, i.e. go to the BLOB with the row data
+//						 */
+//						int pp = Auxiliary.findNthOccur(rc, ';', 4);
+//						String data = rc.substring(pp + 1);
+//
+//						/* transform String data into an byte array */
+//						byte[] binary = Auxiliary.decode(data);
+//						ByteBuffer bf = ByteBuffer.wrap(binary);
+//
+//						/* skip the first to bytes */
+//						bf.getShort();
+//						/* first get the total number of entries for this rtree branch */
+//						int entries = bf.getShort();
+//
+//						/* create a new line for every data row */
+//						while (entries > 0) {
+//							StringBuffer vrow = new StringBuffer();
+//							vrow.append(tbln + ";VT;0;"); // start a new row for the virtual component
+//
+//							// The first column is always a 64-bit signed integer primary key.
+//							long primarykey = bf.getLong();
+//							vrow.append(primarykey + ";");
+//
+//							// Each R*Tree indices is a virtual component with an odd number of columns
+//							// between 3 and 11
+//							// The other columns are pairs, one pair per dimension, containing the minimum
+//							// and maximum values for that dimension, respectively.
+//							int number = tds.columnnames.size() - 1;
+//
+//							while (number > 0) {
+//								float rv = bf.getFloat();
+//								vrow.append(rv + ";");
+//								number--;
+//							}
+//
+//							vrow.append("\n");
+//							//output.add(vrow.toString());
+//
+//							//System.out.println(vrow);
+//
+//							entries--;
+//
+//						}
+//
+//					}
+//
+//				}
 
-					if (job.virtualTables.containsKey(tbln)) {
-						TableDescriptor tds = job.virtualTables.get(tbln);
-
-						/*
-						 * we use the xxx_node shadow component to construct the virtual component
-						 */
-						String BLOB = rc.substring(p1);
-						System.out.println(BLOB);
-
-						/*
-						 * skip the first information -> go directly to the 5th element of the data
-						 * record line, i.e. go to the BLOB with the row data
-						 */
-						int pp = Auxiliary.findNthOccur(rc, ';', 4);
-						String data = rc.substring(pp + 1);
-
-						/* transform String data into an byte array */
-						byte[] binary = Auxiliary.decode(data);
-						ByteBuffer bf = ByteBuffer.wrap(binary);
-
-						/* skip the first to bytes */
-						bf.getShort();
-						/* first get the total number of entries for this rtree branch */
-						int entries = bf.getShort();
-
-						/* create a new line for every data row */
-						while (entries > 0) {
-							StringBuffer vrow = new StringBuffer();
-							vrow.append(tbln + ";VT;0;"); // start a new row for the virtual component
-
-							// The first column is always a 64-bit signed integer primary key.
-							long primarykey = bf.getLong();
-							vrow.append(primarykey + ";");
-
-							// Each R*Tree indices is a virtual component with an odd number of columns
-							// between 3 and 11
-							// The other columns are pairs, one pair per dimension, containing the minimum
-							// and maximum values for that dimension, respectively.
-							int number = tds.columnnames.size() - 1;
-
-							while (number > 0) {
-								float rv = bf.getFloat();
-								vrow.append(rv + ";");
-								number--;
-							}
-
-							vrow.append("\n");
-							output.add(vrow.toString());
-
-							System.out.println(vrow);
-
-							entries--;
-
-						}
-
-					}
-
-				}
-
-				output.add(rc);
+				output.add(record);
 			}
 
 		} // end of for - cell pointer
@@ -516,6 +508,10 @@ public class RollbackJournalReader extends Base {
 
 	}
 
+	
+	
+	
+	
 	/**
 	 * Quick lookup. Does a given hex-String starts with Zeros?
 	 * 
@@ -644,7 +640,7 @@ public class RollbackJournalReader extends Base {
 
 				if (next.to - next.from > 10)
 					/* do we have at least one match ? */
-					if (c.carve(next.from + 4, next.to, stm, CarverTypes.NORMAL, tab.get(n), firstcol) != Global.CARVING_ERROR) {
+					if (c.carve(next.from + 4, next.to, stm, CarverTypes.NORMAL, tab.get(n)) != Global.CARVING_ERROR) {
 						debug("*****************************  STEP NORMAL finished with matches");
 
 					}
@@ -656,7 +652,7 @@ public class RollbackJournalReader extends Base {
 
 				Gap next = gaps.get(a);
 
-				if (c.carve(next.from + 4, next.to, stm, CarverTypes.COLUMNSONLY, tab.get(n), firstcol) != Global.CARVING_ERROR) {
+				if (c.carve(next.from + 4, next.to, stm, CarverTypes.COLUMNSONLY, tab.get(n)) != Global.CARVING_ERROR) {
 					debug("*****************************  STEP COLUMNSONLY finished with matches");
 
 				}
@@ -668,7 +664,7 @@ public class RollbackJournalReader extends Base {
 
 				Gap next = gaps.get(a);
 
-				if (c.carve(next.from + 4, next.to, stm, CarverTypes.FIRSTCOLUMNMISSING, tab.get(n), firstcol)!= Global.CARVING_ERROR) {
+				if (c.carve(next.from + 4, next.to, stm, CarverTypes.FIRSTCOLUMNMISSING, tab.get(n))!= Global.CARVING_ERROR) {
 					debug("*****************************  STEP FIRSTCOLUMNMISSING finished with matches");
 
 				}
@@ -707,7 +703,7 @@ public class RollbackJournalReader extends Base {
 				Gap next = gaps.get(a);
 
 				/* one last try with 4+1 instead of 4 Bytes */
-				c.carve(next.from + 4 + 1, next.to, stm, CarverTypes.FIRSTCOLUMNMISSING, tab.get(n), firstcol);
+				c.carve(next.from + 4 + 1, next.to, stm, CarverTypes.FIRSTCOLUMNMISSING, tab.get(n));
 
 			}
 
@@ -726,57 +722,63 @@ public class RollbackJournalReader extends Base {
 		if (job.gui != null) {
 			
 			info("Number of records recovered: " + output.size());
+			//String[] lines = output.toArray(new String[0]);
+			//Arrays.sort(lines);
 
-			String[] lines = output.toArray(new String[0]);
-			Arrays.sort(lines);
+			Iterator<LinkedList<String>> lines = output.iterator();
 
-			TreePath path  = null;
-			for (String line : lines) {
-				String[] data = line.split(";");
-
-				path = job.guiroltab.get(data[0]);
-				job.gui.update_table(path, data, false);
+			// holds all data sets for all tables, whereas the tablename represents the key
+			Hashtable<String,ObservableList<LinkedList<String>>> dataSets = new Hashtable<>();
+			
+			while(lines.hasNext())
+			{
+				LinkedList<String> line = lines.next();
+		
+			 	/* if table name is empty -> assign data record to table __UNASSIGNED */
+			   	if (line.getFirst().trim().length()==0)
+			   	{
+			 
+			        // Add the new element add the begin 
+			        line.set(0,"__UNASSIGNED"); 			   	
+			   	}
+				
+			   	// is there already a data set for this particular table
+							
+				if (dataSets.containsKey(line.get(0)))
+				{
+					 
+					     ObservableList<LinkedList<String>> tablelist = dataSets.get(line.getFirst());
+					     tablelist.add(line);  // add row 
+				}
+				
+				// create a new data set before inserting the first row
+				else {
+					  	  ObservableList<LinkedList<String>> tablelist = FXCollections.observableArrayList();
+					  	  tablelist.add(line); // add row 
+					  	  dataSets.put(line.getFirst(),tablelist); 
+				}	
+			
+	            // TODO: Remove empty tables from rollback journal		
+	
+		
+			}
+		
+			//Platform.runLater(() -> {
+			//	fqlite.ui.HexViewFX hex = new fqlite.ui.HexViewFX(GUI.topContainer,this.path,this.rollbackjournal);
+ 			//   hexview = hex; 
+			//});
+			
+			Enumeration<String> tables = dataSets.keys();
+			
+			/* finally we can update the TableView for each table */
+			while(tables.hasMoreElements())
+			{	
+				String tablename = tables.nextElement();
+		        /* get tree path i.e. /data bases/02-05.db/users */
+				String rpath = job.guiroltab.get(tablename);
+				job.gui.update_table(rpath,dataSets.get(tablename),false);
 				
 			}
-			
-			/* remove empty tables and index-tables from the treeview */
-			Set<Entry<String, TreePath>> entries = job.guiroltab.entrySet();
-			Iterator<Entry<String, TreePath>> iter = entries.iterator();
-			DefaultTreeModel model = (DefaultTreeModel) (GUI.tree.getModel());
-			  
-			while(iter.hasNext())
-			{
-				Entry<String,TreePath> entry = iter.next();
-				
-				
-				DefaultMutableTreeNode node = (DefaultMutableTreeNode)entry.getValue().getLastPathComponent();
-				NodeObject no = (NodeObject)node.getUserObject();	
-				
-				/* check, if Rollback Journal-table has row entries, if not -> skip it */
-				DBTable t = no.table;
-				
-				 if (t.getModel().getRowCount() <= 1)
-	    		 {
-					 SwingUtilities.invokeLater(new Runnable() {
-						    public void run() {
-						    	TreeNode parent = node.getParent();
-							    model.removeNodeFromParent(node);
-							    model.nodeChanged(parent); 
-							    model.reload(parent);
-							    GUI.tree.updateUI();
-						    }
-					 });
-					    
-					    
-	    		       
-	    		 }
-				
-			}	
-
-			SwingWorker<Boolean, Void> backgroundProcess = new HexViewCreator(this.job,path,file,this.path,2);
-
-			backgroundProcess.execute();
-
 		} 
 		else 
 		{
@@ -916,7 +918,7 @@ public class RollbackJournalReader extends Base {
 
 				if (next.to - next.from > 10)
 					/* do we have at least one match ? */
-					if (c.carve(next.from + 4, next.to, stm, CarverTypes.NORMAL, tab.get(n), firstcol) != Global.CARVING_ERROR) {
+					if (c.carve(next.from + 4, next.to, stm, CarverTypes.NORMAL, tab.get(n)) != Global.CARVING_ERROR) {
 						debug("*****************************  STEP NORMAL finished with matches");
 
 					}
@@ -928,7 +930,7 @@ public class RollbackJournalReader extends Base {
 
 				Gap next = gaps.get(a);
 
-				if (c.carve(next.from + 4, next.to, stm, CarverTypes.COLUMNSONLY, tab.get(n), firstcol) != Global.CARVING_ERROR) {
+				if (c.carve(next.from + 4, next.to, stm, CarverTypes.COLUMNSONLY, tab.get(n)) != Global.CARVING_ERROR) {
 					debug("*****************************  STEP COLUMNSONLY finished with matches");
 
 				}
@@ -940,7 +942,7 @@ public class RollbackJournalReader extends Base {
 
 				Gap next = gaps.get(a);
 
-				if (c.carve(next.from + 4, next.to, stm, CarverTypes.FIRSTCOLUMNMISSING, tab.get(n), firstcol) != Global.CARVING_ERROR) {
+				if (c.carve(next.from + 4, next.to, stm, CarverTypes.FIRSTCOLUMNMISSING, tab.get(n)) != Global.CARVING_ERROR) {
 					debug("*****************************  STEP FIRSTCOLUMNMISSING finished with matches");
 
 				}

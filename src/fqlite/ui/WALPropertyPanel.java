@@ -1,25 +1,27 @@
 package fqlite.ui;
 
-import java.awt.BorderLayout;
-import java.awt.Color;
-import java.awt.Component;
-import java.awt.Font;
 import javax.swing.JLabel;
-import javax.swing.JPanel;
-import javax.swing.JScrollPane;
-import javax.swing.JTabbedPane;
-import javax.swing.JTable;
-import javax.swing.JTextArea;
-import javax.swing.table.DefaultTableCellRenderer;
-import javax.swing.table.JTableHeader;
-import javax.swing.table.TableColumn;
-import javax.swing.table.TableColumnModel;
 
 import fqlite.base.GUI;
+import javafx.application.Platform;
+import javafx.beans.property.SimpleStringProperty;
+import javafx.beans.value.ObservableValue;
+import javafx.collections.FXCollections;
+import javafx.collections.ObservableList;
+import javafx.scene.control.Label;
+import javafx.scene.control.Tab;
+import javafx.scene.control.TabPane;
+import javafx.scene.control.TableColumn;
+import javafx.scene.control.TableColumn.CellDataFeatures;
+import javafx.scene.control.TableRow;
+import javafx.scene.control.TableView;
+import javafx.scene.layout.Priority;
+import javafx.scene.layout.StackPane;
+import javafx.scene.layout.VBox;
+import javafx.util.Callback;
 
-public class WALPropertyPanel extends JPanel {
+public class WALPropertyPanel extends StackPane {
 
-	private static final long serialVersionUID = 3116420145072139413L;
 	public JLabel ldbpath;
 	public JLabel lpagesize;
 	public JLabel lencoding;
@@ -31,108 +33,149 @@ public class WALPropertyPanel extends JPanel {
 	private FileInfo info;
 	GUI gui;
 
-	JTabbedPane tabpane = new JTabbedPane(JTabbedPane.TOP, JTabbedPane.SCROLL_TAB_LAYOUT);
+    TabPane tabpane = new TabPane();
+    VBox container = new VBox();
+    
 
 	public WALPropertyPanel(FileInfo info, GUI gui) {
 		this.info = info;
 		this.gui = gui;
+		container.setPrefHeight(4000);
+		container.getChildren().add(tabpane);
+		container.getChildren().add(new Label("WAL archive"));
+		VBox.setVgrow(tabpane,Priority.ALWAYS);
+		this.getChildren().add(container);
 	}
-
-	public void initHeaderTable(String[][] data) {
-
-		setLayout(new BorderLayout());
-
-		JTextArea headerinfo = new JTextArea();
-		PopupFactory.createPopup(headerinfo);
-		headerinfo.setColumns(85);
-		headerinfo.setAlignmentX(CENTER_ALIGNMENT);
-		Font font = new Font("Courier", Font.BOLD, 12);
-		headerinfo.setFont(font);
-		headerinfo.setText(info.toString());
-		tabpane.addTab("File info", headerinfo);
-
-		String column[] = { "Offset", "Property", "Value" };
-		JTable jt = new JTable(data, column);
-		PopupFactory.createPopup(jt);
-
-
-		JTableHeader th = jt.getTableHeader();
-		th.setFont(new Font("Serif", Font.BOLD, 15));
-
-		TableColumnModel tcm = jt.getColumnModel();
-
-		// Columns don't fill the viewport, invoke default layout
-		JScrollPane sp = new JScrollPane(jt);
-
-		tabpane.addTab("Header Fields", sp);
-
-		add(tabpane, BorderLayout.CENTER);
-
-		if (tcm.getTotalColumnWidth() < jt.getParent().getWidth())
-			jt.setAutoResizeMode(JTable.AUTO_RESIZE_ALL_COLUMNS);
-
-	}
-
-	Color[] colors = new Color[] { Color.green, Color.yellow, Color.orange, Color.cyan, Color.white, Color.lightGray };
-
-	public void initCheckpointTable(String[][] data) {
-
-		String column[] = { "salt1", "salt2", "framenumber", "pagenumber", "commit" };
-		JTable jt = new JTable(data, column);
-		PopupFactory.createPopup(jt);
-		
-		TableColumnModel tcm = jt.getColumnModel();
-		int cc = tcm.getColumnCount();
-		
-		int m = 0;
-		for (int j = 0; j < data.length; j++)
-		{
-			String salt = data[j][0];
-			if (!gui.getRowcolors().containsKey(salt))
-			{
-				gui.getRowcolors().put(salt, colors[m % 6]);
-				m++;
-			}			
-		}
 	
+	@SuppressWarnings({ "unchecked", "rawtypes" })
+	public void initHeaderTable(String[][] data)
+	{
+		
+		    javafx.scene.control.TextArea headerinfo = new javafx.scene.control.TextArea();
+		    headerinfo.setEditable(false);
+		    headerinfo.setStyle("-fx-font-alignment: center");
+		    headerinfo.setText(info.toString());
+		    StackPane sp =  new StackPane();
+		    sp.getChildren().add(headerinfo);
+			Tab headerinfotab = new Tab("File Info",sp);
+	        tabpane.getTabs().add(headerinfotab);
 		
 		
-		for (int i = 0; i < cc; i++) {
-			TableColumn tm = tcm.getColumn(i);
-			tm.setCellRenderer(new ColoredTableCellRenderer());
-		}
+	        String column[]={"Offset","Property","Value"};         
+			
+			TableView table = new TableView<>();
+			
+			for (int i = 0; i < column.length; i++) {
+		            String colname = column[i];
+		           
+		            final int j = i;                
+					TableColumn col = new javafx.scene.control.TableColumn(colname);
+					col.setCellValueFactory(new Callback<CellDataFeatures<ObservableList,String>,ObservableValue<String>>(){                    
+		            public ObservableValue<String> call(CellDataFeatures<ObservableList, String> param) {                                                                                              
+		                return new SimpleStringProperty(param.getValue().get(j).toString());                        
+		            }                    
+					});
+					
+					if(i == 1) 
+				        col.prefWidthProperty().bind(table.widthProperty().multiply(0.3));
+					
+					if(i == 2)
+				        col.prefWidthProperty().bind(table.widthProperty().multiply(0.5));
 
-		JTableHeader th = jt.getTableHeader();
-		th.setFont(new Font("Serif", Font.BOLD, 15));
-
-		JScrollPane sp = new JScrollPane(jt);
-		// add(sp,BorderLayout.SOUTH);
-		tabpane.addTab("Checkpoints", sp);
-
-		if (tcm.getTotalColumnWidth() < jt.getParent().getWidth())
-			jt.setAutoResizeMode(JTable.AUTO_RESIZE_ALL_COLUMNS);
-
-	}
-
-	class ColoredTableCellRenderer extends DefaultTableCellRenderer {
-
-		int i = 0;
-
-		private static final long serialVersionUID = -1013353404857478956L;
-
-		public Component getTableCellRendererComponent(JTable table, Object value, boolean selected, boolean focused,
-				int row, int column) {
-
-			Component cell = super.getTableCellRendererComponent(table, value, selected, focused, row, column);
-
-			Object salt = table.getValueAt(row, 0);
-
-			if (gui.getRowcolors().containsKey(salt)) {
-				cell.setBackground(gui.getRowcolors().get(salt));
+					
+					table.getColumns().add(col);
 			}
-
-			return this;
-		}
+			
+			fillTable(table,data);
+			
+			
+	        StackPane fields = new StackPane();
+	        fields.getChildren().add(table);
+			Tab headerfieldstab = new Tab("Write Ahead Log Header",fields);
+	        tabpane.getTabs().add(headerfieldstab);
+		
 	}
+	
+	
+	@SuppressWarnings("rawtypes")
+	private void fillTable(TableView table, String[][] data)
+	{
+		// define array list for all table rows 
+	    ObservableList<ObservableList> obdata = FXCollections.observableArrayList();
+		
+	    // iterate over row array to create a data row 
+	 	for(int i = 1; i < data.length; i++)
+	 	{
+	 			String [] s = data[i];
+	 			ObservableList<String> row = FXCollections.observableArrayList();
+                row.addAll(s);
+                obdata.add(row);
+	 	}
+	 		
+	    // finally update TableView with data set
+	 	Platform.runLater(()->{
+	 		table.setItems(obdata);
+	 	});
+	 	
+	 	
+		
+	}
+	
+	static int cl = 0;
+
+	String[] bgcolors = new String[]{"-fx-background-color: orange;","-fx-background-color: yellow;","-fx-background-color: lightblue;","-fx-background-color: green;"};
+	
+	@SuppressWarnings({ "rawtypes", "unchecked" })
+	public void initCheckpointTable(String[][] data) {
+		
+
+		  String column[]={"salt1", "salt2", "framenumber", "pagenumber", "commit"};         
+			
+			TableView table = new TableView<>();
+			
+			for (int i = 0; i < column.length; i++) {
+		            String colname = column[i];
+		            final int j = i;                
+					TableColumn col = new javafx.scene.control.TableColumn(colname);
+					col.setCellValueFactory(new Callback<CellDataFeatures<ObservableList,String>,ObservableValue<String>>(){                    
+		            public ObservableValue<String> call(CellDataFeatures<ObservableList, String> param) {                                                                                              
+		                return new SimpleStringProperty(param.getValue().get(j).toString());                        
+		            }                    
+					});
+					
+					table.setRowFactory(tv -> new TableRow<ObservableList<String>>() {
+					    @Override
+					    public void updateItem(ObservableList<String> item, boolean empty) {
+					        super.updateItem(item, empty) ;
+					        if (item == null) {
+					            setStyle("");
+					        } 
+					        else{
+					        
+					        	String salt1 = item.get(0);
+								if (!gui.getRowcolors().containsKey(salt1))
+								{
+									gui.getRowcolors().put(salt1, bgcolors[cl%bgcolors.length]);
+									cl++;
+								}				
+					        	
+					        	setStyle(gui.getRowcolors().get(salt1));
+					        } 
+					      
+					    }
+					});
+					
+			
+					table.getColumns().add(col);
+			}
+			
+			
+			fillTable(table,data);		
+	        StackPane fields = new StackPane();
+	        fields.getChildren().add(table);
+			Tab checkpointtab = new Tab("Checkpoints",fields);
+	        tabpane.getTabs().add(checkpointtab);
+	}
+	
 
 }

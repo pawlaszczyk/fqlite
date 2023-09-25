@@ -24,7 +24,7 @@ public class Worker implements Runnable {
 	Auxiliary util;
 	
 	/**
-	 * Constructor. Used to assign a new Task to the 
+	 * Constructor. Used to assign a new ImportDBTask to the 
 	 * Worker object.
 	 * 
 	 * @param rt

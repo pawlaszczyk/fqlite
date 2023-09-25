@@ -1,99 +1,123 @@
 package fqlite.ui;
 
-import java.awt.BorderLayout;
-import java.awt.Desktop;
-import java.awt.Dimension;
-import java.awt.FlowLayout;
-import java.awt.Font;
-import java.awt.event.ActionEvent;
-import java.awt.event.ActionListener;
-import java.io.File;
-import java.io.IOException;
-import java.net.URL;
-import java.nio.file.Files;
 import java.util.LinkedHashMap;
 import java.util.Map;
-import javax.swing.BorderFactory;
-import javax.swing.Box;
-import javax.swing.ImageIcon;
-import javax.swing.JButton;
-import javax.swing.JLabel;
-import javax.swing.JPanel;
-import javax.swing.JScrollPane;
-import javax.swing.JTabbedPane;
-import javax.swing.JTable;
-import javax.swing.JTextArea;
-import javax.swing.table.JTableHeader;
 
 import fqlite.base.GUI;
+import javafx.application.Platform;
+import javafx.beans.property.SimpleStringProperty;
+import javafx.beans.value.ObservableValue;
+import javafx.collections.FXCollections;
+import javafx.collections.ObservableList;
+import javafx.scene.Scene;
+import javafx.scene.control.Button;
+import javafx.scene.control.Label;
+import javafx.scene.control.Tab;
+import javafx.scene.control.TabPane;
+import javafx.scene.control.TableColumn;
+import javafx.scene.control.TableColumn.CellDataFeatures;
+import javafx.scene.control.TableView;
+import javafx.scene.image.ImageView;
+import javafx.scene.layout.Priority;
+import javafx.scene.layout.StackPane;
+import javafx.scene.layout.VBox;
+import javafx.stage.Stage;
+import javafx.util.Callback;
 
-public class DBPropertyPanel extends JPanel {
+public class DBPropertyPanel extends StackPane{
 
 	
-	private static final long serialVersionUID = 3116420145072139413L;
-	public JLabel ldbpath;
-    public JLabel lpagesize;
-    public JLabel lencoding;
-    public JLabel ltotalsize;   
-    public JLabel lpagesizeout;
-    public JLabel lencodingout;
-    public JLabel ltotalsizeout;
+	public Label ldbpath;
+    public Label lpagesize;
+    public Label lencoding;
+    public Label ltotalsize;   
+    public Label lpagesizeout;
+    public Label lencodingout;
+    public Label ltotalsizeout;
     private FileInfo info;
-    public JButton columnBtn;
-    public String  columnStr;
+    public Button columnBtn;
+    public String  columnStr = "";
     
     
-    JTabbedPane tabpane = new JTabbedPane(JTabbedPane.TOP,JTabbedPane.SCROLL_TAB_LAYOUT );
-
+    TabPane tabpane = new TabPane();
     
-	public DBPropertyPanel(FileInfo info)
+	public DBPropertyPanel(FileInfo info,String fname)
 	{
 		this.info = info;
-		URL url = GUI.class.getResource("/find.png");
-
-		this.columnBtn = new JButton("View Schema Details");
-		this.columnBtn.setIcon(new ImageIcon(url));
-		this.columnBtn.setToolTipText("Show Schema Information with Standard Webbrowser");
+		VBox base = new VBox();
 		
-
+		String s = GUI.class.getResource("/find.png").toExternalForm();
+		Button btnSchema = new Button("Show Schema Info");
+		ImageView iv = new ImageView(s);
+		btnSchema.setGraphic(iv);
+		btnSchema.setOnAction(e->showColumnInfo());
+		//this.columnBtn.setToolTipText("Show Schema Information with Standard Webbrowser");        
+		StackPane head = new StackPane();
+		head.getChildren().add(btnSchema);
+		base.getChildren().addAll(head,tabpane,new Label(fname));
+	    tabpane.setPrefHeight(4000);
+		VBox.setVgrow(tabpane,Priority.ALWAYS);
+		this.getChildren().add(base);
 	}
 	
 	
 	
 	
+	@SuppressWarnings({ "rawtypes", "unchecked" })
 	public void initHeaderTable(String[][] data)
 	{
-	
-		setLayout(new BorderLayout());	
-		JTextArea headerinfo = new JTextArea();
-		PopupFactory.createPopup(headerinfo);
-		headerinfo.setColumns(85);
-		headerinfo.setAlignmentX(CENTER_ALIGNMENT);
-		Font font = new Font("Courier", Font.BOLD, 12);
-	    headerinfo.setFont(font);
+		
+	    javafx.scene.control.TextArea headerinfo = new javafx.scene.control.TextArea();
+	    headerinfo.setEditable(false);
+	    headerinfo.setStyle("-fx-font-alignment: center");
 	    headerinfo.setText(info.toString());
-		tabpane.addTab("File info",headerinfo);
-			
-		String column[]={"Offset","Property","Value"};         
-		JTable jt=new JTable(data,column);    
-		PopupFactory.createPopup(jt);
-
+	    StackPane sp =  new StackPane();
+	    sp.getChildren().add(headerinfo);
+		Tab headerinfotab = new Tab("File Info",sp);
+        tabpane.getTabs().add(headerinfotab);
+	
+        
+        String column[]={"Offset","Property","Value"};         
 		
-		JTableHeader th = jt.getTableHeader();
-		th.setFont(new Font("Serif", Font.BOLD, 15));
+		TableView table = new TableView<>();
 		
-		JScrollPane sp=new JScrollPane(jt);    
-		add(sp,BorderLayout.CENTER);
-	    tabpane.addTab("Header Fields",sp);
-	    
-	    add(tabpane, BorderLayout.CENTER);
-	    
-		showColumnInfo();
+		for (int i = 0; i < column.length; i++) {
+	            String colname = column[i];
+	            final int j = i;                
+				TableColumn col = new TableColumn(colname);
+				col.setCellValueFactory(new Callback<CellDataFeatures<ObservableList,String>,ObservableValue<String>>(){                    
+	            public ObservableValue<String> call(CellDataFeatures<ObservableList, String> param) {                                                                                              
+	                return new SimpleStringProperty(param.getValue().get(j).toString());                        
+	            }                    
+				});
+				
+				switch(i)
+				{
+				
+					case 1:   col.prefWidthProperty().bind(table.widthProperty().multiply(0.4));
+				              break;
+					case 2:   col.prefWidthProperty().bind(table.widthProperty().multiply(0.5));
+							  break;
+				    	
+				}
+				
+				
+				table.getColumns().add(col);
+		}
+		
+		fillTable(table,data);
+		
+		
+        StackPane fields = new StackPane();
+        fields.getChildren().add(table);
+		Tab headerfieldstab = new Tab("Header Fields",fields);
+        tabpane.getTabs().add(headerfieldstab);
 
 	}
 	
 	public void initColumnTypesTable(LinkedHashMap<String,String[][]> ht)
 	{
+	
         String str = "<!DOCTYPE html>" + "<html>"
         		+ " <head> "
         		+ "<title>" + info.filename +" - Schema Information</title>"
@@ -101,7 +125,9 @@ public class DBPropertyPanel extends JPanel {
         		+ "  table, td, tr { border:1px solid black;}\n"
         		+ " </style>"
                 + " </head>"
-            	+ "<h1>Schema Information for database: " + info.filename + "</h1>";	
+                + " <body>"                
+                + "<h1>Schema Information for database: " + info.filename + "</h1>";	
+        
         
         str += "<a id=\"top\"></a>";
         str += "<br />";
@@ -170,7 +196,7 @@ public class DBPropertyPanel extends JPanel {
         	str	+= "</tr>";
         	str += "<tbody>";
         	
-	        
+	       
        
         	
         	for (int i = 0; i < tab.length; i++) {
@@ -210,33 +236,26 @@ public class DBPropertyPanel extends JPanel {
 	        }
 	        str += "</tbody>";
 	        str += "</table>";
-	        str += "<a href=\"#top\">[TOP]</a><br />";
+            str += "<a href=\"#top\">[TOP]</a><br/>";
 	        str += "</p>";
-        
+
         }
         
-        
+         str += "</body></html>";
         
          columnStr = str;
+         
+         //System.out.println(columnStr);
 	}
 	
 	public void showColumnInfo()
 	{
-		    columnBtn.addActionListener(new ActionListener() {
-			public void actionPerformed(ActionEvent e) {
-    
-			    File file = new File("test.html");
-			    try {
-			        Files.write(file.toPath(), columnStr.getBytes());
-			        Desktop.getDesktop().browse(file.toURI());
-				 } catch (IOException e1) {
-					 e1.printStackTrace();
-				 } 
-
-			}
-		});
-		
-		
+ 	    
+	    Stage secondStage = new Stage();
+        Scene scene = new Scene(new SchemaBrowser(columnStr),750,500, javafx.scene.paint.Color.web("#666970"));			
+	    secondStage.setTitle("Schema Info");
+        secondStage.setScene(scene);
+        secondStage.show();
 	}
 	
 	
@@ -247,30 +266,69 @@ public class DBPropertyPanel extends JPanel {
 		
 		
 		String column[]={"Type","Tablename","Root","SQL-Statement","Virtual","ROWID"};         
-		JTable jt = new JTable(data,column);    
-		PopupFactory.createPopup(jt);
 		
-		//Layout the buttons from left to right.
-		JPanel buttonPane = new JPanel();
-		buttonPane.setLayout(new FlowLayout(FlowLayout.CENTER));//new BoxLayout(buttonPane, BoxLayout.LINE_AXIS));
-		buttonPane.setBorder(BorderFactory.createEmptyBorder(0, 10, 10, 10));
-		buttonPane.add(Box.createHorizontalGlue());
-		buttonPane.add(columnBtn);
-		buttonPane.add(Box.createRigidArea(new Dimension(10, 0)));
-	
-	
-		JTableHeader th = jt.getTableHeader();
-		th.setFont(new Font("Serif", Font.BOLD, 15));
+		TableView table = new TableView<>();
 		
-		JPanel schema = new JPanel();
-		schema.setLayout(new BorderLayout());
-		schema.add(buttonPane, BorderLayout.PAGE_START);
-		JScrollPane sp = new JScrollPane();
-		sp.setViewportView(jt);
-		schema.add(sp, BorderLayout.CENTER);
+		for (int i = 0; i < column.length; i++) {
+	           
+				String colname = column[i];
+	            final int j = i;                
+				TableColumn col = new TableColumn(colname);
+				col.setCellValueFactory(new Callback<CellDataFeatures<ObservableList,String>,ObservableValue<String>>(){                    
+	            public ObservableValue<String> call(CellDataFeatures<ObservableList, String> param) {                                                                                              
+	                return new SimpleStringProperty(param.getValue().get(j)!=null? param.getValue().get(j).toString() :"");                        
+	            }                    
+				});
 				
-        tabpane.addTab("SQL-Schema",schema);
+				switch(i)
+				{
+				
+					case 1:   col.prefWidthProperty().bind(table.widthProperty().multiply(0.15));
+				              break;
+					case 3:   col.prefWidthProperty().bind(table.widthProperty().multiply(0.5));
+							  break;
+				    default:  col.prefWidthProperty().bind(table.widthProperty().multiply(0.08));    	
+				    	
+				}
+				
+				
+				table.getColumns().add(col);
+		}
+		
+		if (null != data)
+			fillTable(table,data);
+		
+				
+		Tab schematab = new Tab("SQL-Schema", table);
+		
+		tabpane.getTabs().add(schematab);
 			
 
 	}
+	
+	private void fillTable(TableView table, String[][] data)
+	{
+		// define array list for all table rows 
+	    ObservableList<ObservableList> obdata = FXCollections.observableArrayList();
+		
+	    // iterate over row array to create a data row 
+	 	for(int i = 0; i < data.length; i++)
+	 	{
+	 			String [] s = data[i];
+	 			ObservableList<String> row = FXCollections.observableArrayList();
+                row.addAll(s);
+                obdata.add(row);
+	 	}
+	 		
+	    // finally update TableView with data set
+	 	Platform.runLater(()->{
+	 		table.setItems(obdata);
+	 	});
+	 	
+	 	
+		
+	}
+	
+	
+	
 }

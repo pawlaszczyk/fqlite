@@ -1,5 +1,6 @@
 package fqlite.util;
 
+import java.text.SimpleDateFormat;
 import java.util.Calendar;
 import java.util.Date;
 import java.util.TimeZone;
@@ -9,14 +10,23 @@ import java.util.TimeZone;
  *
  * @author pawlaszc
  *
+ * 
+ * 07/05/2023 @ 9:42am	UTC
+ * 2023-07-05T09:42:38+00:00	ISO 8601
+ * Wed, 05 Jul 2023 09:42:38 +0000	RFC 822, 1036, 1123, 2822
+ * Wednesday, 05-Jul-23 09:42:38 UTC	RFC 2822
+ * 2023-07-05T09:42:38+00:00	RFC 3339
+ *
  */
 
 
 public class DatetimeConverter{
 
 	final static long UNIX_MIN_DATE = 1262304000000L; // 01.01.2010 
-	final static long UNIX_MAX_DATE = 2524608000000L; // 01.01.2050  
+	final static long UNIX_MAX_DATE = 2524608000000L; // 01.01.2050 
+	final static SimpleDateFormat f = new SimpleDateFormat("dd/MM/yyyy hh:mm:ss");
 		
+	
 	/**
 	 * Core Data is a data storage framework to manage objects in iOS and OS X applications.
 	 * Core Data is part of the Cocoa API. These timestamps are sometimes labeled 'Mac absolute time'.
@@ -31,13 +41,13 @@ public class DatetimeConverter{
 	public static String isMacAbsoluteTime(double timestamp)
 	{		
 		long time = (978307200 + (long)timestamp)*1000;
-		System.out.println("isMacAbsoluteTime(): " + timestamp + " unix " + time);
+		//System.out.println("isMacAbsoluteTime(): " + timestamp + " unix " + time);
 	
 		
 		if (time > UNIX_MIN_DATE && time < UNIX_MAX_DATE)
 		{
 			Date d = new Date(time); 
-			return d.toString();
+			return f.format(d).toString();
 		}
 		return null;
 	}
@@ -50,12 +60,9 @@ public class DatetimeConverter{
 	 */
 	public static String isUnixEpoch(long timestamp)
 	{
-		if (timestamp > UNIX_MIN_DATE && timestamp < UNIX_MAX_DATE)
-		{
-			Date d = new Date(timestamp);
-			return d.toString();
-		}
-		return null;
+		Date d = new Date(timestamp);
+		return f.format(d).toString();
+			
 	}
 	
 	/**

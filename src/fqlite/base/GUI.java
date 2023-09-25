@@ -1,120 +1,123 @@
 package fqlite.base;
 
-import java.awt.BorderLayout;
-import java.awt.Color;
-import java.awt.Desktop;
-import java.awt.Dimension;
-import java.awt.EventQueue;
 import java.awt.Font;
 import java.awt.FontFormatException;
 import java.awt.GraphicsEnvironment;
-import java.awt.Point;
-import java.awt.SystemColor;
+import java.awt.Taskbar;
 import java.awt.Toolkit;
-import java.awt.datatransfer.DataFlavor;
-import java.awt.dnd.DnDConstants;
-import java.awt.dnd.DropTarget;
-import java.awt.dnd.DropTargetDropEvent;
-import java.awt.event.ActionEvent;
-import java.awt.event.ActionListener;
-import java.awt.event.KeyEvent;
-import java.awt.event.MouseAdapter;
-import java.awt.event.MouseEvent;
+import java.awt.datatransfer.Clipboard;
+import java.awt.datatransfer.StringSelection;
+import java.awt.datatransfer.Transferable;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.RandomAccessFile;
-import java.net.URI;
-import java.net.URISyntaxException;
 import java.net.URL;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
-import java.util.Enumeration;
+import java.util.Comparator;
 import java.util.Hashtable;
 import java.util.Iterator;
 import java.util.LinkedList;
 import java.util.List;
-import java.util.Vector;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
+import java.util.concurrent.CountDownLatch;
 
-import javax.swing.DefaultCellEditor;
 import javax.swing.ImageIcon;
-import javax.swing.JButton;
-import javax.swing.JComboBox;
-import javax.swing.JComponent;
-import javax.swing.JDialog;
 import javax.swing.JFileChooser;
-import javax.swing.JFrame;
-import javax.swing.JLabel;
-import javax.swing.JMenu;
-import javax.swing.JMenuBar;
-import javax.swing.JMenuItem;
-import javax.swing.JOptionPane;
-import javax.swing.JPanel;
-import javax.swing.JPopupMenu;
-import javax.swing.JScrollPane;
-import javax.swing.JSplitPane;
-import javax.swing.JTable;
-import javax.swing.JTextArea;
-import javax.swing.JTextField;
 import javax.swing.JTextPane;
-import javax.swing.JToolBar;
-import javax.swing.JTree;
-import javax.swing.JWindow;
-import javax.swing.KeyStroke;
-import javax.swing.SwingConstants;
-import javax.swing.SwingUtilities;
-import javax.swing.SwingWorker;
 import javax.swing.UIManager;
-import javax.swing.border.EmptyBorder;
-import javax.swing.event.TreeSelectionEvent;
-import javax.swing.event.TreeSelectionListener;
 import javax.swing.filechooser.FileNameExtensionFilter;
-import javax.swing.table.TableColumn;
-import javax.swing.table.TableColumnModel;
-import javax.swing.table.TableRowSorter;
-import javax.swing.text.DefaultHighlighter;
-import javax.swing.text.Highlighter;
-import javax.swing.text.Highlighter.HighlightPainter;
-import javax.swing.tree.DefaultMutableTreeNode;
-import javax.swing.tree.DefaultTreeModel;
 import javax.swing.tree.TreeNode;
 import javax.swing.tree.TreePath;
+
+import fqlite.types.CtxTypes;
 import fqlite.types.FileTypes;
 import fqlite.ui.AboutDialog;
-import fqlite.ui.CopyAction;
-import fqlite.ui.CustomCellRenderer;
-import fqlite.ui.CustomTableModel;
-import fqlite.ui.CustomTreeCellRenderer;
+import fqlite.ui.Browser;
 import fqlite.ui.DBPropertyPanel;
-import fqlite.ui.DBTable;
-import fqlite.ui.FTreeNode;
 import fqlite.ui.FileInfo;
-import fqlite.ui.FontChooser;
-import fqlite.ui.HexView;
+import fqlite.ui.FontDialog;
 import fqlite.ui.NodeObject;
-import fqlite.ui.PasteAction;
-import fqlite.ui.PopUpListener;
-import fqlite.ui.ProgressBar;
+import fqlite.ui.Importer;
 import fqlite.ui.RollbackPropertyPanel;
-import fqlite.ui.RowFilterUtil;
-import fqlite.ui.Statusbar;
+import fqlite.ui.TooltippedTableCell;
 import fqlite.ui.WALPropertyPanel;
-import fqlite.ui.IconRenderer;
+import fqlite.ui.hexviewer.HexViewerApp;
 import fqlite.util.Auxiliary;
-import fqlite.util.BLOBCarver;
-import fqlite.util.Logger;
+import javafx.animation.Animation;
+import javafx.animation.FadeTransition;
+import javafx.application.Application;
+import javafx.application.Platform;
+import javafx.beans.property.SimpleStringProperty;
+import javafx.beans.value.ChangeListener;
+import javafx.beans.value.ObservableValue;
+import javafx.collections.FXCollections;
+import javafx.collections.ListChangeListener;
+import javafx.collections.ListChangeListener.Change;
+import javafx.collections.ObservableList;
+import javafx.collections.transformation.FilteredList;
+import javafx.collections.transformation.SortedList;
+import javafx.event.EventHandler;
+import javafx.geometry.Insets;
+import javafx.geometry.Pos;
+import javafx.scene.Scene;
+import javafx.scene.control.Alert;
+import javafx.scene.control.Alert.AlertType;
+import javafx.scene.control.Button;
+import javafx.scene.control.ContextMenu;
+import javafx.scene.control.Label;
+import javafx.scene.control.Menu;
+import javafx.scene.control.MenuBar;
+import javafx.scene.control.MenuItem;
+import javafx.scene.control.ScrollPane;
+import javafx.scene.control.SelectionMode;
+import javafx.scene.control.SeparatorMenuItem;
+import javafx.scene.control.SplitPane;
+import javafx.scene.control.TableColumn;
+import javafx.scene.control.TableColumn.CellDataFeatures;
+import javafx.scene.control.TablePosition;
+import javafx.scene.control.TableView;
+import javafx.scene.control.TextArea;
+import javafx.scene.control.TextField;
+import javafx.scene.control.ToolBar;
+import javafx.scene.control.Tooltip;
+import javafx.scene.control.TreeItem;
+import javafx.scene.control.TreeView;
+import javafx.scene.image.Image;
+import javafx.scene.image.ImageView;
+import javafx.scene.input.ClipboardContent;
+import javafx.scene.input.ContextMenuEvent;
+import javafx.scene.input.DragEvent;
+import javafx.scene.input.Dragboard;
+import javafx.scene.input.KeyCombination;
+import javafx.scene.input.MouseButton;
+import javafx.scene.input.TransferMode;
+import javafx.scene.layout.Background;
+import javafx.scene.layout.BackgroundFill;
+import javafx.scene.layout.CornerRadii;
+import javafx.scene.layout.HBox;
+import javafx.scene.layout.Priority;
+import javafx.scene.layout.StackPane;
+import javafx.scene.layout.VBox;
+import javafx.scene.paint.Color;
+import javafx.scene.text.FontPosture;
+import javafx.stage.FileChooser;
+import javafx.stage.Screen;
+import javafx.stage.Stage;
+import javafx.util.Callback;
+import javafx.util.Duration;
 
 /*
     ---------------
     GUI.java
     ---------------
-    (C) Copyright 2020.
+    (C) Copyright 2023.
 
     Original Author:  Dirk Pawlaszczyk
     Contributor(s):   -;
@@ -151,10 +154,10 @@ import fqlite.util.Logger;
 */
 
 /**
- * This class offers a basic graphical user interface. It is based on swing 
- * and extends the class <code>JFrame</code>.
+ * This class offers a basic graphical user interface. It is based on JavaFX 
+ * and extends the class <code>Application</code>.
  * 
- * Most of the decoration code was generated or build with WindowBuilder.
+ * Most of the decoration code was generated manually.
  * 
  * If you want to start FQLite in graphic-mode you have to call this class. 
  * 
@@ -169,42 +172,56 @@ import fqlite.util.Logger;
  * 
  * 
  * @author Dirk Pawlaszczyk
- * @version 1.5.7
+ *
  *
  */
 
-public class GUI extends JFrame {
+public class GUI extends Application {
 
 	
-	//ImageViewer vi = new ImageViewer(null,null);
-	private static final long serialVersionUID = -4356985691362465255L;
-	private JPanel contentPane;
-	private GUI mainwindow;
-	ConcurrentHashMap<TreePath, JComponent> tables = new ConcurrentHashMap<TreePath, JComponent>();
-	ConcurrentHashMap<TreePath, JTextPane> hexviews = new ConcurrentHashMap<TreePath, JTextPane>();
-	private Hashtable<Object, Color> rowcolors = new Hashtable<Object, Color>();
+	public static File baseDir;
+	
+	public static int pos = 0;
+	
+	public static final CountDownLatch latch = new CountDownLatch(1);
+   	public static GUI mainwindow;
+	public ConcurrentHashMap<String, javafx.scene.Node> tables = new ConcurrentHashMap<String, javafx.scene.Node>();
+	ConcurrentHashMap<String, JTextPane> hexviews = new ConcurrentHashMap<String, JTextPane>();
+	private Hashtable<Object, String> rowcolors = new Hashtable<Object, String>();
 
+	ContextMenu cm = null;
+	TextArea logwindow;
+//	static Statusbar statusbar = new Statusbar();
+	MenuBar menuBar;
+	
+	//ScrollPane scrollpane_tables;
+//	ScrollPane hexScrollPane;
+//	static ScrollPane LogwindowScrollPane;
+	public static ScrollPane CellDetailsScrollPane;
+	VBox table_panel_with_filter;
+	SplitPane splitPane;
+	final StackPane leftSide = new StackPane();
+    final VBox rightSide = new VBox();
 
-	JTextArea logwindow;
-	JMenuBar menuBar;
-	JScrollPane scrollpane_tables;
-	JPanel table_panel_with_filter;
-	Statusbar statusbar = new Statusbar();
-	JScrollPane hexScrollPane;
-	JTextField currentFilter = null;
-	JPanel head;
-
+    static HexViewerApp HEXVIEWER_WINDOW = null; 
+    
+	/* search filter */
+	TextField currentFilter = null;
+	HBox head;
+    int datacounter = 0;
+	
 	static GUI app;
-	static JTree tree;
-	DefaultMutableTreeNode dbNode;
-	DefaultMutableTreeNode walNode;
-	DefaultMutableTreeNode rjNode;
+	static TreeView<NodeObject> tree;
+	//TreeItem<NodeObject>  dbNode;
+	TreeItem<NodeObject>  walNode;
+	TreeItem<NodeObject>  rjNode;
 
 	public static Font ttfFont = null;
 
-	DefaultMutableTreeNode root = new DefaultMutableTreeNode("data bases");
+	TreeItem<NodeObject>  root = new TreeItem<NodeObject>(new NodeObject("data bases",true));
+    
+	ConcurrentHashMap<String, TreeItem<NodeObject>> treeitems  = new ConcurrentHashMap<String, TreeItem<NodeObject>>();
 	
-
 	String lasthit = "";
 	int lasthitrow = 0;
 	int lasthitcol = 0;
@@ -218,15 +235,19 @@ public class GUI extends JFrame {
 	ImageIcon questionIcon;
 	ImageIcon warningIcon;
 
+	StackPane rootPane = new StackPane();
+
+	Stage stage;
+	Scene scene;
+	public static VBox  topContainer;
 	
-	
+	Font appFont = null;
 	
 	/**
 	 * Launch the graphic front-end with this method.
 	 */
-	public static void main(String[] args) {
-
-	
+    public static void main(String[] args) {
+   	
 		/**
 		  * This is needed because only one main class can be called in an
 		  * executable jar archive. 
@@ -244,52 +265,29 @@ public class GUI extends JFrame {
 			} catch (Exception e) {
 				System.out.println("ERROR while running MANI.main(). Leave program now.");
 			}
-		    // do not call the UI and leave right now.
+		    // do not call the HexViewFactory and leave right now.
 		    return;
 		}
 		
 		
-		JWindow window = new JWindow();
-		window.setLayout(new BorderLayout());
-        window.getContentPane().add(
-                new JLabel("", new ImageIcon(GUI.class.getResource("/fqlite_logo_small.png"),BorderLayout.CENTER), SwingConstants.CENTER)).setBackground(Color.WHITE);
-        window.getContentPane().setBackground(Color.WHITE);
-        window.getContentPane().add(new JLabel("<html><h3>V."+ Global.FQLITE_VERSION + "</h3></html>"),BorderLayout.SOUTH);
-        //Set the window's bounds, centering the window
-        int width = 400;
-        int height = 300;
-        Dimension screen = Toolkit.getDefaultToolkit().getScreenSize();
-        int x = (screen.width - width) / 2;
-        int y = (screen.height - height) / 2;
-        window.setBounds(x, y, width, height);
-
-        window.setVisible(true);
-        try {
-            Thread.sleep(3000);
-        } catch (InterruptedException e) {
-            e.printStackTrace();
-        }
-  
-
+		ImageIcon img = new ImageIcon(GUI.class.getResource("/logo.png"));
 		
+		String os = System.getProperty("os.name").toLowerCase();
 		
-		EventQueue.invokeLater(new Runnable() {
-			public void run() {
-				try {
-					GUI frame = new GUI();
-					GUI.app = frame;
-
-					String plaf = UIManager.getSystemLookAndFeelClassName();
-					UIManager.setLookAndFeel(plaf);
-					SwingUtilities.updateComponentTreeUI(frame);
-
-					frame.setVisible(true);
-				} catch (Exception e) {
-					e.printStackTrace();
-				}
-			}
-		});
-	}
+		if (os.contains("osx") || os.contains("os x")){
+		
+			//this is new since JDK 9
+			if (Taskbar.isTaskbarSupported())
+		    {
+				final Taskbar taskbar = Taskbar.getTaskbar();
+				taskbar.setIconImage(img.getImage());
+				taskbar.setIconBadge("FQLite");
+		    }
+		}
+		
+		Application.launch(args);
+		
+    }
 
 	/**
 	 * Set the TTF-font for the user interface. 
@@ -304,335 +302,244 @@ public class GUI extends JFrame {
 				UIManager.put(key, f);
 		}
 	}
+	
+	
+	
+	
+	
 
 	/**
 	 * Constructor of the user interface class. 
 	 * @throws IOException
 	 */
-	public GUI() throws IOException {
-	    	
+	@Override
+	public void start(Stage stage) throws Exception {
+	
+			baseDir = new File(System.getProperty("user.home"), ".fqlite");
+
+			clearCacheFromPreviousRun();
+		
+			this.stage = stage;
+			
 			GraphicsEnvironment ge = GraphicsEnvironment.getLocalGraphicsEnvironment();
    	    
    	    	 // let us first have a look on the currently installed Fonts
-   	    	 // if Segoe UI Emoji (the standard font for emojis on win10
+   	    	 // if Segoe HexViewFactory Emoji (the standard font for emojis on win10)
    	    	 // go for it
    	    	
    	    	 String[] fontFamilies = GraphicsEnvironment.getLocalGraphicsEnvironment().getAvailableFontFamilyNames();
-   	    	 //Vector<String> EmojiFriendlyFonts = new Vector<String>();
              boolean msfontinstalled = false;
-   	    	 
-   			for (String name : fontFamilies) {
-   			
-   	    	    if( name.contains("Segoe UI Emoji"))
-   	    	    {	
-   	    	    
-   	    	    	System.out.println(" Found Microsoft Emoji font. Let use this for the Cell Rendering.");
-   	    	    	GUI.ttfFont = new Font(name, Font.PLAIN, 13);
-   	    	    	msfontinstalled = true;
-   	    	    }	
-   			}
-   				
-   	    	 // if the Segoe Emoji font is not installed -> use an opensource TTF
-   	    	 // that is part of the Archive file
-   			if (!msfontinstalled)
-   			{	
-   				
-   			    try
-   			    {
-   			 	 System.out.println(" Didn't find the Microsoft font. Use OpenSansEmoji instead.");
-   	    	     InputStream is = this.getClass().getResourceAsStream("/OpenSansEmoji.ttf");
-		    	 Font uniFont=Font.createFont(Font.TRUETYPE_FONT,is);
-		    	 ge.registerFont(uniFont);
-				} 
-   			    catch (FontFormatException | IOException e) 
-   			    {
-					e.printStackTrace();
-				}
-			}
-   
+     							
 		mainwindow = this;
 		
+		stage.setTitle("FQLite Carving Tool");
+	
+		rootPane.setBackground(new Background(new BackgroundFill(Color.WHITE, CornerRadii.EMPTY, Insets.EMPTY)));
+
 		
-		setTitle("FQLite Carving Tool");
-		setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
+		/* set Icon for treeview root node */
+		String s = GUI.class.getResource("/leaf.jpg").toExternalForm();
+		ImageView iv = new ImageView(s);
+		root.setGraphic(iv);
+        root.setExpanded(true);
+			
 		URL url = GUI.class.getResource("/find.png");
 		findIcon = new ImageIcon(url);
-		// available size of the screen
-		Dimension screenSize = Toolkit.getDefaultToolkit().getScreenSize();
-		this.setSize((int) (screenSize.width * 0.8), (int) (screenSize.height * 0.8));
-		setLocation((screenSize.width - getWidth()) / 2, (screenSize.height - getHeight()) / 2);
+		
+		javafx.geometry.Rectangle2D primaryScreenBounds = Screen.getPrimary().getVisualBounds();
 
-		menuBar = new JMenuBar();
-		setJMenuBar(menuBar);
-		JMenu mnFiles = new JMenu("File");
-		mnFiles.setMnemonic(KeyEvent.VK_F);
-		menuBar.add(mnFiles);
+	
+		MenuItem mntopen = new MenuItem("Open Database...");
+		mntopen.setAccelerator(KeyCombination.keyCombination("Ctrl+O"));
+		//mntopen.getAccessibleContext().setAccessibleDescription("Open a sqlite database file to analyse...");
+		mntopen.setOnAction(e -> open_db(null));
 
-		JMenuItem mntopen = new JMenuItem("Open Database...");
-		mntopen.setAccelerator(KeyStroke.getKeyStroke(KeyEvent.VK_O, ActionEvent.META_MASK));
-		mntopen.getAccessibleContext().setAccessibleDescription("Open a sqlite database file to analyse...");
-		mntopen.setMnemonic(KeyEvent.VK_O);
-		mntopen.addActionListener(new ActionListener() {
-			public void actionPerformed(ActionEvent e) {
-				open_db(null);
-			}
-		});
-		mnFiles.add(mntopen);
+		MenuItem mntmExport = new MenuItem("Export Database...");
+		mntmExport.setAccelerator(KeyCombination.keyCombination("Ctrl+X"));
+		//mntmExport.getAccessibleContext().setAccessibleDescription("Start export a database to csv...");
+		mntmExport.setOnAction(e -> doExport());
 
-		JMenuItem mntmExport = new JMenuItem("Export Database...");
-		mntmExport.setMnemonic(KeyEvent.VK_X);
-		mntmExport.setAccelerator(KeyStroke.getKeyStroke(KeyEvent.VK_X, ActionEvent.META_MASK));
-		mntmExport.getAccessibleContext().setAccessibleDescription("Start export a database to csv...");
-		mntmExport.addActionListener(new ActionListener() {
-			public void actionPerformed(ActionEvent e) {
+		MenuItem mntclose = new MenuItem("Close All");
+		mntclose.setAccelerator(KeyCombination.keyCombination("Ctrl+D"));
+		//mntclose.getAccessibleContext().setAccessibleDescription("Close All currently open databases");
+		mntclose.setOnAction(e -> closeAll());
 
-				doExport();
-			}
-		});
-		mnFiles.add(mntmExport);
+		
+		MenuItem mntmExit = new MenuItem("Exit");
+		mntmExit.setAccelerator(KeyCombination.keyCombination("Alt+F4"));
+		mntmExit.setOnAction(e -> System.exit(0));
 
-		mnFiles.addSeparator();
 
-		JMenuItem mntclose = new JMenuItem("Close All");
-		mntclose.setAccelerator(KeyStroke.getKeyStroke(KeyEvent.VK_D, ActionEvent.CTRL_MASK));
-		mntclose.getAccessibleContext().setAccessibleDescription("Close All currently open databases");
-		mntclose.setMnemonic(KeyEvent.VK_D);
-		mntclose.addActionListener(new ActionListener() {
-			public void actionPerformed(ActionEvent e) {
-				closeAll();
-			}
-		});
-		mnFiles.add(mntclose);
 
-		mnFiles.addSeparator();
-
-		JMenuItem mntmExit = new JMenuItem("Exit");
-		mntmExit.setAccelerator(KeyStroke.getKeyStroke(KeyEvent.VK_F4, ActionEvent.ALT_MASK));
-		mntmExit.setMnemonic(KeyEvent.VK_F4);
-		mntmExit.addActionListener(new ActionListener() {
-			public void actionPerformed(ActionEvent e) {
-				System.exit(0);
-			}
-		});
-		mnFiles.add(mntmExit);
-
-		JMenu mnInfo = new JMenu("Info");
-		menuBar.add(mnInfo);
-		mnInfo.setMnemonic(KeyEvent.VK_I);
-
-		JMenuItem mntAbout = new JMenuItem("About...");
-		mntAbout.addActionListener(new ActionListener() {
-			public void actionPerformed(ActionEvent e) {
-				JDialog about = new AboutDialog(mainwindow);
-				about.setVisible(true);
-			}
-		});
+		MenuItem mntAbout = new MenuItem("About...");
+		mntAbout.setOnAction(e -> new AboutDialog(topContainer));
 		
 		
-		JMenuItem mntFont= new JMenuItem("Fonts...");
-		mntFont.addActionListener(new ActionListener() 
+		MenuItem mntFont= new MenuItem("Fonts...");
+		mntFont.setOnAction(e -> {
+				//FontChooser fc = new FontChooser(mainwindow);
+				//fc.setVisible(true);
+				FontDialog fdia = new FontDialog(javafx.scene.text.Font.getDefault(),topContainer);
+				fdia.show();
+			}
+		);
+
+		MenuItem mntmHelp = new MenuItem("Help");
+		mntmHelp.setOnAction(e -> {
+				showHelp();
+			}
+		);
+	
+		SeparatorMenuItem sep = new SeparatorMenuItem();
+		SeparatorMenuItem sep2 = new SeparatorMenuItem();
+
+		
+		Menu mnFiles = new Menu("File");
+		Menu mnInfo = new Menu("Info");
+
+		mnFiles.getItems().addAll(mntopen,mntmExport,sep,mntclose,sep2,mntmExit);
+		mnInfo.getItems().addAll(mntmHelp,mntFont,mntAbout);
+		
+		
+		/* MenuBar */
+		menuBar = new MenuBar();
+		menuBar.getMenus().addAll(mnFiles,mnInfo);
+	    	
+		splitPane = new SplitPane();
+
+		 s = GUI.class.getResource("/root.png").toExternalForm();
+		 Button starthere = new Button();
+		 starthere.setMaxSize(200, 200);
+
+		 iv = new ImageView(s);
+		 starthere.setGraphic(iv);
+		 starthere.setOnAction(e->open_db(null));
+		 rootPane.setAlignment(Pos.CENTER);
+		 rootPane.getChildren().add(starthere);
+  		 rootPane.setPrefHeight(4000);
+		
+		prepare_tree();
+        leftSide.getChildren().add(tree);
+                
+		splitPane.getItems().add(leftSide);
+	    splitPane.getItems().add(rightSide);
+	    SplitPane.setResizableWithParent(leftSide, true);
+	    SplitPane.setResizableWithParent(rightSide, true);
+
+		ToolBar toolBar = new ToolBar();
+		
+	    s = GUI.class.getResource("/openDB_gray.png").toExternalForm();
+		Button btnOeffne = new Button();
+		iv = new ImageView(s);
+		btnOeffne.setGraphic(iv);
+		btnOeffne.setOnAction(e->open_db(null));
+		btnOeffne.setTooltip(new Tooltip("open database file"));
+		toolBar.getItems().add(btnOeffne);
+
+		s = GUI.class.getResource("/export_gray.png").toExternalForm();
+		Button btnExport = new Button();
+		iv = new ImageView(s);
+		btnExport.setGraphic(iv);
+		btnExport.setOnAction(e->doExport());
+		btnExport.setTooltip(new Tooltip("export data base to file"));
+		toolBar.getItems().add(btnExport);
+
+		s = GUI.class.getResource("/closeDB_gray.png").toExternalForm();
+		Button btnClose = new Button();
+		iv = new ImageView(s);
+		btnClose.setGraphic(iv);
+		btnClose.setTooltip(new Tooltip("close All"));
+		toolBar.getItems().add(btnClose);
+		btnClose.setOnAction(e->closeAll());
+
+		s = GUI.class.getResource("/helpcontent_gray.png").toExternalForm();
+		Button about = new Button();
+		iv = new ImageView(s);
+		about.setGraphic(iv);
+		about.setOnAction(e->
 		{
-			public void actionPerformed(ActionEvent e) {
-				FontChooser fc = new FontChooser(mainwindow);
-				fc.setVisible(true);
-			}
-		});
-
-		JMenuItem mntmHelp = new JMenuItem("Help");
-		mntmHelp.addActionListener(new ActionListener() {
-			public void actionPerformed(ActionEvent e) {
-
-				// Create Desktop object
-			    Desktop d = Desktop.getDesktop();
-
-				// Browse a URL, say google.com
-				try {
-					d.browse(new URI("https://www.staff.hs-mittweida.de/~pawlaszc/fqlite/"));
-				 } catch (IOException e1) {
-					 e1.printStackTrace();
-				 } catch (URISyntaxException e1) {
-					 e1.printStackTrace();
-				 }
-
-			}
-		});
-		mnInfo.add(mntmHelp);
-		mnInfo.add(mntFont);
-		mnInfo.add(mntAbout);
-
-		contentPane = new JPanel();
-		contentPane.setBorder(new EmptyBorder(5, 5, 5, 5));
-		contentPane.setLayout(new BorderLayout(0, 0));
-		setContentPane(contentPane);
-
-		JSplitPane splitPane = new JSplitPane();
-		splitPane.setDividerLocation(0.2);
-		contentPane.add(splitPane, BorderLayout.CENTER);
-
-		JScrollPane scrollPane = new JScrollPane();
-		splitPane.setLeftComponent(scrollPane);
-
-		scrollpane_tables = new JScrollPane(null, JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED,
-				JScrollPane.HORIZONTAL_SCROLLBAR_ALWAYS);
-		table_panel_with_filter = new JPanel();
-		table_panel_with_filter.setLayout(new BorderLayout());
-		table_panel_with_filter.add(scrollpane_tables, BorderLayout.CENTER);
-		splitPane.setRightComponent(table_panel_with_filter);
-
+			showHelp();
+		}
 		
-	    head = new JPanel();
-		head.add(new JLabel("Filter:"));
-		table_panel_with_filter.add(head, BorderLayout.NORTH);
-		
-	
-		
-		prepare_table_default();
+				
+		);
+		about.setTooltip(new Tooltip("about"));
+		toolBar.getItems().add(about);
 
-		tree.setMinimumSize(new Dimension(300,4000));
-		tree.setAutoscrolls(true);
+		s = GUI.class.getResource("/exit3_gray.png").toExternalForm();
+		Button btnexit = new Button();
+		iv = new ImageView(s);
+		btnexit.setGraphic(iv);
+		btnexit.setTooltip(new Tooltip("exit"));
+		btnexit.setOnAction(e->System.exit(-1));
+		toolBar.getItems().add(btnexit);
 
-		scrollPane.setViewportView(tree);
-		scrollPane.setMinimumSize(new Dimension(300,600));
-		
-		statusbar.showStatus("Ready");
+		s = GUI.class.getResource("/hex-32.png").toExternalForm();
+		Button hexViewBtn = new Button();
+		iv = new ImageView(s);
+		hexViewBtn.setGraphic(iv);
+		hexViewBtn.setTooltip(new Tooltip("open database in HexView"));
+		hexViewBtn.setOnAction(e->{
 
-		JPanel panel = new JPanel();
-		panel.setPreferredSize(new Dimension(500, this.getHeight() / 5));
-		contentPane.add(panel, BorderLayout.SOUTH);
-		panel.setLayout(new BorderLayout(5, 5));
-
-		JScrollPane scrollPane_3 = new JScrollPane();
-		panel.add(scrollPane_3, BorderLayout.CENTER);
-
-		logwindow = new JTextArea("Welcome");
-		logwindow.setBackground(SystemColor.text);
-		logwindow.setEditable(false);
-		scrollPane_3.setViewportView(logwindow);
-
-		panel.add(statusbar, BorderLayout.SOUTH);
-
-		JToolBar toolBar = new JToolBar();
-		contentPane.add(toolBar, BorderLayout.NORTH);
-
-		JButton btnOeffne = new JButton("");
-		btnOeffne.addActionListener(new ActionListener() {
-			public void actionPerformed(ActionEvent e) {
-				open_db(null);
-			}
-		});
-
-		btnOeffne.setToolTipText("open database file");
-		url = GUI.class.getResource("/openDB_gray.png");
-		btnOeffne.setIcon(new ImageIcon(url));
-
-		toolBar.add(btnOeffne);
-
-		JButton btnExport = new JButton("");
-		btnExport.addActionListener(new ActionListener() {
-			public void actionPerformed(ActionEvent e) {
-				doExport();
-			}
-		});
-		btnExport.setToolTipText("export data base to file");
-		url = GUI.class.getResource("/export_gray.png");
-		btnExport.setIcon(new ImageIcon(url));
-		toolBar.add(btnExport);
-
-		JButton btnClose = new JButton("");
-		btnClose.setToolTipText("Close All");
-		url = GUI.class.getResource("/closeDB_gray.png");
-		btnClose.setIcon(new ImageIcon(url));
-		toolBar.add(btnClose);
-
-		btnClose.addActionListener(new ActionListener() {
-
-			public void actionPerformed(ActionEvent e) {
-
-				closeAll();
-			}
-		});
-
-		JButton about = new JButton("");
-		about.addActionListener(new ActionListener() {
-
-			public void actionPerformed(ActionEvent e) {
-				JDialog about = new AboutDialog(mainwindow);
-				about.setVisible(true);
-			}
-		});
-		about.setToolTipText("about");
-		url = GUI.class.getResource("/helpcontent_gray.png");
-		about.setIcon(new ImageIcon(url));
-		toolBar.add(about);
-
-		JButton btnexit = new JButton("");
-		btnexit.setToolTipText("exit");
-
-		url = GUI.class.getResource("/exit3_gray.png");
-		btnexit.setIcon(new ImageIcon(url));
-		btnexit.addActionListener(new ActionListener() {
-			public void actionPerformed(ActionEvent e) {
-				System.exit(-1);
-			}
-		});
-		toolBar.add(btnexit);
-
-		
-		JButton hexViewBtn = new JButton("");
-		hexViewBtn.addActionListener(new ActionListener() {
-			public void actionPerformed(ActionEvent e) {
-				DefaultMutableTreeNode node = (DefaultMutableTreeNode) tree.getLastSelectedPathComponent();
-				if (node == null || node == root) {
-
-				} else if (null != node.getUserObject()) {
-					NodeObject no = (NodeObject) node.getUserObject();
-					
-					// show Hex-View of DB-File
-					if (no.type == FileTypes.SQLiteDB)
-					{	
+			TreeItem<NodeObject> node = (TreeItem<NodeObject>) tree.getSelectionModel().getSelectedItem();
+			if (node == null || node == root) {
+				
+			} else if (null != node.getValue()) {
+				NodeObject no = (NodeObject) node.getValue();
+			
+				// prepare Hex-View of DB-File
+				if (no.type == FileTypes.SQLiteDB)
+				{			
+					if (null != no.job) {
 						
-						
-						if (null != no.job) {
-							HexView hv = no.job.hexview;
-							if (null != hv)
-								hv.setVisible(true);
-	
-						}
-
-					
+						HEXVIEWER_WINDOW.loadNewHexFile(no.job.path);	
 					}
-					// show Hex-View of WAL-File
-					else if (no.type == FileTypes.WriteAheadLog)
-					{
-						
-						if (null != no.job.wal) {
-							HexView hv = no.job.wal.hexview;
-							if (null != hv)
-								hv.setVisible(true);
-							
-						}
-					}	
-					else if (no.type == FileTypes.RollbackJournalLog)
-					{
-						
-						if (null != no.job.rol) {
-							HexView hv = no.job.rol.hexview;
-							if (null != hv)
-								hv.setVisible(true);
-							
-						}
-					}
-						
 				}
-			}
+				// prepare Hex-View of WAL-File
+				else if (no.type == FileTypes.WriteAheadLog)
+				{
+					
+					if (null != no.job.wal) {
+						
+						HEXVIEWER_WINDOW.loadNewHexFile(no.job.wal.path);	
+
+					}
+				}	
+				// prepare Hex-View of Rollback-Journal
+				else if (no.type == FileTypes.RollbackJournalLog)
+				{
+					
+					if (null != no.job.rol) {
+						
+						HEXVIEWER_WINDOW.loadNewHexFile(no.job.rol.path);	
+
+					}
+					
+
+				}
+
+			}	
+			
+			
+			Platform.runLater(new Runnable() {
+				       public void run() {             
+				           try {
+				        	   HEXVIEWER_WINDOW.setVisible();
+				        	   
+				           } catch (Exception e) {
+							e.printStackTrace();
+						}
+				       }
+			});			    
+			
+			
+				
+				
+				
+				
 		});
-		url = GUI.class.getResource("/hex-32.png");
-		hexViewBtn.setIcon(new ImageIcon(url));
-		hexViewBtn.setToolTipText("open database in HexView");
-		toolBar.add(hexViewBtn);
-
-		tree.addMouseListener(new PopUpListener(this));
-
+		toolBar.getItems().add(hexViewBtn);	
+		
 		url = GUI.class.getResource("/facewink.png");
 		facewink = new ImageIcon(url);
 
@@ -649,48 +556,249 @@ public class GUI extends JFrame {
 		warningIcon = new ImageIcon(url);
 
 		
-		this.getContentPane().setDropTarget(new DropTarget() {
+		/**
+		    Bring together all components:
+		 */
+		topContainer = new VBox();
+		topContainer.getChildren().add(menuBar);
+		topContainer.getChildren().add(toolBar);
+		topContainer.getChildren().add(splitPane);
+		scene = new Scene(topContainer,Screen.getPrimary().getVisualBounds().getWidth()*0.9,Screen.getPrimary().getVisualBounds().getHeight()*0.9);	
+	    VBox.setVgrow(splitPane, Priority.ALWAYS);
+        
 		
-			private static final long serialVersionUID = 1L;
+		stage.showingProperty().addListener(new ChangeListener<Boolean>() {
 
-			@SuppressWarnings("unchecked")
-			public synchronized void drop(DropTargetDropEvent evt) {
-		        try {
-		            evt.acceptDrop(DnDConstants.ACTION_COPY);
-		            List<File> droppedFiles = (List<File>)evt.getTransferable().getTransferData(DataFlavor.javaFileListFlavor);
-		            for (File file : droppedFiles) {
-		            		
-		            	open_db(file);
-		            }
-		        } catch (Exception ex) {
-		            ex.printStackTrace();
+		    @Override
+		    public void changed(ObservableValue<? extends Boolean> observable, Boolean oldValue, Boolean newValue) {
+		        if (newValue) {
+		            splitPane.setDividerPositions(0.25f);
+		            observable.removeListener(this);
+		    	    //rightSide.autosize();
+
 		        }
 		    }
 		});
+		
+		
+		tree.setOnContextMenuRequested(new
+				EventHandler<ContextMenuEvent>() {
+				 @Override
+				 public void handle(ContextMenuEvent event) {
+				 
+					 hideContextMenu();
+					 System.out.println("Inside setOnContextMenu"); 
+					 cm = createContextMenu(CtxTypes.TABLE);
+					 tree.setContextMenu(cm);
+					 cm.show(tree,event.getScreenX(), event.getScreenY());
+					 cm.show(tree.getScene().getWindow(), event.getScreenX(), event.getScreenY());
+
+				 }
+		});
+		
+		// OnDrag a file Over
+		scene.setOnDragOver(new EventHandler<DragEvent>() {
+            @Override
+            public void handle(DragEvent event) {
+                Dragboard db = event.getDragboard();
+                if (db.hasFiles()) {
+                    event.acceptTransferModes(TransferMode.COPY);
+                } else {
+                    event.consume();
+                }
+            }
+        });
+        
+        // Dropping over surface
+        scene.setOnDragDropped(new EventHandler<DragEvent>() {
+            @Override
+            public void handle(DragEvent event) {
+                Dragboard db = event.getDragboard();
+                boolean success = false;
+                if (db.hasFiles()) {
+                    success = true;
+                    String filePath = null;
+                    for (File file:db.getFiles()) {
+                        filePath = file.getAbsolutePath();
+                        System.out.println(filePath);
+                        open_db(file);
+                    }
+                }
+                event.setDropCompleted(success);
+                event.consume();
+            }
+        });
+        
+        
+        	 // if the Segoe Emoji font is not installed -> use an opensource TTF
+	    	 // that is part of the Archive file
+			if (!msfontinstalled)
+			{	
+				
+			    try
+			    {
+				 	 System.out.println(" Didn't find the Microsoft font. Use OpenSansEmoji instead.");
+		    	     InputStream is = this.getClass().getResourceAsStream("/OpenSansEmoji.ttf");
+		    	     appFont=Font.createFont(Font.TRUETYPE_FONT,is);
+		    	     ge.registerFont(appFont);
+		    	     rootPane.setStyle("-fx-font: 13 \""+ appFont.getFontName() + "\"; ");
+		    	     topContainer.setStyle("-fx-font: 13 \""+ appFont.getFontName() + "\"; ");
+			   
+		             javafx.scene.text.Font f = javafx.scene.text.Font.font(
+	                            "Segoe UI Emoji",
+	                            null,
+	                            FontPosture.REGULAR,
+	                            14.0);  
+		             topContainer.setStyle("-fx-font: 13 \""+ f.getName() + "\"; ");
+			    } 
+			    catch (FontFormatException | IOException e) 
+			    {
+			    	e.printStackTrace();
+			    }
+		}
+
+
+        tree.autosize(); 
+
+        
+        HEXVIEWER_WINDOW = new HexViewerApp();
+        HEXVIEWER_WINDOW.start(new Stage());
+        
+		stage.setScene(scene);
+        stage.centerOnScreen();
+        stage.sizeToScene();
+        stage.show();
+	}
+	
+	private void showHelp()
+	{
+		
+		 Stage secondStage = new Stage();
+         scene = new Scene(new Browser(),750,500, javafx.scene.paint.Color.web("#666970"));			
+	     secondStage.setTitle("FQlite Help");
+         secondStage.setScene(scene);
+         secondStage.show();
+	}
+	
+	private void hideContextMenu()
+	{
+		 if (null != cm)
+			   cm.hide();
+	}
+	
+	
+	private ContextMenu createContextMenu(CtxTypes type){
+		
+		final ContextMenu contextMenu = new ContextMenu();
+	
+	    MenuItem mntclosesingle = new MenuItem("Close Database");
+	    String s = GUI.class.getResource("/closeDB_gray.png").toExternalForm();
+		ImageView iv = new ImageView(s);
+		mntclosesingle.setGraphic(iv);
+		mntclosesingle.setOnAction(e->System.out.println("Must be implemented"));
+    
+       
+		MenuItem mntopen = new MenuItem("Open Database...");
+		s = GUI.class.getResource("/openDB_gray.png").toExternalForm();
+		iv = new ImageView(s);
+		mntopen.setGraphic(iv);
+		mntopen.setOnAction(e->open_db(null));
+
+		
+		MenuItem mntmExport = new MenuItem("Export Node...");
+		mntmExport.setAccelerator(KeyCombination.keyCombination("Ctrl+X"));
+		//mntmExport.getAccessibleContext().setAccessibleDescription("Start export a database to csv...");
+		mntmExport.setOnAction(e ->{ doExport();});
+		
+		MenuItem mntclose = new MenuItem("Close All");
+		mntclose.setAccelerator(KeyCombination.keyCombination("Ctrl+D"));
+		//mntclose.getAccessibleContext().setAccessibleDescription("Close All currently open databases");
+		mntclose.setOnAction(e -> closeAll());
+
+		
+		MenuItem mntmExit = new MenuItem("Exit");
+		mntmExit.setAccelerator(KeyCombination.keyCombination("Alt+F4"));
+		mntmExit.setOnAction(e -> System.exit(0));
+
+		SeparatorMenuItem sepA = new SeparatorMenuItem();
+		SeparatorMenuItem sepB = new SeparatorMenuItem();
+
+		
+	    contextMenu.getItems().addAll(mntclosesingle,sepA,mntopen,mntmExport,mntclose,sepB,mntmExit);
+		
+	    System.out.println("ContextMenu created.");
+	    
+	    return contextMenu;
 	}
 
+	
+	
+	private void fillClipboard()
+	{
+		Clipboard cb = Toolkit.getDefaultToolkit().getSystemClipboard();
+		StringBuffer selection = new StringBuffer();
+		//selection.append(SimpleHexView.cellValue);
+		Transferable transferable = new StringSelection(selection.toString());
+		cb.setContents(transferable,null);
+	}
+	
 	/**
-	 *  Close all databases that are currently open. 
+	 *  Delete all Files from a previous run of the program. 
+	 */
+	private void clearCacheFromPreviousRun(){
+		
+		if(baseDir != null){
+			
+			try {
+				File [] cache = baseDir.listFiles();
+				
+				if(null == cache)
+					return;
+				
+				for(File file: baseDir.listFiles()) 
+				    if (!file.isDirectory()) 
+				        file.delete();
+			}
+			catch(Exception err){
+				// do nothing - no cache directory	
+			}
+		}
+	}
+	
+	
+	/**
+	 *  Close all database nodes that are currently open. 
 	 */
 	public void closeAll() {
 
-		DefaultMutableTreeNode root = (DefaultMutableTreeNode) tree.getModel().getRoot();
-
-		@SuppressWarnings("unchecked")
-		Enumeration<DefaultMutableTreeNode> en = root.children();
-		while (en.hasMoreElements()) {
-			DefaultMutableTreeNode node = en.nextElement();
-
-			if (null != node.getUserObject()) {
-				NodeObject no = (NodeObject) node.getUserObject();
+		TreeItem<NodeObject> root = tree.getRoot();
+		Iterator<TreeItem<NodeObject>> it = root.getChildren().iterator();
+	
+	
+		while (it.hasNext()) {
+			
+			TreeItem<NodeObject> node = it.next();
+			if (null != node.getValue()) {
+				NodeObject no = (NodeObject) node.getValue();
 				if (null != no.job) {
-					no.job.hexview = null;
+					no.job = null;
+					
 				}
 			}
 		}
-		root.removeAllChildren();
-		tables.clear();
-		updateTreeUI();
+		
+		// remove all nodes -> simply create a new TreeView 
+		if (root != null) {
+			 root.getChildren().clear();
+		}
+
+		this.tables.clear(); 
+		this.hexviews.clear(); 
+	    this.treeitems.clear(); 
+		HEXVIEWER_WINDOW.clearAll();
+		
+        System.gc();	
+
 	}
 
 	/**
@@ -700,11 +808,12 @@ public class GUI extends JFrame {
 		NodeObject no = null;
 		
 		/* Do we really have a database node currently selected ? */
-		DefaultMutableTreeNode node = (DefaultMutableTreeNode) tree.getLastSelectedPathComponent();
-		if (node == null || node == root) {
+		TreeItem<NodeObject> node = tree.getSelectionModel().getSelectedItem();
+		if (node == null || node.getValue().isRoot) {
+			return;
 		} 
-		else if (null != node.getUserObject()) {
-			no = (NodeObject) node.getUserObject();
+		else if (null != node.getValue()) {
+			no = (NodeObject) node.getValue();
 			if (null == no.job) {}
 		}
 
@@ -713,14 +822,6 @@ public class GUI extends JFrame {
 	}
 
 
-	
-	 public void SetIcon(JTable table, int col_index, ImageIcon icon,String name){
-		  table.getTableHeader().getColumnModel().getColumn(col_index).setHeaderRenderer
-		(new IconRenderer());
-		  table.getColumnModel().getColumn(col_index).setHeaderValue(new fqlite.ui.txtIcon(name, icon));
-     }
-
-		
 	 
 	/**
 	 * Add a new table header to the database tree.
@@ -728,247 +829,425 @@ public class GUI extends JFrame {
 	 * @param job
 	 * @param tablename
 	 * @param columns
-	 * @return
+	 * @return tree path
 	 */
-	TreePath add_table(Job job, String tablename, List<String> columns, List<String> columntypes, List<String> PK, boolean walnode,
+	String add_table(Job job, String tablename, List<String> columns, List<String> columntypes, List<String> PK, List<String> BoolColumns, boolean walnode,
 			boolean rjnode, int db_object) {
 
 		NodeObject o = null;
 
-		CustomTableModel model = new CustomTableModel();
-		model.addColumn(" ");
-		model.addColumn(Global.STATUS_CLOMUN);
-		model.addColumn("Offset");
-		for (String colname : columns) {
-			model.addColumn(colname);
-		}
-		for (String coltype : columntypes) {
-			model.addColumnType(coltype);
-		}
+		TableView<Object> table = new TableView<>();
 		
-		DBTable table = new DBTable(model, walnode, this);
-		
-			
-		TableRowSorter<CustomTableModel> sorter = new TableRowSorter<CustomTableModel>();
-		table.setRowSorter(sorter);
-		sorter.setModel(model);
-		
-		table.setRowSelectionAllowed(true);
-		table.setCellSelectionEnabled(true);
-		table.setColumnSelectionAllowed(true);
+ 		
+		table.getSelectionModel().setSelectionMode(
+			    SelectionMode.MULTIPLE
+		);
 		
 		
-		ImageIcon imageIcon = new ImageIcon(Toolkit.getDefaultToolkit().getImage(GUI.class.getResource("/icon_status.png")));
-		SetIcon(table, 1, imageIcon,"");
-		
-		/* add icon to PRIMARYKEY columns */
-		if (null != PK)
-		{
-			Iterator<String> it = PK.iterator();
-			while(it.hasNext())
-			{
-				String pkcol = it.next();
-				for (int c = 0; c < model.getColumnCount(); c++)
-				{
-					if (pkcol.equals(model.getColumnName(c)))
-					{
-						// there is a column with this name -> set PK icon
-						ImageIcon pkIcon = new ImageIcon(Toolkit.getDefaultToolkit().getImage(GUI.class.getResource("/key-icon.png")));
-						SetIcon(table, c, pkIcon,model.getColumnName(c));
-					
-					}	
-				}
-			}
-		}
-		
-		
-		if (walnode)
-			o = new NodeObject(tablename, table, columns.size(), FileTypes.WriteAheadLog, db_object); // wal file
-		if (rjnode)
-			o = new NodeObject(tablename, table, columns.size(), FileTypes.RollbackJournalLog, db_object); // rollback
-																										// journal file
+		Image img = new Image(GUI.class.getResource("/icon_status.png").toExternalForm());
+	    ImageView view = new ImageView(img);
+	  
+	
+		// normal table ?
+		if (!walnode) {
+	    //yes		
+		//add the standard columns (index 0 <>'line number', 2 <> 'status',3 <> 'offset' - '1' <>is the table name 
+	    //Label NoLabel = new Label("No.");
+	    //NoLabel.setTooltip(new Tooltip("row number")); 
+		TableColumn numbercolumn = new TableColumn<>("No.");
+		//numbercolumn.setGraphic(NoLabel);
+		numbercolumn.setCellValueFactory(new Callback<CellDataFeatures<ObservableList,String>,ObservableValue<String>>(){                    
+			public ObservableValue<String> call(CellDataFeatures<ObservableList, String> param) {                                                                                              
+					return new SimpleStringProperty(param.getValue().get(0).toString());               //line number index   
+			}                    
+		});  
 
+		//Label PLLLabel = new Label("PLL");
+		//PLLLabel.setTooltip(new Tooltip("shows payload length in bytes")); 
+		TableColumn pllcolumn = new TableColumn<>("PLL");
+		//pllcolumn.setGraphic(PLLLabel);
+		pllcolumn.setCellFactory(TooltippedTableCell.forTableColumn(tablename,job));
+     	pllcolumn.setCellValueFactory(new Callback<CellDataFeatures<ObservableList,String>,ObservableValue<String>>(){                    
+            public ObservableValue<String> call(CellDataFeatures<ObservableList, String> param) {                                                                                              
+                return new SimpleStringProperty(param.getValue().get(2).toString());                        
+            }                    
+		});
+     	
+    	//Label HLLabel = new Label("HL");
+		//HLLabel.setTooltip(new Tooltip("shows the header length in bytes")); 
+		TableColumn hlcolumn = new TableColumn<>("HL");
+		//hlcolumn.setGraphic(HLLabel);
+		hlcolumn.setCellFactory(TooltippedTableCell.forTableColumn(tablename,job));
+     	hlcolumn.setCellValueFactory(new Callback<CellDataFeatures<ObservableList,String>,ObservableValue<String>>(){                    
+            public ObservableValue<String> call(CellDataFeatures<ObservableList, String> param) {                                                                                              
+                return new SimpleStringProperty(param.getValue().get(3).toString());                        
+            }                    
+		});
+     	 
+     	
+     	Label statusLabel = new Label(Global.STATUS_CLOMUN);
+		
+     	statusLabel.setTooltip(new Tooltip("indicates if data record is deleted or not")); 
+     	TableColumn statuscolumn = new TableColumn<>();
+        statuscolumn.setGraphic(statusLabel);
+		statuscolumn.setCellFactory(TooltippedTableCell.forTableColumn(tablename,job));
+     	statuscolumn.setCellValueFactory(new Callback<CellDataFeatures<ObservableList,String>,ObservableValue<String>>(){                    
+            public ObservableValue<String> call(CellDataFeatures<ObservableList, String> param) {                                                                                              
+                return new SimpleStringProperty(param.getValue().get(4).toString());                        
+            } 
+     	});
+     	statuscolumn.setGraphic(view);
+
+	  	
+     	TableColumn offsetcolumn = new TableColumn<>("Offset");
+		offsetcolumn.setCellFactory(TooltippedTableCell.forTableColumn(tablename,job));
+     	offsetcolumn.setCellValueFactory(new Callback<CellDataFeatures<ObservableList,String>,ObservableValue<String>>(){                    
+            public ObservableValue<String> call(CellDataFeatures<ObservableList, String> param) {                                                                                              
+                return new SimpleStringProperty(param.getValue().get(5).toString());                        
+            }                    
+		});
+     		
+
+     		
+     	//[no,pll,hl,tabname,status,...]
+		table.getColumns().addAll(numbercolumn,statuscolumn,offsetcolumn,pllcolumn,hlcolumn);
+		
+		}
+		else {
+			/**
+			 * Attention: Table is a WAL-Table and has some extra columns !!!
+			 */
+		
+			//add the standard columns (index 0 <>'line number', 2 <> 'status',3 <> 'offset' - '1' <>is the table name 
+		    //Label NoLabel = new Label("No.");
+		    //NoLabel.setTooltip(new Tooltip("row number")); 
+			TableColumn numbercolumn = new TableColumn<>("No.");
+			//numbercolumn.setGraphic(NoLabel);
+			numbercolumn.setComparator(new CustomComparator());
+			numbercolumn.setCellValueFactory(new Callback<CellDataFeatures<ObservableList,String>,ObservableValue<String>>(){                    
+				public ObservableValue<String> call(CellDataFeatures<ObservableList, String> param) {                                                                                              
+						return new SimpleStringProperty(param.getValue().get(0).toString());               //line number index   
+				}                    
+			});  
+
+			//Label PLLLabel = new Label("PLL");
+			//PLLLabel.setTooltip(new Tooltip("shows payload length in bytes")); 
+			TableColumn pllcolumn = new TableColumn<>("PLL");
+			pllcolumn.setCellFactory(TooltippedTableCell.forTableColumn(tablename,job));
+			//pllcolumn.setGraphic(PLLLabel);
+			pllcolumn.setComparator(new CustomComparator());
+	     	pllcolumn.setCellValueFactory(new Callback<CellDataFeatures<ObservableList,String>,ObservableValue<String>>(){                    
+	            public ObservableValue<String> call(CellDataFeatures<ObservableList, String> param) {                                                                                              
+	                return new SimpleStringProperty(param.getValue().get(2).toString());                        
+	            }                    
+			});
+	     	
+	    	//Label HLLabel = new Label("HL");
+			//HLLabel.setTooltip(new Tooltip("shows the header length in bytes")); 
+			TableColumn hlcolumn = new TableColumn<>("HL");
+			hlcolumn.setCellFactory(TooltippedTableCell.forTableColumn(tablename,job));
+			//hlcolumn.setGraphic(HLLabel);
+			hlcolumn.setComparator(new CustomComparator());
+	     	hlcolumn.setCellValueFactory(new Callback<CellDataFeatures<ObservableList,String>,ObservableValue<String>>(){                    
+	            public ObservableValue<String> call(CellDataFeatures<ObservableList, String> param) {                                                                                              
+	                return new SimpleStringProperty(param.getValue().get(3).toString());                        
+	            }                    
+			});
+	     	 
+	     	
+	     	Label statusLabel = new Label(Global.STATUS_CLOMUN);
+			statusLabel.setTooltip(new Tooltip("indicates if data record is deleted or not")); 
+	     	TableColumn statuscolumn = new TableColumn<>();
+	        statuscolumn.setGraphic(statusLabel);
+			statuscolumn.setCellFactory(TooltippedTableCell.forTableColumn(tablename,job));
+	        statuscolumn.setCellValueFactory(new Callback<CellDataFeatures<ObservableList,String>,ObservableValue<String>>(){                    
+	            public ObservableValue<String> call(CellDataFeatures<ObservableList, String> param) {                                                                                              
+	                return new SimpleStringProperty(param.getValue().get(4).toString());                        
+	            } 
+	     	});
+	     	statuscolumn.setGraphic(view);
+
+		  	
+	     	TableColumn offsetcolumn = new TableColumn<>("Offset");
+			offsetcolumn.setComparator(new CustomComparator());
+			offsetcolumn.setCellFactory(TooltippedTableCell.forTableColumn(tablename,job));
+	     	offsetcolumn.setCellValueFactory(new Callback<CellDataFeatures<ObservableList,String>,ObservableValue<String>>(){                    
+	            public ObservableValue<String> call(CellDataFeatures<ObservableList, String> param) {                                                                                              
+	                return new SimpleStringProperty(param.getValue().get(5).toString());                        
+	            }                    
+			});
+	     		
+	     	//[no,pll,hl,tabname,status,...]
+			table.getColumns().addAll(numbercolumn,statuscolumn,offsetcolumn,pllcolumn,hlcolumn);
+		
+		
+		
+		
+		}	// end of else (walnode = true)	
+		
+		datacounter = 0;
+		
+	   /**********************************
+        * ADD TABLE COLUMNS DYNAMICALLY *
+        **********************************/
+		
+		
+		for (int i = 0; i < columns.size(); i++) {
+            String colname = columns.get(i);
+            final int j = walnode ? i + 6 : i + 6;                
+			TableColumn col = new TableColumn(colname);		
+			col.setCellFactory(TooltippedTableCell.forTableColumn(tablename,job));
+			col.setComparator(new CustomComparator());
+			col.setCellValueFactory(new Callback<CellDataFeatures<ObservableList,String>,ObservableValue<String>>(){                    
+	  
+			public ObservableValue<String> call(CellDataFeatures<ObservableList, String> param) {                                                                                              
+            	if (param.getValue().size() <= j)
+            		return new SimpleStringProperty("");
+            	return new SimpleStringProperty(param.getValue().get(j).toString());                        
+
+            }      
+			});
+			
+			if (columntypes.size()>i && !columntypes.get(i).equals("BLOB") && !columntypes.get(i).equals("TEXT")) {				
+				col.setStyle( "-fx-alignment: CENTER-RIGHT;");
+			}
+			
+			/* add icon to PRIMARYKEY columns */
+			if (null != PK)
+			{
+				if(PK.contains(colname))
+				{
+					img = new Image(GUI.class.getResource("/key-icon.png").toExternalForm());
+				    view = new ImageView(img);
+				    col.setGraphic(view);
+				}	
+			}
+			table.getColumns().add(col);
+		}
+						
+			
+	    VBox tablePane = new VBox();
+	    TextField filter = new TextField();
+	  
+		tablePane.getChildren().add(filter);
+		tablePane.getChildren().add(table);
+		table.setPrefHeight(4000);
+		VBox.setVgrow(table, Priority.ALWAYS);
+	    Label l = new Label("Table: " + tablename);
+	    tablePane.getChildren().add(l);
+	
+		if (walnode)
+      		o = new NodeObject(tablename, tablePane, columns.size(), FileTypes.WriteAheadLog, db_object); // wal file
+		if (rjnode)
+			o = new NodeObject(tablename, tablePane, columns.size(), FileTypes.RollbackJournalLog, db_object); // rollback																									// journal file
 		if (!walnode && !rjnode)
-			o = new NodeObject(tablename, table, columns.size(), FileTypes.SQLiteDB, db_object); // normal db
+			o = new NodeObject(tablename, tablePane, columns.size(), FileTypes.SQLiteDB, db_object); // normal db
 
 		o.job = job;
-		DefaultMutableTreeNode dmtn = new fqlite.ui.FTreeNode(o);
-
+		TreeItem<NodeObject> dmtn = new TreeItem<NodeObject>(o);    
+	    dmtn.setExpanded(true);
+		
+		String s = null;
+		
+		switch(o.tabletype)
+		{
+			case 0   :	s = GUI.class.getResource("/table_icon_empty.png").toExternalForm(); // /.png
+						break;
+			case 1   : 	s = GUI.class.getResource("/table-key-icon-reddot.png").toExternalForm();
+						break;
+			case 99  :  s = GUI.class.getResource("/database-small-icon.png").toExternalForm();
+						break;						
+			case 100 :  s = GUI.class.getResource("/journal-icon.png").toExternalForm();  
+						break; 			
+			case 101 :  s = GUI.class.getResource("/wal-icon.png").toExternalForm();
+						break;
+		}
+		
+	    ImageView iv = new ImageView(s);
+		dmtn.setGraphic(iv);
+ 		
 		if (walnode) {
 			/* WAL-tree node - add child node of table */
-			walNode.add(dmtn);
+			walNode.getChildren().add(dmtn);
+			
+			//walNode.getChildren().add(0,dmtn);
+			
 		}
-		if (rjnode) {
+		else if (rjnode) {
 			/* Rollback Journal */
-			rjNode.add(dmtn);
+			//Platform.runLater( () -> {rjNode.getChildren().add(dmtn);});
+			rjNode.getChildren().add(dmtn);
+			
 		}
-
-		if (!walnode && !rjnode) /* main db */
-			dbNode.add(dmtn);
-
-		TableColumnModel columnModel = table.getColumnModel();
-		columnModel.getColumn(0).setPreferredWidth(20);
-		columnModel.getColumn(0).setMinWidth(20);
-		columnModel.getColumn(0).setMaxWidth(150);
-		
-		columnModel.getColumn(1).setPreferredWidth(20);
-		columnModel.getColumn(1).setMinWidth(20);
-		columnModel.getColumn(1).setMaxWidth(150);
-		table.setName(tablename);
-		table.setColumnSelectionAllowed(true);
-		table.setRowSelectionAllowed(true);
-		table.setCellSelectionEnabled(true);
-
-		TreePath tp = getPath(dmtn);
-
-		/* create popup menu */
-		final JPopupMenu pm = new JPopupMenu();
-		pm.add(new CopyAction(table));
-		pm.add(new PasteAction(table));
-		table.setComponentPopupMenu(pm);
-
-		table.addMouseListener(new MouseAdapter() {
-
-			//JDialog preview;
+		else{
+			 /* main db */	
+			 Platform.runLater( () -> {
 			
-			
-			@Override
-			public void mouseEntered(MouseEvent e)
-			{
-				
-				
-			}
-			
-			
-			public void mouseExited(MouseEvent event)
-			{
-				//if (null != preview)
-					//preview.setVisible(false);
-					//preview.dispose();
-			}
-			
-			@Override
-			public void mouseClicked(MouseEvent e) {
-				
-				ImageIcon ico = getImageIcon(e);
-				if (null != ico)
-				{
-					//vi.toFront();
-					//vi.updateImage(ico);
-					//vi.show(ico);
-					//vi.setVisible(true);
-					//vi.repaint();
-					// show a joptionpane dialog using showMessageDialog
-				     //   JOptionPane.showMessageDialog(GUI.app,
-				     //   "Found Image-BLOB.",
-				     //   "Preview",
-				     //   JOptionPane.INFORMATION_MESSAGE,ico);
-				}
-				
-				if (e.isPopupTrigger()) {
-					highlightRow(e);
-					doPopup(e);
-				}
-			}
-			
-			@Override
-			public void mousePressed(MouseEvent e) {
-				ImageIcon ico = getImageIcon(e);
-				if (null != ico)
-				{
-				    
-					JOptionPane.showMessageDialog(GUI.app, "Found Image-BLOB.",  "Preview",  JOptionPane.INFORMATION_MESSAGE,ico);
-				}
-			}
+				 
+				 job.getTreeItem().getChildren().add(dmtn);
+	
+					FXCollections.sort(job.getTreeItem().getChildren(), new Comparator<TreeItem<NodeObject>>() {
+					     
+						@Override
+						public int compare(TreeItem<NodeObject> o1, TreeItem<NodeObject> o2) {
+						
+							return o1.getValue().name.compareTo(o2.getValue().name);
+							
+						}
+						
+					});
 
-			@Override
-			public void mouseReleased(MouseEvent e) {
+				 
+			 });
+			 
 			    
-				
-				
-				if (e.isPopupTrigger()) {
-					highlightRow(e);
-					doPopup(e);
-				}
-			}
-
-			public void doPopup(MouseEvent e) {
-				pm.show(e.getComponent(), e.getX(), e.getY());
-			}
-
-			public void highlightRow(MouseEvent e) {
-				JTable table = (JTable) e.getSource();
-				Point point = e.getPoint();
-				int row = table.rowAtPoint(point);
-				int col = table.columnAtPoint(point);
-
-				table.setRowSelectionInterval(row, row);
-				table.setColumnSelectionInterval(col, col);
-			}
-
+					 
+					 
 			
-			
-			public ImageIcon getImageIcon(MouseEvent event)
-			{
-				Point point = event.getPoint();
-				int column = table.columnAtPoint(point);
-				int row = table.rowAtPoint(point);
-				ImageIcon out = null; 
-				
-				
-				//if (column > 1) //&& lastclickrow != row)
-				{
-					JTable table = (JTable)event.getSource();
-					Object o = table.getValueAt(row, column);
-					
-					
-				    if (o instanceof String)
-				    {
-						String v = (String)o;
-				    	if (BLOBCarver.isGraphic(v))
-						{
-				    		byte[] b = CustomCellRenderer.hexStringToByteArray(v.toUpperCase());
-								
-						}	
-				    	
-				    	
-				    	
-				    }	
-				}
-				return out;
-			}
-			
-		});
+		}
 		
-		
-
-		tables.put(tp, table);
-
-	    TableColumn testColumn = table.getColumnModel().getColumn(2);
-	    JComboBox<String> comboBox = new JComboBox<>();
-	    comboBox.addItem("default");
-	    comboBox.addItem("hex2UTF");
-	    comboBox.addItem("int2time");
-	    comboBox.addItem("float2time");
-	    testColumn.setCellEditor(new DefaultCellEditor(comboBox));
+	
 
 		
-		SwingUtilities.invokeLater(new Runnable() {
-			public void run() {
-				// Here, we can safely update the GUI
-				// because we'll be called from the
-				// event dispatch thread
-				scrollpane_tables.updateUI();
-			}
-		});
+		String tp = getPath(dmtn);
 
-		table.addMouseListener(new TableMouseListener((JTable) table));
+		// save assignment between tree item's path an a tree item
+		treeitems.put(tp, dmtn);
+		
+		
+		table.setOnMouseClicked(new EventHandler<javafx.scene.input.MouseEvent>() {
+			   @Override
+			   public void handle(javafx.scene.input.MouseEvent event) {
 
+				   //System.out.println("Quelle : " + event.getTarget());
+				   if(event.getTarget().toString().startsWith("TableColumnHeader"))
+					   return;
+				   
+				   int row = -1;
+				   TablePosition pos = null;
+				   try 
+				   {
+				     pos = (TablePosition) table.getSelectionModel().getSelectedCells().get(0);
+			         row = pos.getRow();
+
+				   }catch(Exception err) {
+					   return;
+				   }
+				   
+				  
+				   
+				   
+				   // Item here is the table view type:
+				   Object item = table.getItems().get(row);
+				   
+				
+				   TableColumn col = pos.getTableColumn();
+
+				   if(col == null)
+					   	return;
+				   
+				   // this gives the value in the selected cell:
+				   Object data = col.getCellObservableValue(item).getValue();
+
+				  // if (col.getText().contains("photo")) {
+				   if (((String)data).contains("<jpg>")) {
+
+					   System.out.println("TEST");
+					   //col.setCellFactory(TooltippedTableCell.forTableColumn());
+                       
+					   
+				   }	
+				   if (col.getText().equals("Offset"))
+				   {
+					   if(row >= 0)
+					   {   
+						   // get currently selected database
+						   NodeObject no = getSelectedNode();
+						   
+						   //HexViewFX hx = no.job.hexview;
+						   
+						   String model = null;
+						   
+						   if (no.type == FileTypes.SQLiteDB)
+							model = no.job.path;
+						   else if (no.type == FileTypes.WriteAheadLog)
+							model = no.job.wal.path;
+					       else if (no.type == FileTypes.RollbackJournalLog)
+					    	model = no.job.rol.path;
+						   
+						   
+						   ObservableList<String> hl = (ObservableList<String>)table.getItems().get(row);
+						   
+						   
+					       //hx.go2Offset(Integer.parseInt((String)data),Integer.valueOf(hl.get(3)));
+					       //hx.show();
+						   HEXVIEWER_WINDOW.switchModel(model);
+						   HEXVIEWER_WINDOW.goTo(Integer.parseInt((String)data));
+						   HEXVIEWER_WINDOW.setVisible();
+					   	}
+				   }
+				   
+				   if(event.getButton() == MouseButton.SECONDARY) {
+					  
+					   ContextMenu tcm = createContextMenu(CtxTypes.TABLE,table); 
+					   tcm.show(table.getScene().getWindow(), event.getScreenX(), event.getScreenY());
+				   }
+				   
+				  
+				   
+			   }
+			});
+		
+		
+	
+		tables.put(tp, tablePane);
 		return tp;
 	}
 	
-	 
+	private ContextMenu createContextMenu(CtxTypes type,TableView table){
+		
+		final ContextMenu contextMenu = new ContextMenu();
+	
+	    MenuItem mntclosesingle = new MenuItem("Copy Line");
+	    String s = GUI.class.getResource("/edit-copy.png").toExternalForm();
+		ImageView iv = new ImageView(s);
+		mntclosesingle.setGraphic(iv);
+		mntclosesingle.setOnAction(e ->{
 
+			StringBuffer sb = new StringBuffer();
+			
+		 	final javafx.scene.input.Clipboard clipboard = javafx.scene.input.Clipboard.getSystemClipboard();
+	        final ClipboardContent content = new ClipboardContent();
+	        
+	        ObservableList selection = table.getSelectionModel().getSelectedCells();	        
+	        Iterator<TablePosition> iter = selection.iterator();
+	        
+	       
+	        
+	        while(iter.hasNext()) {
+	        	
+	        	TablePosition pos = iter.next();	        	
+	        	ObservableList<String> hl = (ObservableList<String>)table.getItems().get(pos.getRow());
+	        	  sb.append(hl.toString());
+	        	
+	        	
+	        	
+	        	sb.append("\n");
+	        }
+	        
+	        content.putString(sb.toString());
+	        clipboard.setContent(content);
+	       
+		}
+		);
+    
+        SeparatorMenuItem sepA = new SeparatorMenuItem();
+
+		contextMenu.getItems().addAll(mntclosesingle,sepA);
+			    
+	    return contextMenu;
+	}
+	
 
 	/**
 	 * Returns the Path object of for a given treeNode.
@@ -990,92 +1269,105 @@ public class GUI extends JFrame {
 	}
 
 	/**
-	 * Sometimes we need an empty table as placeholder.
-	 * 
+	 * Returns the tree-path for a given node item. 
+	 * @param item
+	 * @return path as string
 	 */
-	protected void prepare_table_default() {
-
-		if (tree == null) {
-			tree = new JTree(root);
-			tree.setCellRenderer(new CustomTreeCellRenderer());
-
+	private String getPath(TreeItem<NodeObject> item)
+	{
+		StringBuilder pathBuilder = new StringBuilder();
+		for (;item != null ; item = item.getParent()) {
+		    pathBuilder.insert(0, item.getValue());
+		    pathBuilder.insert(0, "/");
 		}
-
-		tree.getSelectionModel().addTreeSelectionListener(new TreeSelectionListener() {
-
-			@Override
-			public void valueChanged(TreeSelectionEvent e) {
-
-				TreePath path = e.getNewLeadSelectionPath();
-
-				if (null == path)
-					return;
-				Logger.out.debug(path.toString());
-				JComponent cp = tables.get(path);
-				if (null == cp)
-					return;
-
-				if (cp instanceof DBTable) {
-					DBTable tb = (DBTable) cp;
-					tb.setAutoResizeMode(JTable.AUTO_RESIZE_OFF);
-
-					JTextField filterField = RowFilterUtil.createRowFilter(tb);
-					if (null != currentFilter) {
-						head.remove(currentFilter);
-					}
-					head.add(filterField);
-					currentFilter = filterField;
-
-					table_panel_with_filter.add(head, BorderLayout.NORTH);
-					table_panel_with_filter.updateUI();
-					scrollpane_tables.setViewportView(tb);
-					updateTableUI();
-				} else {
-
-					scrollpane_tables.setViewportView(cp);
-
-					updateTableUI();
-				}
-			}
-		});
-
+		String path = pathBuilder.toString();
+		return path;
 	}
 	
 	/**
-	 *  Reload the TableView scroll pane. 
+	 * Returns the currently selected treenode.
+	 * @return
 	 */
-	public void updateTableUI() {
-		SwingUtilities.invokeLater(new Runnable() {
-			public void run() {
-				// Here, we can safely update the GUI
-				// because we'll be called from the
-				// event dispatch thread
-				scrollpane_tables.updateUI();
-			}
-		});
+	private NodeObject getSelectedNode()
+	{
+	   return tree.getSelectionModel().getSelectedItem().getValue();	
 	}
-
+	
 	/**
-	 *  Reload the TreeView component. 
+	 * Sometimes we need an empty table as placeholder.
+	 * 
 	 */
-	public void updateTreeUI() {
-		SwingUtilities.invokeLater(new Runnable() {
-			public void run() {
-				// Here, we can safely update the GUI
-				// because we'll be called from the
-				// event dispatch thread
-				tree.updateUI();
-			}
-		});
-	}
+	protected void prepare_tree() {
 
+		if (tree == null) {
+			tree = new TreeView<NodeObject>(root);
+		 	tree.getSelectionModel().setSelectionMode(SelectionMode.SINGLE);
+			//tree.setCellRenderer(new CustomTreeCellRenderer());
+		}
+		
+		rightSide.getChildren().add(rootPane);
+
+		tree.getSelectionModel().selectedItemProperty().addListener( new ChangeListener<TreeItem>() {
+
+		        @Override
+		        public void changed(ObservableValue observable, TreeItem oldValue, TreeItem newValue) {
+
+		       
+		            TreeItem<NodeObject> selectedItem = (TreeItem<NodeObject>) newValue;
+		            if (null == selectedItem)
+		            {
+		            	// after closeAll() we have to set back everything
+		            	rightSide.getChildren().clear();
+		            	rightSide.getChildren().add(rootPane);
+		            	return;
+		            }	
+		          
+		            NodeObject node = selectedItem.getValue();
+		            if (null != node.tablePane)
+		            {
+		            	Platform.runLater(new Runnable() {
+		    	            @Override public void run() {
+		    	    
+		            	
+		    	            		rightSide.getChildren().clear();
+		    	            		rightSide.getChildren().add(node.tablePane);
+		    	            		
+		    	            		VBox.setVgrow(node.tablePane,Priority.ALWAYS);
+
+		    	            }
+		            	});
+		            }
+		            else // no table -> show db pane
+		            {
+		            	
+		            	if(node.isRoot){
+		            		rightSide.getChildren().clear();
+			            	rightSide.getChildren().add(rootPane);
+			            }
+		            	else{
+			            	String tp = getPath(selectedItem);
+			            	StackPane dbpanel  = (StackPane)tables.get(tp);
+			            	rightSide.getChildren().clear();
+			            	if(null != dbpanel)
+			            	{
+			            		rightSide.getChildren().add(dbpanel);		
+			            		dbpanel.setPrefHeight(4000);
+			            		VBox.setVgrow(dbpanel,Priority.ALWAYS);
+			            	}
+			            }
+		            }
+		        }
+
+		});
+		
+	}
 	
 
 	/**
 	 * Show an open dialog and import <code>sqlite</code>-file.
 	 * 
 	 */
-	public void open_db(File f) {
+	public synchronized void open_db(File f) {
 		File file = f;
 		
 		if (file == null)
@@ -1089,11 +1381,11 @@ public class GUI extends JFrame {
 			chooser.setName("open database");
 			FileNameExtensionFilter filter = new FileNameExtensionFilter("Sqlite & DB Files (*.sqlite,*.db)", "sqlite",	"db");
 			chooser.setFileFilter(filter);
-			int returnVal = chooser.showOpenDialog(this);
-			if (returnVal == JFileChooser.APPROVE_OPTION) {
-				file = chooser.getSelectedFile();
-				lastDir = chooser.getCurrentDirectory();
-			}
+			
+			FileChooser fileChooser = new FileChooser();
+			fileChooser.setTitle("Open database File");
+			file = fileChooser.showOpenDialog(stage);
+			
 		}
 			
 		if (file == null)
@@ -1102,7 +1394,10 @@ public class GUI extends JFrame {
 		/* check file size - the size has to be at least 512 Byte */
 		if (file.length() < 512)
 		{
-			JOptionPane.showMessageDialog(GUI.app, "File size is smaller than 512 bytes. Import stopped",  "Error",  JOptionPane.ERROR_MESSAGE,null);
+			Alert alert = new Alert(AlertType.ERROR);
+			alert.setTitle("Error");
+			alert.setContentText("File size is smaller than 512 bytes. Import stopped.");
+			alert.showAndWait();		
 			return;
 		}
 		
@@ -1117,12 +1412,19 @@ public class GUI extends JFrame {
 			if (!Auxiliary.bytesToHex(h).equals(Job.MAGIC_HEADER_STRING)) // we currently
 			{
 				abort = true;
-				JOptionPane.showMessageDialog(GUI.app, "Couldn't find a valid SQLite3 magic. Import stopped",  "Error",  JOptionPane.ERROR_MESSAGE,null);
+				Alert alert = new Alert(AlertType.ERROR);
+				alert.setTitle("Error");
+				alert.setContentText("Couldn't find a valid SQLite3 magic. Import stopped");
+				alert.showAndWait();
+				
 			}
 		}
 		catch(Exception err)
 		{
-			JOptionPane.showMessageDialog(GUI.app, "IO-Exception. Cloud not open file.",  "Error",  JOptionPane.ERROR_MESSAGE,null);
+			Alert alert = new Alert(AlertType.ERROR);
+			alert.setTitle("Error");
+			alert.setContentText("IO-Exception. Cloud not open file.");
+			alert.showAndWait();
 			abort = true;
 		}
 		finally		
@@ -1135,36 +1437,40 @@ public class GUI extends JFrame {
 		
 		FileInfo info = new FileInfo(file.getAbsolutePath());
 		
-		 
+		DBPropertyPanel panel = new DBPropertyPanel(info,file.getName());
+		panel.setPrefHeight(4000);
+		VBox.setVgrow(panel,Priority.ALWAYS);
 		
-		DBPropertyPanel panel = new DBPropertyPanel(info);
 			
 		NodeObject o = new NodeObject(file.getName(), null, -1, FileTypes.SQLiteDB, 99);
-		dbNode = new FTreeNode(o);
-		root.add(dbNode);
-
+		TreeItem<NodeObject> dbNode = new TreeItem<NodeObject>(o); 
+		dbNode.setGraphic(createFadeTransition("loading..."));	
+		root.getChildren().add(dbNode);
+		
 		/* insert Panel with general header information for this database */
-		TreePath tp = getPath(dbNode);
+		String tp = getPath(dbNode);
 			
 		Job job = new Job();
 		tables.put(tp, panel);
-		updateTableUI();
 			
 			
 		/* Does a companion RollbackJournal exist ? */
 		if (doesRollbackJournalExist(file.getAbsolutePath()) > 0) {
 				NodeObject ro = new NodeObject(file.getName() + "-journal", null, -1,
 						FileTypes.RollbackJournalLog, 100);
-				rjNode = new FTreeNode(ro);
-				root.add(rjNode);
+				rjNode = new TreeItem<NodeObject>(ro);
+				
+				rjNode.setGraphic(createFadeTransition("loading..."));
+				
+				root.getChildren().add(rjNode);
 
 				/* insert Panel with general header information for this database */
-				TreePath tpr = getPath(rjNode);
+				String tpr = getPath(rjNode);
 				FileInfo rinfo = new FileInfo(file.getAbsolutePath()+"-journal");
 				RollbackPropertyPanel rpanel = new RollbackPropertyPanel(rinfo);
 				tables.put(tpr, rpanel);
 
-				updateTableUI();
+				job.rjNode = rjNode;
 				job.setRollbackPropertyPanel(rpanel);
 				ro.job = job;
 				ro.job.readRollbackJournal = true;
@@ -1172,21 +1478,22 @@ public class GUI extends JFrame {
 
 		}
 
-			/* Does a companion WAL-archive exist ? */
-			else if (doesWALFileExist(file.getAbsolutePath()) > 0) {
+		/* Does a companion WAL-archive exist ? */
+		else if (doesWALFileExist(file.getAbsolutePath()) > 0) {
 
 			NodeObject wo = new NodeObject(file.getName() + "-wal", null, -1, FileTypes.WriteAheadLog, 101);
-			walNode = new FTreeNode(wo);
-			root.add(walNode);
-
+			walNode = new TreeItem<NodeObject>(wo);
+			walNode.setGraphic(createFadeTransition("loading..."));
+			
+			root.getChildren().add(walNode);
 
 			/* insert Panel with general header information for this database */
-			TreePath tpw = getPath(walNode);
+			String tpw = getPath(walNode);
 			FileInfo winfo = new FileInfo(file.getAbsolutePath()+"-wal");
 			WALPropertyPanel wpanel = new WALPropertyPanel(winfo,this);
 			tables.put(tpw, wpanel);
-
-			updateTableUI();
+			job.walNode =  walNode;
+			
 			job.setWALPropertyPanel(wpanel);
 			wo.job = job;
 			wo.job.readWAL = true;
@@ -1194,19 +1501,37 @@ public class GUI extends JFrame {
 
 		}
 
-		DefaultTreeModel model = (DefaultTreeModel) tree.getModel();
-		model.reload(root);
-
+		tree.refresh();
+	
 		job.setPropertyPanel(panel);
-		
-		
-		
-		
 		job.setGUI(this);
+		job.setTreeItem(dbNode);
 		job.setPath(file.getAbsolutePath());
-		ProgressBar.createAndShowGUI(this, file.getAbsolutePath(), job);
+		Importer.createAndShowGUI(this, file.getAbsolutePath(), job, dbNode);
 		o.job = job;	
 
+		int idx = tree.getRow(dbNode);
+	
+		tree.getSelectionModel().select(idx);
+		tree.scrollTo(idx);
+	
+	}
+	
+	/**
+	 * During import a fading "loading.." message is shown. This method 
+	 * creates an label for this purpose.
+	 * @param msg
+	 * @return
+	 */
+	private Label createFadeTransition(String msg) 
+	{
+		  Label l = new Label(msg);
+		  FadeTransition fadeTransition = new FadeTransition(Duration.seconds(1.0),l);
+	      fadeTransition.setFromValue(1.0);
+	      fadeTransition.setToValue(0.0);
+	      fadeTransition.setCycleCount(Animation.INDEFINITE);
+	        fadeTransition.play();
+	      return l;
 	}
 
 	/**
@@ -1264,7 +1589,7 @@ public class GUI extends JFrame {
 	 * @param message
 	 */
 	protected void doLog(String message) {
-		logwindow.append("\n" + message);
+		//logwindow.append("\n" + message);
 	}
 
 	/**
@@ -1276,77 +1601,74 @@ public class GUI extends JFrame {
 
 		if (null == no)
 			return;
-		JFileChooser chooser = new JFileChooser();
-		chooser.setCurrentDirectory(new File(System.getProperty("user.home")));
-		chooser.setDialogTitle("export records to file");
-		chooser.setName("export records");
-		chooser.setSelectedFile(new File(no.name + ".csv"));
-		FileNameExtensionFilter filter = new FileNameExtensionFilter("CSV file ", "csv");
-		chooser.setFileFilter(filter);
-
-		int returnVal = chooser.showSaveDialog(this);
-		if (returnVal != JFileChooser.APPROVE_OPTION)
+			
+		FileChooser fileChooser = new FileChooser();
+		fileChooser.setTitle("Export Database");	
+        fileChooser.setInitialFileName(prepareDefaultFileName(no.name));
+		File f = fileChooser.showSaveDialog(stage);
+        
+		if(null == f)
 			return;
-
-		File f = new File(chooser.getSelectedFile().getAbsolutePath());
-
-		String [] lines = null; 
-		
+			
 		switch(no.tabletype)
 		{
 			case 0      :	// table 					   
 			case 1      :   // index
-				
-						String headerline = getColumnLineForTable(no.table);
-						lines = filterLines(no.job.ll.iterator(),no.name,headerline);
-						
+					
+						if(f != null)
+						{	
+							boolean success = no.job.exportResults2File(f, no.name);
+							if (success) {
+								Alert alert = new Alert(AlertType.INFORMATION);
+								alert.setTitle("Success Info");
+								alert.setContentText("Table " + no.name + " exported successfully to \n" + f.getAbsolutePath());
+								alert.showAndWait();
+							}
+						}
 						
 						break;
+						
 			case 99  :  // database
 					
 			case 100 :  // journal
 					 			
 			case 101 :  // wal 
 					    
-				        lines = no.job.ll.toArray(new String[0]);
-				        	
-						break;
+						boolean success = no.job.exportResults2File(f, no.name);
+						if(success) {
+							Alert alert = new Alert(AlertType.INFORMATION);
+							alert.setTitle("Success Info");
+							alert.setContentText("Data base " + no.name + " exported successfully to \n" + f.getAbsolutePath());
+							alert.showAndWait();
+						}
+				        break;	
 			default  :  // root;
 		}
 		
-	    /* filter and format export*/
-		for (int i = 0; i < lines.length; i++)
-        {
-        	int idx = lines[i].indexOf("##header##");
-        	if (idx > 0)
-        	{
-           		lines[i] = lines[i].substring(0, idx) +"\n"; 
-        		idx = lines[i].indexOf("##header##", idx+1);
-        	}
-        }	
-		
-		
-		no.job.writeResultsToFile(f.getAbsolutePath(), lines);
-
-		JOptionPane.showMessageDialog(this,
-				"Data base " + no.name + " exported successfully to \n" + f.getAbsolutePath());
-		
-
 	}
 	
-	private String getColumnLineForTable(JTable t)
-	{
-		String result = "_table;";
-		
-		int no = t.getColumnCount();
-		for (int i = 0; i < no; i++)
-		{
-			result += t.getColumnName(i) + ";";
-		}
-		
-		return result + "\n";
+	/**
+	 * Returns a filename with a time stamp in ISO_DATE_TIME format.
+	 * @param nameofnode
+	 * @return
+	 */
+	private String prepareDefaultFileName(String nameofnode){
+		LocalDateTime now = LocalDateTime.now();
+		DateTimeFormatter df;
+		df = DateTimeFormatter.ISO_DATE_TIME; // 2020-01-31T20:07:07.095
+		String date = df.format(now);
+		date = date.replace(":","_");
+		return nameofnode + date + ".csv";
 	}
 	
+	
+	/**
+	 * Returns a filtered list with all lines that are matching a condition (filter).  
+	 * @param lines
+	 * @param filterword
+	 * @param headerline
+	 * @return
+	 */
 	private String[] filterLines(Iterator<String> lines, String filterword, String headerline)
 	{
 		LinkedList<String> filtered = new LinkedList<String>();
@@ -1367,299 +1689,227 @@ public class GUI extends JFrame {
 		return filtered.toArray(new String[0]);
 	}
 
+	
+	/**
+	 * Prepares the table row - with all columns - for a TableView.  
+	 * @param tp 
+	 * @param linenumber the current line number (we put this number in front of the datarecord).
+	 * @param data the actual line of data to fill in
+	 * @param isWALTable whether or not the table to built is a WAL-Table 
+	 * @return
+	 */
+	private ObservableList<String> prepareRow(int linenumber, LinkedList<String> row,boolean isWALTable)
+	{
+				
+		ObservableList<String> list = FXCollections.observableArrayList(row);
+		list.add(0,String.valueOf(++linenumber));	
+		
+		// add line number 
+		return list;
+	}
+	
+	
 	/**
 	 * This method is used to insert new records into a output table. 
 	 * 
-	 * @param tp
-	 * @param data
+	 * @param tp  the table name
+	 * @param data  String array with data rows
+	 * @param isWALTable whether or not this table to fill is a WAL-Table
 	 */
-	protected void update_table(TreePath tp, String[] data, boolean isWALTable) {
+	@SuppressWarnings({ "unchecked", "rawtypes" })
+	protected void update_table(String treepath, ObservableList<LinkedList<String>> rows, boolean isWALTable) {
 		
+		// define array list for all table rows 
+		ObservableList<ObservableList> obdata = FXCollections.observableArrayList();
 		
-		String tablename = data[0];
-
-		JTable tb = null;
-		try {
-			
-			tb = (JTable) tables.get(tp);
-			
+	    // first get the right table
+	    TableView tb = null;
+		TextField filterField = null;
+	    
+		try {	
+			VBox tablepanel = (VBox)tables.get(treepath);	
+			VBox.setVgrow(tablepanel,Priority.ALWAYS);
+			filterField = (TextField)tablepanel.getChildren().get(0);
+		    tb = (TableView)tablepanel.getChildren().get(1);
+		    
+		    Label statusline = (Label)tablepanel.getChildren().get(2);
+		    String text = statusline.getText();
+		    statusline.setText(text + " | rows: " + rows.size());
 		} catch (Exception err) {
-			return;
+			System.err.println(err);
+			return ;
 		}
 		
-		
+		/* Just in case ;-) */
 		if (tb == null) {
-			doLog(">>>> Unkown tablename" + tablename);
+			doLog(">>>> Unkown tablename" + treepath);
 			return;
 		}
-
-		Vector<String> v = new Vector<String>();
-		CustomTableModel ctm = ((CustomTableModel) tb.getModel());
-
 		
-		// add line number 
-		v.add(String.valueOf(ctm.getRowCount()+1));
+		// determine the right treeitem for a given treepath from hashtable
+		TreeItem<NodeObject> node = treeitems.get(treepath);
 		
-		
-		String[] waldata = new String[5];
-		
-		int last = data.length-1;
-		
-		String walframe = "";
-		
-		if(isWALTable)
+		if (null != node && rows.size()>0 )
 		{
-			String lastcol = data[last];
-			
-			/* WALframe information ? */
-			int ff = lastcol.indexOf("#walframe#");
-			if (ff > 0)
-			{
-				walframe = lastcol.substring(ff+10);
-				lastcol = lastcol.substring(0, ff);	
-				waldata = walframe.split(",");		
-				data[last] = data[last].substring(0, ff);
-			}
-			
-		}
-		
-		/* Extract header information */
-		String header = "";
-		
-		
-		String lastcol = data[last];
-			
-		/* Header fingerprint ? */
-		int hh = lastcol.indexOf("##header##");
-		if (hh >= 0) {
-			header = lastcol.substring(hh);	
-			data[last] = data[last].substring(0, hh);
-			/* add header string to table model */
-			ctm.addHeader(header.substring(10));
-		}
-	
-		
-		for (int i = 1; i < data.length; i++) {
-			
-			if (i == 2) {
-				try
-				{
-					v.add(String.format("%0" + 6 + "X", Long.parseLong(data[2])));
-			
-				}catch(NumberFormatException nfe)
-				{
-					v.add(data[2]);
-				}
-				
-				if(isWALTable)
-				{
-					v.add(waldata[0]);
-					v.add(waldata[1]);
-					v.add(waldata[2]);
-					v.add(waldata[3]);
-					v.add(waldata[4]);
-					
-				}
-			} 
-			
-			
-			
-			else
-			{
-			    v.add(data[i]);
-			}
-		}
-		
-			
-		ctm.addRow(v);
 
+			node.getValue().hasData = true;
+			
+			Platform.runLater(new Runnable() {
+	            @Override public void run() {
+	            	String s = null;
+	            	if (node.getValue().tabletype == 0) // normal table with rows
+	            		s = GUI.class.getResource("/table-icon.png").toExternalForm();  
+	            	if (node.getValue().tabletype == 1) // index table with rows
+	            		s = GUI.class.getResource("/table-key-icon.png").toExternalForm();  
+	          	
+	            	if (null == s)
+	            		return;
+	            	ImageView iv = new ImageView(s);
+	    			node.setGraphic(null);
+	    			node.setGraphic(iv); 
+	    			TreeItem.graphicChangedEvent();
+	    			TreeItem.valueChangedEvent();
+	    			tree.refresh();
+	    		}
+	        });
+		
+		}
+		
+		
+	    // iterate over row array to create table rows  
+		for(int i = 0; i < rows.size(); i++)
+		{
+			LinkedList<String> data = rows.get(i);
+			// rearrange the row cell values for table view
+			obdata.add(FXCollections.observableList(prepareRow(i,data,isWALTable)));
+			
+		}
+		
+
+		// 1. Wrap the ObservableList in a FilteredList (initially display all data).
+		FilteredList<ObservableList> filteredData = new FilteredList<>(obdata, p -> true);
+
+		// 2. Set the filter predicate whenever the filter changes.
+		filterField.textProperty().addListener((observable, oldValue, newValue) -> {
+					filteredData.setPredicate(r -> {
+						// If filter text is empty, display all persons.
+						if (newValue == null || newValue.isEmpty()) {
+							return true;
+						}
+						
+						// Compare the column values of all row columns with filter text.
+						String lowerCaseFilter = newValue.toLowerCase();
+						
+						for(int i = 0; i < r.size(); i++)
+						{
+							String value = (String)r.get(i);
+							if (value.toLowerCase().contains(lowerCaseFilter))
+								return true; // Filter matches name
+						}
+						
+						return false; // Does not match.
+					});
+				});
+				
+		// 3. Wrap the FilteredList in a SortedList. 
+		SortedList<ObservableList> sortedData = new SortedList<>(filteredData);
+				
+		// 4. Bind the SortedList comparator to the TableView comparator.
+		sortedData.comparatorProperty().bind(tb.comparatorProperty());
+		
+		
+		// 5. Add sorted (and filtered) data to the table & update TableView with data set
+		tb.setItems(sortedData);
+		
+		final TableView tb2 = tb;
+		
+		
+//		tb.getSelectionModel().selectedIndexProperty().addListener((obs, oldSelection, newSelection) -> {
+//		    if (newSelection != null) {
+//		    	
+//		       if (tb2 != null){
+//		    	   int selecteditems = tb2.getSelectionModel().getSelectedCells().size();
+//				   VBox tablepanel = (VBox)tables.get(treepath);	
+//				   Label statusline = (Label)tablepanel.getChildren().get(2);
+//				   String text = statusline.getText();
+//				   int idx = text.indexOf(" | rows: ");
+//				   statusline.setText(text.substring(0,idx) + " | rows: " + rows.size() + " | selected rows: " + selecteditems);	
+//		       }
+//		    	   
+//		    }
+//		});
+		
+
+		tb.getSelectionModel().getSelectedItems().addListener((ListChangeListener.Change c) -> {
+         
+			   if (tb2 != null){
+		    	   int selecteditems = tb2.getSelectionModel().getSelectedCells().size();
+				   VBox tablepanel = (VBox)tables.get(treepath);	
+				   Label statusline = (Label)tablepanel.getChildren().get(2);
+				   String text = statusline.getText();
+				   int idx = text.indexOf(" | rows: ");
+				   statusline.setText(text.substring(0,idx) + " | rows: " + rows.size() + " | selected rows: " + selecteditems);	
+		       }
+		    	   
+		    }
+			
+        );
+   
+		
+		
 	}
 
-	public Hashtable<Object, Color> getRowcolors() {
+	public Hashtable<Object, String> getRowcolors() {
 		return rowcolors;
 	}
 
-	public void setRowcolors(Hashtable<Object, Color> rowcolors) {
+	public void setRowcolors(Hashtable<Object, String> rowcolors) {
 		this.rowcolors = rowcolors;
 	}
 
-}
+	
 
+	private class CustomComparator implements Comparator<String>{
 
+	    @Override
+	    public int compare(String o1, String o2) {
+	    
+	    	if (o1 == null && o2 == null) 
+	    		return 0;
+	        if (o1 == null) 
+	        	return -1;
+	        if (o2 == null) 
+	        	return 1;
 
-/**
- * A mouse listener class which is used to handle mouse clicking event on column
- * headers of a JTable.
- * 
- * @author www.codejava.net
- *
- */
-class TableMouseListener extends MouseAdapter {
+	        if (o1.length() == 0)
+	        	return -1;
+	        
+	        char ch = o1.charAt(0);
+	       
+	        // only if o1 start with a number or a sign
+	        if((ch >= '0' && ch <= '9') || ch =='-' || ch =='+')
+	        {
+	        	Integer i1=null;
+	        		try{ i1=Integer.valueOf(o1); } catch(NumberFormatException ignored){}
+	        	Integer i2=null;
+	        		try{ i2=Integer.valueOf(o2); } catch(NumberFormatException ignored){}
 
-	private JTable table;
-	private int lastclickrow = -1;
+	        	if(i1==null && i2==null) 
+	        		return o1.compareTo(o2);
+	        	if(i1==null) 
+	        		return -1;
+	        	if(i2==null) 
+	        		return 1;
 
-	HexView hv = null;
-
-	public TableMouseListener(JTable table) {
-		this.table = table;
+	        	return i1-i2;
+	        }
+	        
+	        // o1 does not start with a number -> compare String objects as usual 
+	        return o1.compareTo(o2);
+	    }
 	}
-
 	
-	
-	
-	
-	public void mouseClicked(MouseEvent event) {
 
-		Point point = event.getPoint();
-		int column = table.columnAtPoint(point);
-		int row = table.rowAtPoint(point);
-//
-//		if (column > 1 && lastclickrow != row)
-//		{
-//			JTable table = (JTable)event.getSource();
-//			Object o = table.getValueAt(row, column);
-//			
-//		    if (o instanceof String)
-//		    {
-//				String v = (String)o;
-//		    	if (BLOBCarver.isGraphic(v))
-//				{
-//					byte[] b = CustomCellRenderer.hexStringToByteArray(v.toUpperCase());
-//					try {
-//						ImageIcon out = new ImageIcon(b,"test");
-//						ImageViewer vi = new ImageViewer(null,out);
-//					} catch (Exception e) {
-//						
-//						e.printStackTrace();
-//					}
-//					
-//				}	
-//		    	
-//		    	
-//		    	
-//		    }	
-//		}
-		
-		/* When the address column is clicked, the HexView is automatically generated.*/
-		if (column == 2 && lastclickrow != row) {
+} // End of class GUI
 
-			SwingWorker<Boolean, Void> backgroundProcess = new SwingWorker<Boolean, Void>() {
 
-				@Override
-				protected Boolean doInBackground() throws Exception {
-
-					String value = (String) table.getModel().getValueAt(row, column);
-					long v = Long.parseLong(value, 16);
-					int start = (int) v * 2;
-
-					DefaultMutableTreeNode node = (DefaultMutableTreeNode) GUI.tree.getLastSelectedPathComponent();
-
-					if (node != null) {
-
-						if (null != node.getUserObject()) {
-							NodeObject no = (NodeObject) node.getUserObject();
-							if (null != no.job) {
-
-								if (no.type == FileTypes.SQLiteDB)
-									hv = no.job.hexview;
-								else if (no.type == FileTypes.WriteAheadLog)
-									hv = no.job.wal.hexview;
-								else if (no.type == FileTypes.RollbackJournalLog)
-									hv = no.job.rol.hexview;
-
-								CustomTableModel ctm = (CustomTableModel) table.getModel();
-								String hd = ctm.getHeader(row);
-
-								String text = hv.thex.getText();
-
-								String status = (String) table.getModel().getValueAt(row, 2);
-
-								if (status.contains(Global.DELETED_RECORD_IN_PAGE)) {
-									/* a removed entry - skip the first two bytes */
-									hd = hd.substring(2);
-
-								}
-
-								int match = -1;
-								Pattern exampleRegex = Pattern.compile(hd.trim(), Pattern.DOTALL);
-
-								String test = text.substring(start + (start / 32 + 4 + hd.length()),
-										start + (start / 32) + 4 * hd.length());
-								test = test.replace(System.getProperty("line.separator"), "");
-
-								Matcher m = exampleRegex.matcher(test);
-
-								if (m.find()) {
-									match = m.start();
-								}
-
-								int hdstart = -1;
-								hdstart = match + start;
-								if (status.contains(Global.DELETED_RECORD_IN_PAGE))
-									hdstart = match + start - hd.length();
-
-								Color[] colors = new Color[] { Color.yellow, Color.orange, Color.green, Color.cyan,
-										Color.red, Color.blue, Color.magenta, Color.pink, Color.gray };
-								int linebreaks = start / 32;
-								hdstart += linebreaks;
-								int currenthex = hdstart;
-								int currenttxt = (hdstart / 2) + linebreaks / 2 + 1;
-
-								if ((currenthex % 33) % 2 == 1) {
-									currenthex++;
-									currenttxt++;
-								}
-
-								if (status.contains(Global.DELETED_RECORD_IN_PAGE))
-									currenttxt--;
-
-								Highlighter highlighter = hv.thex.getHighlighter();
-								Highlighter highlighterText = hv.ttext.getHighlighter();
-
-								SqliteElement[] columns = Auxiliary.toColumns(hd);
-								int delta = 2;
-								for (int i = 0; i < columns.length; i++) {
-
-									HighlightPainter painter = new DefaultHighlighter.DefaultHighlightPainter(
-											colors[i % 9]);
-
-									delta = 2;
-									if (hv.thex.getText().substring(currenthex, currenthex + 2).indexOf("\n") >= 0)
-										delta = 3;
-									highlighter.addHighlight(currenthex, currenthex + delta, painter);
-									currenthex += delta;
-
-									delta = 1;
-									if (hv.ttext.getText().substring(currenttxt, currenttxt + 1).indexOf("\n") >= 0) {
-										delta = 2;
-
-									}
-									highlighterText.addHighlight(currenttxt, currenttxt + delta, painter);
-									currenttxt += delta;
-								}
-
-								hv.thex.setCaretPosition(currenthex);
-
-							}
-						}
-					}
-
-					return true;
-				}
-
-				@Override
-				protected void done() {
-					// Process ended, mark some ended flag here
-					// or show result dialog, messageBox, etc
-					hv.setVisible(true);
-				}
-
-			};
-
-			backgroundProcess.execute();
-		}
-
-	}
-
-}

@@ -65,7 +65,7 @@ public class SimpleSQLiteParser {
 	List<String> coltypes = new ArrayList<String>();
 	List<String> sqltypes = new ArrayList<String>();
 	List<String> colconstraints = new ArrayList<String>();
-	List<String> colnames = new ArrayList<String>();
+	ArrayList<String> colnames = new ArrayList<String>();
 	List<String> tableconstraint = new ArrayList<String>();
 	Map<Integer,String> constraints = new HashMap<Integer,String>();
 	HeaderPattern pattern = new HeaderPattern();
@@ -347,7 +347,6 @@ public class SimpleSQLiteParser {
         		}
         		else
         		{
-        			System.out.println("aha!!!");
         			tblconstraint = true;
         		}	
         		
@@ -459,6 +458,21 @@ public class SimpleSQLiteParser {
     		    /* the pattern always starts with a header constraint */ 
     		    pattern.addHeaderConstraint(colnames.size()+1,colnames.size()*2);
     		 
+    		    /* Bug-fix: the sqlite_XXX columns do not have a type
+    		     * https://www.sqlite.org/datatype3.html
+                 * 3.1. Determination Of Column Affinity
+                 * If the declared type for a column contains the string "BLOB" or if no type is specified then the column has affinity BLOB.
+    		     */
+    		    if (coltypes.size() == 0)
+    		    {
+    		    	for(int i =0; i < colnames.size(); i++)
+    		    	{
+    		    		coltypes.add("BLOB");
+    		    		sqltypes.add("BLOB");
+    		    	}
+    		    }
+    		    
+    		    
         		
         		int cc = 0;
         		ListIterator<String> list = coltypes.listIterator();
@@ -494,7 +508,7 @@ public class SimpleSQLiteParser {
 	        		cc++;
         		}
 	        		
-    	
+  
         		tds = new TableDescriptor(tablename,stmt,sqltypes,coltypes,colnames,colconstraints,tableconstraint,pattern,stmt.contains("WITHOUT ROWID"));
         		System.out.println("PATTTERN: " + pattern);
         		
@@ -519,9 +533,7 @@ public class SimpleSQLiteParser {
 		
 		/* Attention: issue 3 */
 		s = s.toUpperCase();
-		
-		System.out.println("Datentyp" + s);
-		
+				
 		if (s.startsWith("TIMESTAMP"))
 		{
 			type="INT";
@@ -546,6 +558,7 @@ public class SimpleSQLiteParser {
 		{
 			type="NUMERIC";	
 		}
+		
 		return type;
 	}
 	

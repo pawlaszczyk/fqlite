@@ -11,6 +11,8 @@ import fqlite.pattern.SerialTypeMatcher;
 import fqlite.types.CarverTypes;
 import fqlite.util.Auxiliary;
 import fqlite.util.Logger;
+import javafx.collections.FXCollections;
+import javafx.collections.ObservableList;
 
 /**
  * This class represents a recovery task. 
@@ -55,6 +57,18 @@ public class RecoveryTask extends Base implements Runnable {
 		visit = new BitSet(pagesize);
 	}
 
+	
+	public void carveOnly()
+	{
+		debug("carveOnly()::" + offset);
+		/* read the db page into buffer */
+		buffer = job.readPageWithOffset(offset, pagesize);
+		/* convert byte array into a string representation */
+		String content = Auxiliary.bytesToHex(buffer);
+		
+		this.carve(content, null);
+	}
+	
 	/**
 	 * This method called to recover regular data records startRegion a database page.
 	 * 
@@ -63,6 +77,7 @@ public class RecoveryTask extends Base implements Runnable {
 	public int recover() {
 
 		boolean withoutROWID = false;
+		int fbstart = -1;
 		
 		try {
 			
@@ -70,6 +85,8 @@ public class RecoveryTask extends Base implements Runnable {
 			/* read the db page into buffer */
 			buffer = job.readPageWithOffset(offset, pagesize);
 			/* convert byte array into a string representation */
+			if (null == buffer)
+				return -1;
 			String content = Auxiliary.bytesToHex(buffer);
 
 			// offset 0
@@ -104,7 +121,6 @@ public class RecoveryTask extends Base implements Runnable {
 				/* was page dropped ? */
 				if (checksum == 0)
 				{
-					System.out.println(" DROPPED PAGE !!!");
 					/* no overflow page -> carve for data records - we do our best! ;-)*/
 					carve(content,null);
 				}
@@ -120,9 +136,14 @@ public class RecoveryTask extends Base implements Runnable {
 			if (type < 0) {
 				info("No Data page. " + pagenumber);
 				return -1;
-			} else if (type == 12) {
+			} 
+			else if(type == 5){
+			    info("Inner Table page (only references no data). Page:" + pagenumber);
+			    return 0;
+			}
+			else if (type == 12) {
 				info("Internal Table page " + pagenumber);
-				return -1;
+				return 0;
 			} else if (type == 10) {
 				info("Index leaf page " + pagenumber);	
 				// note: WITHOUT ROWID tables are saved here.
@@ -134,22 +155,21 @@ public class RecoveryTask extends Base implements Runnable {
 
 			/************** regular leaf page with data ******************/
 
-			//boolean freeblocks = false;
 			if (type == 8)
 			{
 				// offset 1-2 let us find the first free block offset for carving
 				byte fboffset[] = new byte[2];
 				buffer.position(1);
 				buffer.get(fboffset);
-				//ByteBuffer fboff = ByteBuffer.wrap(fboffset);
-				//int ffb = Auxiliary.TwoByteBuffertoInt(fboff);
-
+			
 				// Note: The two-byte integer at offset 1 of the page gives the start of the first freeblock 
 				// on the page, or is zero if there are no freeblocks.
-				//if (ffb > 0)
-				//	freeblocks = true;  
 				// A freeblock marks an area between 2 normal cells (that was removed for example)
 				// every byte before the cell content region (on offset 5) is no part of the freeblock!!! 
+			
+				ByteBuffer firstfb = ByteBuffer.wrap(fboffset);
+				fbstart = Auxiliary.TwoByteBuffertoInt(firstfb);
+			
 			}	
 				
 			int ccrstart = job.ps;
@@ -178,10 +198,63 @@ public class RecoveryTask extends Base implements Runnable {
 			if (0 == cp)
 				debug(" Page seems to be dropped. No cell entries.");
 
-			int headerend = 8 + (cp * 2);
-			visit.set(0, headerend);
+			int pageheaderend = 8 + (cp * 2);
+			visit.set(0, pageheaderend);
 			//System.out.println("headerend:" + headerend);
 
+			
+			/*
+			 * scan of Freeblock list 
+			 */
+			if (fbstart > pageheaderend  && fbstart <  job.ps) {
+			
+		    	boolean goon = false;
+				do {
+			    	// go to next free block
+					buffer.position(fbstart);
+
+					// read the next 2 bytes -> if the are 0000xh there is no further
+					// freeblock 
+					byte[] dword = new byte[2];
+					buffer.get(dword);
+			    	ByteBuffer nextblock = ByteBuffer.wrap(dword);
+					int next = Auxiliary.TwoByteBuffertoInt(nextblock);
+                    //System.out.println(" NextFreeBlock offset:" + next);
+					
+					// read the next 2 bytes -> this value represents the length of the
+					// freeblock. Remember: The maximum size of a database page is 64kb (2^16 bytes)
+					buffer.get(dword);
+			    	ByteBuffer blocklength = ByteBuffer.wrap(dword);
+					int length = Auxiliary.TwoByteBuffertoInt(blocklength);
+					//System.out.println(" Length of next free block:" + length);
+					
+					//String rc;
+					LinkedList<String> record;
+					
+					byte[] header = new byte[6];
+					buffer.get(header);
+					String parsed = Auxiliary.bytesToHex(header);
+					//System.out.println(">>" + parsed);
+					
+					if(next > 0 && next < job.ps){
+						fbstart = next;
+						goon = true;
+					}
+					else
+						goon = false;
+				}
+			    while(goon);
+			
+			}
+			
+			
+			
+			
+			
+			
+			
+			
+			
 			/***************************************************************
 			 * STEP 2:
 			 * 
@@ -209,24 +282,26 @@ public class RecoveryTask extends Base implements Runnable {
 					}
 				}
 				last = celloff;
-				//if (Logger.LOGLEVEL == Logger.DEBUG)
-				//{	
+				if (Logger.LOGLEVEL == Logger.DEBUG)
+				{	
 					String hls = Auxiliary.Int2Hex(celloff); // Integer.toHexString(celloff);
 					Logger.out.debug(pagenumber + " -> " + celloff + " " + "0" + hls);
-				//}
+				}
 					
-				String rc;
+				//String rc;
+				LinkedList<String> record;
 				
-				rc = ct.readRecord(celloff, buffer, pagenumber, visit, type, Integer.MAX_VALUE, firstcol,withoutROWID,-1);
+				record = ct.readRecord(celloff, buffer, pagenumber, visit, type, Integer.MAX_VALUE, firstcol,withoutROWID,Global.REGULAR_DB_FILE,-1);
 								
 				// add new line to output
-				if (null != rc && rc.length() > 0) {
+				if (null != record && record.size() > 0) {
 					
 					int p;
-					if ((p = rc.indexOf("_node;")) > 0)
+					
+					if ((p = record.getFirst().indexOf("_node")) > 0)
 					{
+						String rc = record.getFirst();
 						String tbln = rc.substring(0, p);
-						
 						if (job.virtualTables.containsKey(tbln))
 						{
 							TableDescriptor tds = job.virtualTables.get(tbln);
@@ -234,20 +309,17 @@ public class RecoveryTask extends Base implements Runnable {
 							/* we use the xxx_node shadow component to construct the 
 							 * virtual component
 							 */
-							String BLOB = rc.substring(p);
-							//System.out.println(BLOB);
-							
 							/* skip the first information -> go directly to the 5th element
 							 * of the data record line, i.e. go to the BLOB with the row data
 							 */
-							int pp = Auxiliary.findNthOccur(rc, ';', 4);
-							String data = rc.substring(pp+1);
+							
+				            String data = record.get(6);  //rc.substring(pp+1);
 						
 							/* transform String data into an byte array */
 							byte[] binary = Auxiliary.decode(data);
 							ByteBuffer bf = ByteBuffer.wrap(binary);
                             
-							/* skip the first to bytes */
+							/* skip the first two bytes */
 							bf.getShort();
 							/* first get the total number of entries for this rtree branch */
                             int entries = bf.getShort();
@@ -255,12 +327,18 @@ public class RecoveryTask extends Base implements Runnable {
                             /* create a new line for every data row */ 
                             while(entries>0)
                             {
-                        		StringBuffer vrow = new StringBuffer();
-    							vrow.append(tbln + ";VT;0;");  // start a new row for the virtual component 
-    					
+                        		//StringBuffer vrow = new StringBuffer();
+                            	LinkedList<String> rtreerecord = new LinkedList<String>();
+                    			
+                            	rtreerecord.add(tbln + "");  // start a new row for the virtual component 
+                            	rtreerecord.add("");
+                            	rtreerecord.add("");
+                            	rtreerecord.add("");
+                            	rtreerecord.add("");
+                            	
                             	// The first column is always a 64-bit signed integer primary key.
                             	long primarykey = bf.getLong();
-                            	vrow.append(primarykey+";");
+                            	rtreerecord.add(String.valueOf(primarykey));
                             	
                             	//Each R*Tree indices is a virtual component with an odd number of columns between 3 and 11
                             	//The other columns are pairs, one pair per dimension, containing the minimum and maximum values for that dimension, respectively.
@@ -269,17 +347,13 @@ public class RecoveryTask extends Base implements Runnable {
                             	while (number > 0)
                             	{	
 	                            	float rv = bf.getFloat();
-	                            	vrow.append(rv + ";");
+	                            	rtreerecord.add(String.valueOf(rv));
 	                            	number--;
                             	}
                             	
 	                            	
-	                            vrow.append("\n");
-                            	job.ll.add(vrow.toString());
-
-    							System.out.println(vrow);
-    							
-    							entries--;
+	                            updateResultSet(rtreerecord);
+	                            entries--;
 	                            
                             }	
 							
@@ -290,16 +364,21 @@ public class RecoveryTask extends Base implements Runnable {
 					
 					/* if record resides inside a free page -> add a flag char to document this */
 					if(freeList)
-					{    
-					   int idx = rc.indexOf(";");
-					   rc = rc.substring(0, idx) + ";"+ Global.FREELIST_ENTRY + rc.substring(idx+1);
-					   
+					{  
+					   String secondcol = record.get(3);	
+					   secondcol = Global.FREELIST_ENTRY + secondcol;
+					   record.set(3, secondcol);		   
 					}
-					job.ll.add(rc);
+					updateResultSet(record);
 				}
 
 			} // end of for - cell pointer
 
+			
+			
+	
+			
+			
 			
 			/***************************************************************
 			 * STEP 3:
@@ -312,7 +391,7 @@ public class RecoveryTask extends Base implements Runnable {
 			/* before we go to the free blocks an gaps let us first check the area between the header and 
 			   the start byte of the cell content region */
 			
-			buffer.position(headerend);
+			buffer.position(pageheaderend);
 			
 			/* 	Although we have already reached the official end of the cell pointer array, 
 			 *  there may be more pointers startRegion deleted records. They do not belong to the
@@ -320,31 +399,31 @@ public class RecoveryTask extends Base implements Runnable {
 			 *  artifacts in the unallocated space. 
 			 */
 			
-			byte garbage[] = new byte[2];
+			//byte garbage[] = new byte[2];
 			
-			int garbageoffset = -1;
-			do
-			{
+			//int garbageoffset = -1;
+			//do
+			//{
 				
-				buffer.get(garbage);
-				ByteBuffer ignore = ByteBuffer.wrap(garbage);
-				garbageoffset = Auxiliary.TwoByteBuffertoInt(ignore);
+			//	buffer.get(garbage);
+	 	    //	ByteBuffer ignore = ByteBuffer.wrap(garbage);
+			//	garbageoffset = Auxiliary.TwoByteBuffertoInt(ignore);
 				//System.out.println("garbage bytes " + buffer.position());
-			} while (buffer.position() < pagesize && garbageoffset > 0);
+			//} while (buffer.position() < pagesize && garbageoffset > 0);
 			
 			
 			/*  Now, skip all zeros - no information to recover just empty space */
-			byte zerob = 0;
-			while(buffer.position() < pagesize && zerob == 0)
-			{
-				zerob = buffer.get();
-			}
+			//byte zerob = 0;
+			//while(buffer.position() < pagesize && zerob == 0)
+			//{
+			//	zerob = buffer.get();
+			//}
 			
 			/* mark the region startRegion the end of page header till end of zero space as visited */
-			visit.set(headerend,buffer.position());
+//			visit.set(pageheaderend,buffer.position());
 			
 			/* go back one byte */
-			buffer.position(buffer.position()-1);
+			//buffer.position(buffer.position()-1);
 		
 			//System.out.println("First none-zero Byte " + zerob);
 			
@@ -352,27 +431,27 @@ public class RecoveryTask extends Base implements Runnable {
 			//System.out.println("First none zero byte in unallocated space : " + buffer.position());
 			
 			/* only if there is a significant number of bytes in the unallocated area, evaluate it more closely. */
-			if (ccrstart - buffer.position() > 3)
-			{
-				/* try to read record as usual */
-				String rc;
-				
-				/* Tricky thing : data record could be partly overwritten with a new data record!!!  */
-				/* We should read until the end of the unallocated area and not above! */
-				rc = ct.readRecord(buffer.position(), buffer, pagenumber, visit, type, ccrstart - buffer.position(),firstcol,withoutROWID,-1);
-				
-				// add new line to output
-				if (null != rc) { // && rc.length() > 0) {
-					
-					int idx = rc.indexOf(";");
-					rc = rc.substring(0, idx) + ";" + Global.DELETED_RECORD_IN_PAGE  + rc.substring(idx+1);
-					   					
-					
-					//if (job.doublicates.add(rc.hashCode()))
-					job.ll.add(rc);
-				}
-				
-			}
+//			if (ccrstart - buffer.position() > 3)
+//			{
+//				/* try to read record as usual */
+//				String rc;
+//				
+//				/* Tricky thing : data record could be partly overwritten with a new data record!!!  */
+//				/* We should read until the end of the unallocated area and not above! */
+//				rc = ct.readRecord(buffer.position(), buffer, pagenumber, visit, type, ccrstart - buffer.position(),firstcol,withoutROWID,-1);
+//				
+//				// add new line to output
+//				if (null != rc) { // && rc.length() > 0) {
+//					
+//					int idx = rc.indexOf(";");
+//					rc = rc.substring(0, idx) + ";" + Global.DELETED_RECORD_IN_PAGE  + rc.substring(idx+1);
+//					   					
+//					
+//					//if (job.doublicates.add(rc.hashCode()))
+//					job.ll.add(rc);
+//				}
+//				
+//			}
 			
 			
 			/***************************************************************
@@ -391,6 +470,23 @@ public class RecoveryTask extends Base implements Runnable {
 		}
 
 		return 0;
+	}
+	
+	private void updateResultSet(LinkedList<String> line) 
+	{
+		// entry for table name already exists  
+		if (job.resultlist.containsKey(line.getFirst()))
+		{
+			     ObservableList<LinkedList<String>> tablelist = job.resultlist.get(line.getFirst());
+			     tablelist.add(line);  // add row 
+		}
+		
+		// create a new data set since table name occurs for the first time
+		else {
+		          ObservableList<LinkedList<String>> tablelist = FXCollections.observableArrayList();
+				  tablelist.add(line); // add row 
+				  job.resultlist.put(line.getFirst(),tablelist);  	
+		}
 	}
 
 	/**
@@ -479,8 +575,6 @@ public class RecoveryTask extends Base implements Runnable {
 			/* start carving on the complete page */
 			c = new Carver(job, buffer, content, visit, pagenumber);
 
-		//Matcher mat = null;
-		// boolean match = false;
 
 		/* try to get component schema for the current page, if possible */
 		TableDescriptor tdesc = null;
@@ -506,7 +600,6 @@ public class RecoveryTask extends Base implements Runnable {
 		
 		List<Gap> gaps = findGaps();
 
-		System.out.println("gaps.size()" + gaps.size());
 		if (gaps.size() == 0)
 		{
 			debug("no gaps anymore. Stopp search");
@@ -536,7 +629,7 @@ public class RecoveryTask extends Base implements Runnable {
 				
 				if (next.to - next.from > 5)
 					/* do we have at least one match ? */
-					if (c.carve(next.from+4,next.to, stm, CarverTypes.NORMAL, tab.get(n),firstcol)!= Global.CARVING_ERROR) {
+					if (c.carve(next.from,next.to, stm, CarverTypes.NORMAL, tab.get(n))!= Global.CARVING_ERROR) {
 						debug("*****************************  STEP NORMAL finished with matches");
 						
 					}
@@ -548,7 +641,7 @@ public class RecoveryTask extends Base implements Runnable {
 				
 				Gap next = gaps.get(a);
 				
- 				if (c.carve(next.from+4,next.to, stm, CarverTypes.COLUMNSONLY, tab.get(n),firstcol) != Global.CARVING_ERROR) {
+ 				if (c.carve(next.from,next.to, stm, CarverTypes.COLUMNSONLY, tab.get(n)) != Global.CARVING_ERROR) {
 					debug("*****************************  STEP COLUMNSONLY finished with matches");
 					
 				}
@@ -556,14 +649,15 @@ public class RecoveryTask extends Base implements Runnable {
 			
 			gaps = findGaps();
 			
+			int oldhash = gaps.hashCode();
+			
 			
 			for (int a = 0; a < gaps.size(); a++) {
-				
+			
 				Gap next = gaps.get(a);
-				
-				
-				if (c.carve(next.from+4,next.to, stm, CarverTypes.FIRSTCOLUMNMISSING, tab.get(n),firstcol)!= Global.CARVING_ERROR) {
-					debug("*****************************  STEP FIRSTCOLUMNMISSING finished with matches");
+			
+			if (c.carve(next.from,next.to, stm, CarverTypes.FIRSTCOLUMNMISSING, tab.get(n))!= Global.CARVING_ERROR) {
+					debug("RecoveryTask *****************************  STEP FIRSTCOLUMNMISSING finished with matches");
 					
 				}
 			
@@ -595,17 +689,25 @@ public class RecoveryTask extends Base implements Runnable {
 			 * [offset of next free block | length of the current free block | ]
 			 */
 
+
+			
 			/* There are still gaps? */
 			gaps = findGaps();
+			
+			int newhash = gaps.hashCode();
+			
 			
 			for (int a = 0; a < gaps.size(); a++) {
 				
 				
 				Gap next = gaps.get(a);
 			
-				/* one last try with 4+1 instead of 4 Bytes */
-				c.carve(next.from+4+1,next.to, stm, CarverTypes.FIRSTCOLUMNMISSING, tab.get(n),firstcol); 
 				
+				if (oldhash != newhash){
+			        
+					/* one last try with 4+1 instead of 4 Bytes */
+					c.carve(next.from+4,next.to, stm, CarverTypes.FIRSTCOLUMNMISSING, tab.get(n)); 
+				}	
 			}
 			
 
@@ -619,8 +721,6 @@ public class RecoveryTask extends Base implements Runnable {
 		try
 		{
 			recover();
-			/* if task has finished, decrement this counter to inform the main-thread */
-			//System.out.println("task finished" );
 		}
 		catch(Exception err)
 		{
@@ -628,7 +728,7 @@ public class RecoveryTask extends Base implements Runnable {
 		}
 		finally
 		{
-			//System.out.println("task finally" );
+			/* if task has finished, decrement this counter to inform the main-thread */
 			job.runningTasks.decrementAndGet();
 		}
 		
