@@ -1,0 +1,227 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<!--
+    Copyright (c) 2019, Gluon
+    All rights reserved.
+    Redistribution and use in source and binary forms, with or without
+    modification, are permitted provided that the following conditions are met:
+        * Redistributions of source code must retain the above copyright
+    notice, this list of conditions and the following disclaimer.
+        * Redistributions in binary form must reproduce the above copyright
+    notice, this list of conditions and the following disclaimer in the
+    documentation and/or other materials provided with the distribution.
+        * Neither the name of Gluon, any associated website, nor the
+    names of its contributors may be used to endorse or promote products
+    derived from this software without specific prior written permission.
+    THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
+    ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+    WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+    DISCLAIMED. IN NO EVENT SHALL GLUON BE LIABLE FOR ANY
+    DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+    (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+    LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
+    ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+    (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+    SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+-->
+
+<?import javafx.geometry.Insets?>
+<?import javafx.scene.control.Button?>
+<?import javafx.scene.control.CheckBox?>
+<?import javafx.scene.control.Label?>
+<?import javafx.scene.control.Menu?>
+<?import javafx.scene.control.MenuBar?>
+<?import javafx.scene.control.MenuItem?>
+<?import javafx.scene.control.ProgressBar?>
+<?import javafx.scene.control.Separator?>
+<?import javafx.scene.control.Tab?>
+<?import javafx.scene.control.TabPane?>
+<?import javafx.scene.control.TextField?>
+<?import javafx.scene.control.ToolBar?>
+<?import javafx.scene.input.KeyCodeCombination?>
+<?import javafx.scene.layout.AnchorPane?>
+<?import javafx.scene.layout.ColumnConstraints?>
+<?import javafx.scene.layout.GridPane?>
+<?import javafx.scene.layout.HBox?>
+<?import javafx.scene.layout.RowConstraints?>
+<?import javafx.scene.layout.StackPane?>
+<?import javafx.scene.layout.VBox?>
+<?import javafx.scene.text.Font?>
+<?import javafx.scene.image.Image?>
+
+<AnchorPane fx:id="pane" prefHeight="500.0" prefWidth="700.0" stylesheets="@style.css" xmlns="http://javafx.com/javafx/11.0.1" xmlns:fx="http://javafx.com/fxml/1" fx:controller="fqlite.ui.editor.JEditFXController">
+   <children>
+      <VBox fx:id="vbox" prefHeight="400.0" prefWidth="600.0" AnchorPane.bottomAnchor="0.0" AnchorPane.leftAnchor="0.0" AnchorPane.rightAnchor="0.0" AnchorPane.topAnchor="0.0">
+         <children>
+            <MenuBar fx:id="menuBar">
+              <menus>
+                <Menu mnemonicParsing="false" text="File">
+                  <items>
+                        <MenuItem mnemonicParsing="false" onAction="#openFileAction" text="Open" />
+                        <MenuItem mnemonicParsing="false" onAction="#saveFileAction" text="Save" />
+                        <MenuItem mnemonicParsing="false" onAction="#closeFileAction" text="Close" />
+                    <MenuItem mnemonicParsing="false" onAction="#exit" text="Exit">
+                           <accelerator>
+                              <KeyCodeCombination alt="UP" code="Q" control="UP" meta="UP" shift="UP" shortcut="DOWN" />
+                           </accelerator></MenuItem>
+                  </items>
+                </Menu>
+                <Menu mnemonicParsing="false" text="Edit">
+                  <items>
+                        <MenuItem mnemonicParsing="false" text="Cut" />
+                        <MenuItem mnemonicParsing="false" text="Copy" />
+                        <MenuItem mnemonicParsing="false" text="Paste" />
+                    <MenuItem mnemonicParsing="false" text="Delete" />
+                  </items>
+                </Menu>
+                <Menu mnemonicParsing="false" text="Help">
+                  <items>
+                    <MenuItem mnemonicParsing="false" text="About" />
+                  </items>
+                </Menu>
+              </menus>
+            </MenuBar>
+            <HBox prefHeight="40.0" prefWidth="600.0">
+               <children>
+                  <ToolBar prefHeight="45.0" prefWidth="517.0" HBox.hgrow="ALWAYS">
+                     <items>
+                        <Button mnemonicParsing="false" prefHeight="33.0">
+                         <!-- <graphic>
+                              <ImageIcon fill="#6e6d6d" iconLiteral="fa-file" iconSize="24" />
+                           </graphic>  --> 
+                        </Button>
+                        <Button fx:id="openButton" mnemonicParsing="false" onAction="#openFileAction" prefHeight="33.0" prefWidth="33.0">
+                         <!--     <graphic>
+                              <ImageIcon fill="#6e6d6d" iconLiteral="fa-folder-open" iconSize="24" />
+                           </graphic>  -->
+                        </Button>
+                        <Button fx:id="closeButton" mnemonicParsing="false" onAction="#closeFileAction" prefHeight="33.0" prefWidth="33.0">
+                          <!--  <graphic>
+                              <FontIcon fill="#6e6d6d" iconLiteral="fa-folder" iconSize="24" />
+                           </graphic>  -->
+                        </Button>
+                        <Button fx:id="saveButton" mnemonicParsing="false" onAction="#saveFileAction" prefHeight="33.0" prefWidth="33.0">
+                          <!--     <graphic>
+                              <FontIcon fill="#6e6d6d" iconLiteral="fa-save" iconSize="24" />
+                           </graphic> -->
+                        </Button>
+                        <HBox alignment="CENTER" prefHeight="33.0" spacing="5.0">
+                           <children>
+                             <!--  <FontIcon fill="#6e6d6d" iconLiteral="fa-search" HBox.hgrow="NEVER" /> -->
+                              <TextField fx:id="searchField" onKeyPressed="#searchAction" HBox.hgrow="ALWAYS" />
+                              <HBox alignment="CENTER">
+                                 <children>
+                                    <Button mnemonicParsing="false" onAction="#ScrollPrevAction">
+                                      <!--   <graphic>
+                                          <FontIcon fill="#6e6d6d" iconLiteral="fa-arrow-circle-left" />
+                                       </graphic>  -->
+                                    </Button>
+                                    <Button mnemonicParsing="false" onAction="#ScrollNextAction">
+                                     <!--   <graphic>
+                                          <FontIcon fill="#6e6d6d" iconLiteral="fa-arrow-circle-right" />
+                                       </graphic> -->
+                                       </Button> 
+                                 </children>
+                              </HBox>
+                              <VBox fx:id="vboxSearchOptions" alignment="CENTER_LEFT" prefWidth="50.0" spacing="3.0">
+                                 <children>
+                                    <CheckBox fx:id="expertSearch" mnemonicParsing="false" text="Expert">
+                                       <font>
+                                          <Font size="10.0" />
+                                       </font>
+                                    </CheckBox>
+                                    <Label fx:id="searchQuantityLabel" text="0 found">
+                                       <font>
+                                          <Font size="10.0" />
+                                       </font>
+                                    </Label>
+                                 </children>
+                              </VBox>
+                           </children>
+                           <padding>
+                              <Insets left="10.0" />
+                           </padding>
+                        </HBox>
+                     </items>
+                  </ToolBar>
+                  <ToolBar nodeOrientation="RIGHT_TO_LEFT" prefHeight="45.0" prefWidth="156.0" HBox.hgrow="ALWAYS">
+                    <items>
+                        <Button alignment="CENTER" mnemonicParsing="false" onAction="#FontDecreaseAction" prefHeight="33.0" prefWidth="33.0" textFill="#6e6d6d">
+                           <font>
+                              <Font size="14.0" />
+                           </font>
+                          <!--    <graphic>
+                              <FontIcon fill="#6e6d6d" iconLiteral="fa-search-minus" iconSize="16" />
+                           </graphic>  -->
+                        </Button>
+                        <Button alignment="CENTER" mnemonicParsing="false" onAction="#FontIncreaseAction" prefHeight="33.0" prefWidth="33.0" textFill="#6e6d6d">
+                           <font>
+                              <Font size="14.0" />
+                           </font>
+                           <!--   <graphic>
+                              <FontIcon fill="#6e6d6d" iconLiteral="fa-search-plus" iconSize="16" />
+                           </graphic> -->
+                        </Button>
+                        <CheckBox fx:id="wrapTextCheckBox" mnemonicParsing="false" scaleX="0.8" scaleY="0.8" text="Wrap text" textOverrun="CLIP">
+                           <font>
+                              <Font size="10.0" />
+                           </font></CheckBox>
+                    </items>
+                  </ToolBar>
+               </children>
+            </HBox>
+            <TabPane fx:id="tabbedPane" prefHeight="292.0" prefWidth="600.0" tabClosingPolicy="UNAVAILABLE" VBox.vgrow="ALWAYS">
+              <tabs>
+                <Tab text="Untitled Tab 1">
+                     <content>
+                        <StackPane fx:id="mainview" prefHeight="150.0" prefWidth="200.0" />
+                     </content>
+                  </Tab>
+              </tabs>
+            </TabPane>
+            <HBox prefHeight="27.0" prefWidth="600.0" style="-fx-border-color: lightgrey;">
+               <children>
+                  <StackPane fx:id="progressInfo" prefHeight="25.0" prefWidth="204.0">
+                     <children>
+                        <ProgressBar fx:id="progressBar" prefWidth="200.0" progress="0.0" />
+                        <Label fx:id="progressLabel" text="Label" />
+                     </children>
+                  </StackPane>
+                  <GridPane alignment="CENTER_RIGHT" prefHeight="25.0" prefWidth="349.0" HBox.hgrow="ALWAYS">
+                    <columnConstraints>
+                      <ColumnConstraints hgrow="SOMETIMES" maxWidth="318.0" minWidth="10.0" prefWidth="138.0" />
+                        <ColumnConstraints hgrow="SOMETIMES" maxWidth="318.0" minWidth="10.0" prefWidth="131.0" />
+                      <ColumnConstraints hgrow="SOMETIMES" maxWidth="189.0" minWidth="10.0" prefWidth="144.0" />
+                    </columnConstraints>
+                    <rowConstraints>
+                      <RowConstraints minHeight="10.0" prefHeight="30.0" vgrow="SOMETIMES" />
+                    </rowConstraints>
+                     <children>
+                        <Label fx:id="charsetLabel" alignment="CENTER_RIGHT" prefHeight="17.0" text="DEFAULT" textFill="#616060" GridPane.columnIndex="2" GridPane.halignment="RIGHT">
+                          <!--  <graphic>
+                              <Separator orientation="VERTICAL" prefHeight="25.0" />
+                           </graphic> --></Label>
+                        <Label fx:id="sizeLabel" text="Size:" textFill="#616060" GridPane.columnIndex="1">
+                           <!--  <graphic>
+                              <Separator orientation="VERTICAL" prefHeight="25.0" />
+                           </graphic>  -->
+                        </Label>
+                        <Label fx:id="linesLabel" text="Lines:" textFill="#616060">
+                          <!--  <graphic>
+                              <Separator orientation="VERTICAL" prefHeight="25.0" />
+                           </graphic>  -->
+                        </Label>
+                     </children>
+                     <padding>
+                        <Insets left="5.0" right="5.0" />
+                     </padding>
+                  </GridPane>
+               </children>
+               <padding>
+                  <Insets left="5.0" />
+               </padding>
+            </HBox>
+         </children>
+      </VBox>
+   </children>
+</AnchorPane>
