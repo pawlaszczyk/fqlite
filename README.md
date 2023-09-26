@@ -1,20 +1,13 @@
-```
-      __________    __    _ __     
-     / ____/ __ \  / /   (_) /____ 
-    / /_  / / / / / /   / / __/ _ \
-   / __/ / /_/ / / /___/ / /_/  __/
-  /_/    \___\_\/_____/_/\__/\___/ 
-``` 
 
 <p align="center">
   <img width="298" height="123" src="fqlite_logo_256.png?raw=true" alt="FQLite Logo"/>
 </p>
 
-# FQLite - Forensic SQLite Data Recovery Tool
+### FQLite - Forensic SQLite Data Recovery Tool
 
 FQLite is a tool to find and restore deleted records in SQLite databases. It therefore examines the database for entries marked as deleted. Those entries can be recovered and displayed. It is written with the Java programming language. The program can operate with a simple graphical user interface (GUI mode). The program is able to search a SQLite database file for regular as well as deleted records.
 
-# Features
+### Features
 
 FQLite allows you to:
 * browse and recover the content of freelist pages
@@ -36,13 +29,13 @@ Some features:
 * runs out of the box
 
 
-# Official Project Webpage
+### Official Project Webpage
 
 Check out the latest binary version (as a runnable jar-Archive) from the official project homepage
 
 https://www.staff.hs-mittweida.de/~pawlaszc/fqlite/                          
 
-# Technical Background
+### Technical Background
 
 On overview article highlighting the technical background of FQLite can be retrieved from 
 
@@ -53,14 +46,14 @@ Making the Invisible Visible – Techniques for Recovering Deleted SQLite Data R
 International Journal of Cyber Forensics and Advanced Threat Investigations,
 
 
-# Prerequisites
+### Prerequisites
 
 In the latest version, the FQLite is bundled with a Java Runtime Environment (JRE) and all required libraries.
 
 > **Important note:** With version 2.0 the support for the command line mode was cancelled.
 
 
-# Installation and  Usage
+### Installation and  Usage
 
 To run the FQLite in GUI mode the executable can normally be started with a double-click on the run file. FQLite is written in Java. For the convenience of the user, the runtime environment and all necessary libraries are included and shipped with the install file. Just download the version for your system environment and start immediately.
 
@@ -83,7 +76,7 @@ Then call the shell script to start FQLite:
 $ ./run.sh
 ```
 
-# Licence and Author
+### Licence and Author
 
 Author: Dirk Pawlaszczyk <pawlaszc@hs-mittweida.de>
 
