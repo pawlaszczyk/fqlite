@@ -5,23 +5,23 @@ FQLite is a tool to find and restore deleted records in SQLite databases. It the
 # Features
 
 FQLite allows you to:
-- browse and recover the content of freelist pages
-- recover records in all database pages including unallocated space
-- support of UTF-8,UTF-16BE,UTF-16LE encoded databases
-- support for multi-byte columns as well as overflow pages
-- recover dropped tables
-- create CSV-format data export
-- support for Rollback-Journals and WAL-Archives
-- integrated Hex-Viewer
-- support a forensically sound investigation of database files
+* browse and recover the content of freelist pages
+* recover records in all database pages including unallocated space
+* support of UTF-8,UTF-16BE,UTF-16LE encoded databases
+* support for multi-byte columns as well as overflow pages
+* recover dropped tables
+* create CSV-format data export
+* support for Rollback-Journals and WAL-Archives
+* integrated Hex-Viewer
+* support a forensically sound investigation of database files
 
 Some features:
 
-- written with Java standard class library
-- JavaFX-based graphical user interface
-- open-source
-- free of charge
-- runs out of the box
+* written with Java standard class library
+* JavaFX-based graphical user interface
+* open-source
+* free of charge
+* runs out of the box
 
 
 # Official Project Webpage
@@ -59,14 +59,17 @@ FQLite works well on Windows. First, download the zip archive to your computer f
 FQLite works well on Linux. First, download the tar archive to your computer from this page. Open a command shell and change to the download folder.
 
 Now unpack the tar archive with the following command:
+```
 $ tar zxvf fqlite.tar.gz 
-
+```
 Change to the application folder:
+```
 $ cd fqlite
-
+```
 Then call the shell script to start FQLite:
+```
 $ ./run.sh
-
+```
 
 # Licence and Author
 
