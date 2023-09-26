@@ -37,13 +37,13 @@ Some features:
 
 ### Official Project Webpage
 
-Check out the latest binary version (as a runnable jar-Archive) from the official project homepage
+Check out the latest binary version (for Intel as well as ARM-based systems) from the official project homepage
 
 https://www.staff.hs-mittweida.de/~pawlaszc/fqlite/                          
 
 ### Technical Background
 
-On overview article highlighting the technical background of FQLite can be retrieved from 
+An overview article highlighting the technical background of FQLite can be retrieved from 
 
 https://conceptechint.net/index.php/CFATI/article/view/17/6
 
@@ -63,11 +63,11 @@ In the latest version, the FQLite is bundled with a Java Runtime Environment (JR
 
 To run the FQLite in GUI mode the executable can normally be started with a double-click on the run file. FQLite is written in Java. For the convenience of the user, the runtime environment and all necessary libraries are included and shipped with the install file. Just download the version for your system environment and start immediately.
 
-FQLite works well on `MAC OS`. First, download the DMG archive to your computer from this page. Double-click the DMG file to open it, and you'll see a Finder window. Often these will include the application itself, some form of arrow, and a shortcut to the Applications folder. Simply drag the application's icon to your Applications folder and you're done: the software is now installed and ready to use.
+FQLite works well on **MAC OS**. First, download the DMG archive to your computer from this page. Double-click the DMG file to open it, and you'll see a Finder window. Often these will include the application itself, some form of arrow, and a shortcut to the Applications folder. Simply drag the application's icon to your Applications folder and you're done: the software is now installed and ready to use.
 
-FQLite works well on `Windows`. First, download the zip archive to your computer from this page. Unpack the archive file. Now change to the subfolder fqlite. The application can be started by calling the batch file run.bat.
+FQLite works well on **Windows**. First, download the zip archive to your computer from this page. Unpack the archive file. Now change to the subfolder fqlite. The application can be started by calling the batch file run.bat.
 
-FQLite works well on `Linux`. First, download the tar archive to your computer from this page. Open a command shell and change to the download folder.
+FQLite works well on **Linux***. First, download the tar archive to your computer from this page. Open a command shell and change to the download folder.
 
 Now unpack the tar archive with the following command:
 ```
