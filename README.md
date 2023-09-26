@@ -53,7 +53,7 @@ International Journal of Cyber Forensics and Advanced Threat Investigations,
 
 In the latest version, the FQLite is bundled with a Java Runtime Environment (JRE) and all required libraries.
 
-Important note: With version 2.0 the support for the command line mode was cancelled.
+> **Important note:** With version 2.0 the support for the command line mode was cancelled.
 
 
 # Installation and  Usage
