@@ -25,6 +25,8 @@ FQLite allows you to:
 * support for Rollback-Journals and WAL-Archives
 * integrated Hex-Viewer
 * support a forensically sound investigation of database files
+* support for decoding of bplist, protobuffer and BASE64 encoded cell values
+* automatic detection of different BLOB types like .png, .bmp, .gif, .jpeg, .tiff, .heic, .pdf
 
 Some features:
 
