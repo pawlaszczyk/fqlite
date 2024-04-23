@@ -95,6 +95,7 @@ FQLite ist using the following libraries:
 * commons-lang3-3.13.0.jar (Apache License, Version 2.0)
 * commons-logging-1.2.jar (Apache License, Version 2.0)
 * cssfx-11.5.1.jar (Apache License, Version 2.0)
+* FxTextEditor (https://github.com/andy-goryachev/FxTextEditor) (Apache License, Version 2.0)
 * msgpack-core-0.9.0.jar (MIT)
 * pdfbox-3.0.0.jar (Apache License, Version 2.0)
 * pdfbox-io-3.0.0.jar (Apache License, Version 2.0)
