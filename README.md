@@ -86,21 +86,21 @@ $ ./run.sh
 
 ### 3rd Party libraries (Bill of Materials - BOM)
 FQLite ist using the following libraries:
-* antlr-4.8-complete.jar
-* avro-1.11.1.jar
-* bplist.jar
-* bson-3.6.0.jar
-* commons-codec-1.15.jar
-* commons-io-2.14.0.jar
-* commons-lang3-3.13.0.jar
-* commons-logging-1.2.jar
-* cssfx-11.5.1.jar
-* msgpack-core-0.9.0.jar
-* pdfbox-3.0.0.jar
-* pdfbox-io-3.0.0.jar
-* pdfviewfx-3.0.0.jar
-* readablethrift-1.0.0-all.jar
-* SerializationDumper-v.1.13.jar
+* antlr-4.8-complete.jar (BSD-3-Clause license)
+* avro-1.11.1.jar (Apache License, Version 2.0)
+* bplist.jar (Apache License, Version 2.0)
+* bson-3.6.0.jar (Apache License, Version 2.0)
+* commons-codec-1.15.jar (Apache License, Version 2.0)
+* commons-io-2.14.0.jar (Apache License, Version 2.0)
+* commons-lang3-3.13.0.jar (Apache License, Version 2.0)
+* commons-logging-1.2.jar (Apache License, Version 2.0)
+* cssfx-11.5.1.jar (Apache License, Version 2.0)
+* msgpack-core-0.9.0.jar (MIT)
+* pdfbox-3.0.0.jar (Apache License, Version 2.0)
+* pdfbox-io-3.0.0.jar (Apache License, Version 2.0)
+* pdfviewfx-3.0.0.jar (Apache License, Version 2.0)
+* readablethrift-1.0.0-all.jar (Apache License, Version 2.0)
+* SerializationDumper-v.1.13.jar (MIT)
 
 ### Licence and Author
 
