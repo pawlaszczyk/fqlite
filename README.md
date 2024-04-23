@@ -84,6 +84,16 @@ Then call the shell script to start FQLite:
 $ ./run.sh
 ```
 
+### 3rd Party libraries (Bill of Materials - BOM)
+FQLite ist using the following libraries:
+antlr-4.8-complete.jar
+avro-1.11.1.jar
+bplist.jar
+bson-3.6.0.jar
+commons-codec-1.15.jar
+
+
+
 ### Licence and Author
 
 Author: Dirk Pawlaszczyk <pawlaszc@hs-mittweida.de>
