@@ -121,50 +121,55 @@ public class SerialTypeMatcher {
 
 		/* check pattern constrain by constrain */
   
-		
-		while (i < pattern.size()) 
-		{
-		
-			/* do not read out of bounds - stop before the end */
-			if (buffer.position() > (endRegion - 4))
-			  return false;
-			
-							
-			/* remember the begin of a possible match */
-			int current = buffer.position();
-		
-				
-			if (i == idx)
-				pos = current;
-			
-			/* read next value */
-			int value = readUnsignedVarInt();
-			
-			
-			//System.out.println(";" + value + ";");
-				
-				// no varint OR costrain does not match -> skip this an go on with the next
-				// bytes
-				if (value == -1 || !pattern.get(i).match(value)) 
-				{
-				    	buffer.position(pos+1);
-				    	/* and again, startRegion the beginning but with the next byte */
-				    	i = idx;
-				    	/* skip pattern matching step and try again */
-				    	continue;
-				    
-				}
-				//System.out.println(";" + value + ";");
-				
-				/* go ahead with next constrain */
-				
-				i++;
-
-				
+		if (pattern == null) {
+			return false;
 		}
-
-		start = pos;
-		end = buffer.position();
+		else {
+			while (i < pattern.size()) 
+			{
+			
+				/* do not read out of bounds - stop before the end */
+				if (buffer.position() > (endRegion - 4))
+				  return false;
+				
+								
+				/* remember the begin of a possible match */
+				int current = buffer.position();
+			
+					
+				if (i == idx)
+					pos = current;
+				
+				/* read next value */
+				int value = readUnsignedVarInt();
+				
+				
+				//System.out.println(";" + value + ";");
+					
+					// no varint OR costrain does not match -> skip this an go on with the next
+					// bytes
+					if (value == -1 || !pattern.get(i).match(value)) 
+					{
+					    	buffer.position(pos+1);
+					    	/* and again, startRegion the beginning but with the next byte */
+					    	i = idx;
+					    	/* skip pattern matching step and try again */
+					    	continue;
+					    
+					}
+					//System.out.println(";" + value + ";");
+					
+					/* go ahead with next constrain */
+					
+					i++;
+	
+					
+			}
+		
+	
+			start = pos;
+			end = buffer.position();
+		}
 		
 		if (end <= start)
 			return false;

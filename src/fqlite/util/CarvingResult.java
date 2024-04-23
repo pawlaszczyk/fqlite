@@ -13,10 +13,10 @@ public class CarvingResult {
 
 	public StringBuffer bf;
 	public int rcursor;
-	public int offset; 
+	public long offset; 
 	public LinkedList<String> record;
 	
-	public CarvingResult(int rcursor,int offset, StringBuffer result, LinkedList<String> record)
+	public CarvingResult(int rcursor,long offset, StringBuffer result, LinkedList<String> record)
 	{
 		bf = result;
 		this.rcursor = rcursor;

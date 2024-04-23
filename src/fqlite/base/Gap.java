@@ -8,10 +8,10 @@ package fqlite.base;
  *
  */
 public class Gap {
-	int from;
-	int to;
+	public int from;
+	public int to;
 
-	Gap(int fromIdx, int toIdx) {
+	public Gap(int fromIdx, int toIdx) {
 		from = fromIdx;
 		to = toIdx;
 	}

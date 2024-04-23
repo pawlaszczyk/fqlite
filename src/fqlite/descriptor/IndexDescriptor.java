@@ -2,11 +2,14 @@ package fqlite.descriptor;
 
 import java.util.ArrayList;
 import java.util.Hashtable;
+import java.util.Iterator;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.regex.Pattern;
+import fqlite.base.Job;
 import fqlite.pattern.HeaderPattern;
 import fqlite.util.Auxiliary;
+import fqlite.util.VIntIter;
 
 /**
  * Objects of this class are used to represent an indices. 
@@ -18,10 +21,9 @@ import fqlite.util.Auxiliary;
  * @author pawlaszc
  *
  */
+@SuppressWarnings("rawtypes")
 public class IndexDescriptor extends AbstractDescriptor implements Comparable{
 
-	public List<String> columntypes;
-	public ArrayList<String> columnnames;
 	public List<String> boolcolumns;
 	int size = 0;
 	public String idxname = "";
@@ -30,8 +32,23 @@ public class IndexDescriptor extends AbstractDescriptor implements Comparable{
     public HeaderPattern hpattern = null;	
     private String sql = "";
 	public Hashtable<String,String> tooltiptypes = new Hashtable<String,String>();
-
+	public TableDescriptor table = null;
+	public Job job;
+	
+	public void addColumtype(String columntype){
+		serialtypes.add(columntype);
+		columntypes.add(columntype);
+	}
        
+	public List<String> getColumntypes() {
+		return serialtypes;
+	}
+
+
+	public void setColumntypes(List<String> columntypes) {
+		this.serialtypes = columntypes;
+	}
+	
     public boolean checkMatch(String match) {
 		
         try
@@ -41,58 +58,64 @@ public class IndexDescriptor extends AbstractDescriptor implements Comparable{
 	
 			/* interpret all byte values as a list of varints */
 			/* each varint represents a columntype */
-			int[] values = Auxiliary.readVarInt(bcol);
-	
+			VIntIter values = VIntIter.wrap(bcol,4);
+			
+			
 			/*
 			 * normally, the first byte of the match holds total length of header bytes
 			 * including this byte
 			 */
-			int headerlength = values[0];
-			System.out.println(headerlength);
+			//int headerlength = values.next().length;
+			//System.out.println(headerlength);
+			values.next();
 			
 			boolean valid = true;
-	
+	        int i = 1;
 			// check serialtypes, only if all serialtypes are valid the match is valid too
-			for (int i = 1; i < values.length; i++) {
+			while (values.hasNext()) {
+				
+				int value = values.next();
+				
 				/* get next column */
 				String type = columntypes.get(i - 1);
 	
 				switch (type) {
 				case "INT":
 					/* an INT column has always a value between 0..6 */
-					valid = values[i] >= 0 && values[i] <= 6;
+					valid = value >= 0 && value <= 6;
 					break;
 				case "REAL":
 					/* a FLOATING POINT COLUMN is always mapped with value 7 */
-					valid = values[i] == 7;
+					valid = value == 7;
 					break;
 				case "TEXT":
 					/* a TEXT COLUMN has always an odd value bigger 13 or is zero */
-					if (values[i] == 0)
+					if (value == 0)
 						valid = true;
-					else if (values[i] % 2 != 0)
-						valid = values[i] > 13;
+					else if (value % 2 != 0)
+						valid = value > 13;
 					else
 						valid = false;
 					break;
 				case "BLOB":
 					/* a BLOB COLUMN has always an even value bigger 13 or is zero */
-					if (values[i] == 0)
+					if (value == 0)
 						valid = true;
-					else if (values[i] % 2 == 0)
-						valid = values[i] > 12;
+					else if (value % 2 == 0)
+						valid = value > 12;
 					else
 						valid = false;
 					break;
 	
 				case "NUMERIC":
-					valid = values[i] >= 0 && values[i] <= 9;
+					valid = value >= 0 && value <= 9;
 					break;
 				}
 	
 				/* as soon as one of the serialtypes is not valid -> discard the match */
 				if (!valid)
 					return false;
+			i++;
 			}
         }
         catch(Exception err)
@@ -106,31 +129,34 @@ public class IndexDescriptor extends AbstractDescriptor implements Comparable{
 	}
 
 
-	public IndexDescriptor(String idxname, String tablename, String stmt, ArrayList<String> names) {
+	 /**
+	  * Use this method to initialize a new index table description object. 
+	  * @param job	The job/database it belongs to
+	  * @param idxname name of the index (from the schema)
+	  * @param tablename name of the table the index belongs to
+	  * @param stmt the concrete sql statement used to create the index
+	  * @param names list of column names 
+	  */
+	public IndexDescriptor(Job job, String idxname, String tablename, String stmt, ArrayList<String> names) {
 
 		super.ROWID = false;
 		columnnames = names;
 		this.idxname = idxname;
 		this.tablename = tablename;
 		this.columntypes = new LinkedList<String>();
+		this.serialtypes = new LinkedList<String>();
+		
 		this.setSql(stmt);
 		this.boolcolumns = new LinkedList<String>();
 		
-		/* find the bool columns */ 
-		for(int i=0; i < names.size(); i++)
-		{
+		/* assign the correct table description object to the index table */
+		Iterator<TableDescriptor> tbls = job.headers.iterator();
+		while(tbls.hasNext()) {
 		
-			if (columntypes.size()>i && columntypes.get(i).startsWith("BOOL"))
-			{
-				this.boolcolumns.add(names.get(i));
-			}
-		
-			if (columntypes.size() > i )
-				tooltiptypes.put(names.get(i),columntypes.get(i));
-			
+			TableDescriptor td = tbls.next();
+				if(td.tblname.equals(tablename))
+					this.table = td;
 		}
-		
-		
 	}
 	
 
@@ -166,6 +192,15 @@ public class IndexDescriptor extends AbstractDescriptor implements Comparable{
 		return this.root;
 	}
 
+	
+	public HeaderPattern getHpattern() {
+		return hpattern;
+	}
+
+
+	public void setHpattern(HeaderPattern hpattern) {
+		this.hpattern = hpattern;
+	}
 	
 	/**
 	 * Returns the indices header length.
@@ -237,8 +272,8 @@ public class IndexDescriptor extends AbstractDescriptor implements Comparable{
 	 * 
 	 **/
 	public void printIndexDefinition() {
-		System.out.println("Index" + idxname);
-		System.out.println("COLUMNS: " + columnnames);
+		//System.out.println("Index" + idxname);
+		//System.out.println("COLUMNS: " + columnnames);
 	}
 
 	@Override
@@ -271,8 +306,10 @@ public class IndexDescriptor extends AbstractDescriptor implements Comparable{
 		
 	}
 
-	public String getToolTypeForColumn(String column){
-		return tooltiptypes.get(column);
+	public String getSqlTypeForColumn(String column){
+		if (column.equals("rowid"))
+			return "INTEGER";
+		return this.table.getSqlTypeForColumn(column);
 	}
 
 	

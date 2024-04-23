@@ -6,9 +6,10 @@ import java.util.LinkedList;
 import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+
+import fqlite.log.AppLog;
 import fqlite.pattern.HeaderPattern;
 import fqlite.util.Auxiliary;
-import fqlite.util.Logger;
 
 /**
  * Objects of this class are used to represent a component. 
@@ -24,12 +25,13 @@ public class TableDescriptor extends AbstractDescriptor implements Comparable<Ta
 
 	String regex = "";
 	String delregex = "";
-	public List<String> serialtypes;
-	public List<String> columnnames;
+	//public List<String> serialtypes;
+	//public List<String> columnnames;
 	public List<String> sqltypes;
 	public List<String> constraints; // constraint for each column
 	public List<String> tableconstraints; // constraints on table level
 	public List<String> primarykeycolumns;
+	public List<Integer> primarykeycolumnnumbers;
 	public List<String> boolcolumns;
 	public Hashtable<String,String> tooltiptypes = new Hashtable<String,String>();
 	
@@ -37,7 +39,7 @@ public class TableDescriptor extends AbstractDescriptor implements Comparable<Ta
 	int numberofmultibytecolumns = 0;
 	String fingerprint = ""; // the regex expression
 	String signature = ""; // the type signature, i.e., INTSTRINGSTINGINT
-	public String tblname = "";
+	//public String tblname = "";
 	public int root = -1;
 	public boolean ROWID = true; 
     private HeaderPattern hpattern = null;	
@@ -182,6 +184,7 @@ public class TableDescriptor extends AbstractDescriptor implements Comparable<Ta
 		this.tblname = tblname;
 		
 		primarykeycolumns = new LinkedList<String>();
+		primarykeycolumnnumbers = new LinkedList<Integer>();
 		boolcolumns = new LinkedList<String>();
 		
 		
@@ -190,7 +193,7 @@ public class TableDescriptor extends AbstractDescriptor implements Comparable<Ta
 		for(int i=0; i < names.size(); i++)
 		{
 			
-			if (tblname.equals("__UNASSIGNED"))
+			if (tblname.equals("__FREELIST"))
 				break;
 			if (constraints == null)
 				break;
@@ -221,14 +224,22 @@ public class TableDescriptor extends AbstractDescriptor implements Comparable<Ta
 				 
 				String constraint = tableconstraints.get(i);
 				
-				Matcher m = Pattern.compile("PRIMARYKEY\\((.*?)\\)").matcher(constraint);
+				System.out.println("constraint " + constraint);
+				
+				Matcher m = Pattern.compile("PRIMARY\\s?KEY\\((.*?)\\)").matcher(constraint);
 				while (m.find()) {
 					String key = m.group(1);
-				    System.out.println("Table Constraint Key "  + key);
+				    //System.out.println("Table Constraint Key "  + key);
 				    if (!key.contains(","))
 				    {
+				    	if (key.startsWith("\"") && key.endsWith("\""))
+				    		key= key.substring(1,key.length()-1);
 				    	// simple key like 'id'
 				    	this.primarykeycolumns.add(key);
+				    	int index = this.columnnames.indexOf(key);
+				    	if (index >= 0) {
+				    		this.primarykeycolumnnumbers.add(index);
+				    	} 
 				    }
 				    else
 				    {
@@ -237,6 +248,11 @@ public class TableDescriptor extends AbstractDescriptor implements Comparable<Ta
 				        for(String c: parts)
 				        {
 					    	this.primarykeycolumns.add(c);
+					    	int index = this.columnnames.indexOf(c);
+					    	if (index >= 0) {
+					    		this.primarykeycolumnnumbers.add(index);
+					    	}
+				        
 				        }
 				    }
 				}
@@ -259,6 +275,7 @@ public class TableDescriptor extends AbstractDescriptor implements Comparable<Ta
 		{	
 			int i = names.indexOf(primarykeycolumns.get(0));
 			System.out.println("Primary key column :: " + i);
+    		this.primarykeycolumnnumbers.add(i);
 			if(i >= 0 && sqltypes.get(i).toUpperCase().equals("INTEGER"))
 			{
 				if(!constraints.get(i).toUpperCase().contains("DESC"))
@@ -266,8 +283,12 @@ public class TableDescriptor extends AbstractDescriptor implements Comparable<Ta
 					System.out.println("Attention!!! integer primary key: " + names.get(i));
 					/* Note: this column has the columntype "00" */
 					rowidcolumn = names.get(i);
+					try {
 					pattern.change2RowID(i+1); // because there is a Header length constraint on index 0 (+1)
-				    Logger.out.debug("set rowid column for table " + tblname + " to " + i);
+					}catch(Exception err){
+						System.out.println("ERROR: change2RowID doesn't work");
+					}
+					AppLog.debug("set rowid column for table " + tblname + " to " + i);
 					rowid_col = i;
 				}
 			}	
@@ -289,7 +310,7 @@ public class TableDescriptor extends AbstractDescriptor implements Comparable<Ta
 	}
 	
 	
-	public String getToolTypeForColumn(String column){
+	public String getSqlTypeForColumn(String column){
 		return tooltiptypes.get(column);
 	}
 	
@@ -473,8 +494,8 @@ public class TableDescriptor extends AbstractDescriptor implements Comparable<Ta
 	 * 
 	 **/
 	public void printTableDefinition() {
-		System.out.println("TABLE" + tblname);
-		System.out.println("COLUMNS: " + columnnames);
+		//System.out.println("TABLE" + tblname);
+		//System.out.println("COLUMNS: " + columnnames);
 	}
 
 	@Override
@@ -488,10 +509,10 @@ public class TableDescriptor extends AbstractDescriptor implements Comparable<Ta
 		return output;
 	}
 
-	@Override
-	public boolean equals(Object o) {
-		return this.regex.equals(((TableDescriptor) o).regex);
-	}
+	
+	//public boolean equals(Object o) {
+	//	return this.regex.equals(((TableDescriptor) o).regex);
+	//}
 
 
 	public List<String> getColumntypes() {
@@ -523,8 +544,20 @@ public class TableDescriptor extends AbstractDescriptor implements Comparable<Ta
 	}
 
 
-	
+	@Override
 	public int compareTo(TableDescriptor o) {
 		return tblname.compareTo(o.tblname);	
 	}
+	
+	@Override
+	public boolean equals(Object o) {
+	   if (o instanceof TableDescriptor)
+	    	return equals((TableDescriptor)o);
+	   return false;
+	}	
+	
+	public boolean equals(TableDescriptor o) {
+		return tblname.equals(o.tblname);	
+	}
+	
 }

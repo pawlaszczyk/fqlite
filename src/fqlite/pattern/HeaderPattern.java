@@ -17,7 +17,7 @@ import java.util.List;
  */
 public class HeaderPattern {
 	
-	List<Constraint> pattern = new ArrayList<Constraint>();
+	public List<Constraint> pattern = new ArrayList<Constraint>();
 
 	/**
 	 *  Do nothing. Default-Constructor.

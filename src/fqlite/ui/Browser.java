@@ -4,12 +4,10 @@ import javafx.event.ActionEvent;
 import javafx.event.EventHandler;
 import javafx.geometry.HPos;
 import javafx.geometry.VPos;
-import javafx.scene.Node;
 import javafx.scene.control.Hyperlink;
 import javafx.scene.image.Image;
 import javafx.scene.image.ImageView;
 import javafx.scene.layout.HBox;
-import javafx.scene.layout.Priority;
 import javafx.scene.layout.Region;
 import javafx.scene.web.WebEngine;
 import javafx.scene.web.WebView;
@@ -74,12 +72,7 @@ public class Browser extends Region {
 	        getChildren().add(browser); 
 	    }
 	 
-	    private Node createSpacer() {
-	        Region spacer = new Region();
-	        HBox.setHgrow(spacer, Priority.ALWAYS);
-	        return spacer;
-	    }
-	 
+	    
 	    @Override protected void layoutChildren() {
 	        double w = getWidth();
 	        double h = getHeight();

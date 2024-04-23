@@ -1,11 +1,19 @@
 package fqlite.ui;
 
 
+import java.awt.Desktop;
+import java.io.IOException;
+import java.net.URI;
+
 import fqlite.base.GUI;
 import fqlite.base.Global;
+import javafx.event.ActionEvent;
+import javafx.event.EventHandler;
 import javafx.geometry.Insets;
+import javafx.geometry.Pos;
 import javafx.scene.control.ButtonType;
 import javafx.scene.control.DialogPane;
+import javafx.scene.control.Hyperlink;
 import javafx.scene.control.Label;
 import javafx.scene.control.TextArea;
 import javafx.scene.image.Image;
@@ -14,10 +22,10 @@ import javafx.scene.layout.Background;
 import javafx.scene.layout.BackgroundFill;
 import javafx.scene.layout.CornerRadii;
 import javafx.scene.layout.GridPane;
+import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
+import javafx.scene.layout.VBox;
 import javafx.scene.paint.Color;
-import javafx.stage.Stage;
-import javafx.stage.Window;
 
 /*
  ---------------
@@ -68,7 +76,9 @@ import javafx.stage.Window;
 public class AboutDialog extends javafx.scene.control.Dialog<Object>{
 
     javafx.scene.Node root;
-    final DialogPane dialogPane = getDialogPane();
+    DialogPane dialogPane = getDialogPane();
+    VBox content = new VBox();
+    
     
 	public AboutDialog(javafx.scene.Node rootelement) {
 		
@@ -97,9 +107,29 @@ public class AboutDialog extends javafx.scene.control.Dialog<Object>{
         		+ "Author: Dirk Pawlaszczyk \n\n"
         		+ "Mittweida University of Applied Sciences\n"
         		+ "Germany\n"
-        		//+ "Web: https://www.staff.hs-mittweida.de/~pawlaszc/fqlite/\n"
-        		+ "\u00A9 2023");
-       
+        		+ "\u00A9 "+ Global.YEAR);
+        
+        
+        Hyperlink link = new Hyperlink();
+        link.setText("https://www.staff.hs-mittweida.de/~pawlaszc/fqlite/");
+        link.setOnAction(new EventHandler<ActionEvent>() {
+            @Override
+            public void handle(ActionEvent e) {
+            	
+            	try {
+                    if (Desktop.isDesktopSupported()) {
+                        Desktop desktop = Desktop.getDesktop();
+                        if (desktop.isSupported(Desktop.Action.BROWSE)) {
+                            desktop.browse(URI.create("https://www.staff.hs-mittweida.de/~pawlaszc/fqlite/"));
+                        }
+                    }
+                } catch (IOException | InternalError err) {
+                    err.printStackTrace();
+                }
+            
+            }
+        });
+        
 	
 		String license =  
 				
@@ -133,16 +163,44 @@ public class AboutDialog extends javafx.scene.control.Dialog<Object>{
 		expContent.add(label, 0, 0);
 		expContent.add(textArea, 0, 1);
 
+		
+		
+		
+		//content.getChildren().add(dialogPane);
+		TextArea ta = new TextArea();
+		ta.setText("FQLite Retrieval Tool, Version " + Global.FQLITE_VERSION + "\n" 
+        		+ "Author: Dirk Pawlaszczyk \n\n"
+        		+ "Mittweida University of Applied Sciences\n"
+        		+ "Germany\n"
+        		+ "\u00A9 "+ Global.YEAR
+        		+ "\n"
+        		+ "\n"
+        		+ "FQLite for SQLite is bi-licensed under the Mozilla Public License Version 2, \n"
+        		+ "as well as the GNU General Public License Version 3 or later. \n"
+				+ "You can modify or redistribute it under the conditions of these licenses.\n"
+				);
+   
+		
+		Label lb = new Label("Find us on Web: ");
+		
+		
+		content.getChildren().add(ta);
+		
+		HBox fl = new HBox();
+		fl.setAlignment(Pos.CENTER);
+		
+		fl.getChildren().add(lb);
+		fl.getChildren().add(link);
+		
+		content.getChildren().add(fl);
+		
+		getDialogPane().contentProperty().set(content);
+		
+		
 		// Set expandable Exception into the dialog pane.
 		getDialogPane().setExpandableContent(expContent);
-
-
-		final Window window = getDialogPane().getScene().getWindow();
-		Stage stage = (Stage) window;
-		//stage.setMinHeight(600);
-		//stage.setMinWidth(700);
-		//stage.setMaxHeight(700);
-		//stage.setMaxWidth(800);
+    
+		//final Window window = getDialogPane().getScene().getWindow();
 	}
 	
 }

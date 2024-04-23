@@ -28,13 +28,12 @@ public class RollbackPropertyPanel extends StackPane{
 	public RollbackPropertyPanel(FileInfo info)
 	{
 		this.info = info;
-		
-		StackPane head = new StackPane();
 		this.getChildren().add(tabpane);
 
 	}
 	
 	
+	@SuppressWarnings({ "rawtypes", "unchecked" })
 	public void initHeaderTable(String[][] data)
 	{
 		
@@ -75,6 +74,7 @@ public class RollbackPropertyPanel extends StackPane{
 		
 	}
 	
+	@SuppressWarnings({ "unchecked", "rawtypes" })
 	private void fillTable(TableView table, String[][] data)
 	{
 		// define array list for all table rows 

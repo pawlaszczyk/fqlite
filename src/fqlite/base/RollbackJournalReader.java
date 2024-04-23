@@ -14,15 +14,16 @@ import java.util.Hashtable;
 import java.util.Iterator;
 import java.util.LinkedList;
 import java.util.List;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.Future;
 
 import fqlite.descriptor.AbstractDescriptor;
 import fqlite.descriptor.TableDescriptor;
+import fqlite.log.AppLog;
 import fqlite.pattern.SerialTypeMatcher;
 import fqlite.types.CarverTypes;
 import fqlite.util.Auxiliary;
-import fqlite.util.Logger;
 import javafx.collections.FXCollections;
 import javafx.collections.ObservableList;
 
@@ -40,13 +41,16 @@ import javafx.collections.ObservableList;
  * @author pawlaszc
  *
  */
-public class RollbackJournalReader extends Base {
+public class RollbackJournalReader{
 
 	public static final String MAGIC_HEADER_STRING = "d9d505f920a163d7";
 	
 	/* An asynchronous channel for reading, writing, and manipulating a file. */
 	public AsynchronousFileChannel file;
 
+	/* this is a multi-threaded program -> all data are saved to the list first*/
+	ConcurrentHashMap<String,ObservableList<LinkedList<String>>> resultlist = new ConcurrentHashMap<>();
+	
 	/* This buffer holds RollbackJournal-file in RAM */
 	ByteBuffer rollbackjournal;
 
@@ -57,7 +61,7 @@ public class RollbackJournalReader extends Base {
 	public int ps;
 
 	/* path to RollbackJournal-file */
-	String path;
+	public String path;
 
 	/* flag for already visited Bytes of the page */
 	BitSet visit = null;
@@ -130,7 +134,7 @@ public class RollbackJournalReader extends Base {
 		try {
 			file = AsynchronousFileChannel.open(p, StandardOpenOption.READ);
 		} catch (Exception e) {
-            this.err("Cannot open RollbackJournal-file" + p.getFileName());
+            AppLog.error("Cannot open RollbackJournal-file" + p.getFileName());
 			return;
 		}
 
@@ -196,28 +200,28 @@ public class RollbackJournalReader extends Base {
 
 		if (Auxiliary.bytesToHex(head).equals(MAGIC_HEADER_STRING))
 		{
-			info("header is okay. seems to be an rollback journal file.");
+			AppLog.info("header is okay. seems to be an rollback journal file.");
 		}
 		else 
 		{
-				info("This file does not contain a valid header.");
+				AppLog.info("This file does not contain a valid header.");
 				
 		}
 		
 		pagecount = Integer.toUnsignedLong(header.getInt());
-		info(" pagecount " + pagecount);
+		AppLog.info(" pagecount " + pagecount);
 
 		nounce = Integer.toUnsignedLong(header.getInt());
-		info(" nounce " + nounce);
+		AppLog.info(" nounce " + nounce);
 
 		pages = Integer.toUnsignedLong(header.getInt());
-		info(" pages " + pages);
+		AppLog.info(" pages " + pages);
 		
 		sectorsize = Integer.toUnsignedLong(header.getInt());
-		info(" sector size  " + sectorsize);
+		AppLog.info(" sector size  " + sectorsize);
 		
 		journalpagesize = Integer.toUnsignedLong(header.getInt());
-		info(" journal page size  " + journalpagesize);
+		AppLog.info(" journal page size  " + journalpagesize);
 
 		
 	    journalpointer = 512; // this is the position, where the first frame should be
@@ -237,7 +241,7 @@ public class RollbackJournalReader extends Base {
 			/* get the page number of the journal page in main db */
 			
 		    pagenumber_maindb = rollbackjournal.getInt();
-			debug("pagenumber of journal-entry " + pagenumber_maindb);
+			AppLog.debug("pagenumber of journal-entry " + pagenumber_maindb);
 			
 			//* offset of the journal page -> save it */
 			int pageoffset = rollbackjournal.position();
@@ -267,9 +271,26 @@ public class RollbackJournalReader extends Base {
 			
 		}while(next);
 
-		info("Lines after RollbackJournal-file recovery: " + output.size());
-		info("Number of pages in RollbackJournal-file" + numberofpages);
+		AppLog.info("Lines after RollbackJournal-file recovery: " + output.size());
+		AppLog.info("Number of pages in RollbackJournal-file" + numberofpages);
 	
+	}
+	
+	private void updateResultSet(LinkedList<String> line) 
+	{
+		// entry for table name already exists  
+		if (resultlist.containsKey(line.getFirst()))
+		{
+			     ObservableList<LinkedList<String>> tablelist = resultlist.get(line.getFirst());
+			     tablelist.add(line);  // add row 
+		}
+		
+		// create a new data set since table name occurs for the first time
+		else {
+		          ObservableList<LinkedList<String>> tablelist = FXCollections.observableArrayList();
+				  tablelist.add(line); // add row 
+				  resultlist.put(line.getFirst(),tablelist);  	
+		}
 	}
 
 	/**
@@ -331,17 +352,17 @@ public class RollbackJournalReader extends Base {
 
 		// no leaf page -> skip this page
 		if (type < 0) {
-			info("No Data page. " + pagenumber_rol);
+			AppLog.info("No Data page. " + pagenumber_rol);
 			return -1;
 		} else if (type == 5) {
-			info("Internal Table page " + pagenumber_rol);
+			AppLog.info("Internal Table page " + pagenumber_rol);
 			return -1;
 		} else if (type == 10) {
-			info("Index leaf page " + pagenumber_rol);
+			AppLog.info("Index leaf page " + pagenumber_rol);
 			withoutROWID = true;
 
 		} else {
-			info("Data page " + pagenumber_rol+ " Offset: " + (rollbackjournal.position() - ps));
+			AppLog.info("Data page " + pagenumber_rol+ " Offset: " + (rollbackjournal.position() - ps));
 		}
 
 		/************** regular leaf page with data ******************/
@@ -377,14 +398,13 @@ public class RollbackJournalReader extends Base {
 		ByteBuffer size = ByteBuffer.wrap(cpn);
 		int cp = Auxiliary.TwoByteBuffertoInt(size);
 
-		debug(" number of cells: " + cp + " type of page " + type);
+		AppLog.debug(" number of cells: " + cp + " type of page " + type);
 		job.numberofcells.addAndGet(cp);
 		if (0 == cp)
-			debug(" Page seems to be dropped. No cell entries.");
+			AppLog.debug(" Page seems to be dropped. No cell entries.");
 
 		int headerend = 8 + (cp * 2);
 		visit.set(0, headerend);
-		//System.out.println("headerend:" + headerend);
 
 		/***************************************************************
 		 * STEP 2:
@@ -413,14 +433,10 @@ public class RollbackJournalReader extends Base {
 				}
 			}
 			last = celloff;
-			//if (Logger.LOGLEVEL == Logger.DEBUG) {
 				String hls = Auxiliary.Int2Hex(celloff); 
-				//Integer.toHexString(celloff);
-				Logger.out.debug(pagenumber_rol + " -> " + celloff + " " + "0" + hls);
-			//}
+				AppLog.debug(pagenumber_rol + " -> " + celloff + " " + "0" + hls);
 			hls.trim();
 			
-			String rc = null;
             LinkedList<String> record = null;
 			
 			try {
@@ -432,76 +448,15 @@ public class RollbackJournalReader extends Base {
 			// add new line to output
 			if (null != record && record.size() > 0) {
 
-				int p1;
-//				if ((p1 = rc.indexOf("_node;")) > 0) {
-//					String tbln = rc.substring(0, p1);
-//
-//					if (job.virtualTables.containsKey(tbln)) {
-//						TableDescriptor tds = job.virtualTables.get(tbln);
-//
-//						/*
-//						 * we use the xxx_node shadow component to construct the virtual component
-//						 */
-//						String BLOB = rc.substring(p1);
-//						System.out.println(BLOB);
-//
-//						/*
-//						 * skip the first information -> go directly to the 5th element of the data
-//						 * record line, i.e. go to the BLOB with the row data
-//						 */
-//						int pp = Auxiliary.findNthOccur(rc, ';', 4);
-//						String data = rc.substring(pp + 1);
-//
-//						/* transform String data into an byte array */
-//						byte[] binary = Auxiliary.decode(data);
-//						ByteBuffer bf = ByteBuffer.wrap(binary);
-//
-//						/* skip the first to bytes */
-//						bf.getShort();
-//						/* first get the total number of entries for this rtree branch */
-//						int entries = bf.getShort();
-//
-//						/* create a new line for every data row */
-//						while (entries > 0) {
-//							StringBuffer vrow = new StringBuffer();
-//							vrow.append(tbln + ";VT;0;"); // start a new row for the virtual component
-//
-//							// The first column is always a 64-bit signed integer primary key.
-//							long primarykey = bf.getLong();
-//							vrow.append(primarykey + ";");
-//
-//							// Each R*Tree indices is a virtual component with an odd number of columns
-//							// between 3 and 11
-//							// The other columns are pairs, one pair per dimension, containing the minimum
-//							// and maximum values for that dimension, respectively.
-//							int number = tds.columnnames.size() - 1;
-//
-//							while (number > 0) {
-//								float rv = bf.getFloat();
-//								vrow.append(rv + ";");
-//								number--;
-//							}
-//
-//							vrow.append("\n");
-//							//output.add(vrow.toString());
-//
-//							//System.out.println(vrow);
-//
-//							entries--;
-//
-//						}
-//
-//					}
-//
-//				}
-
+		
 				output.add(record);
+				updateResultSet(record);
 			}
 
 		} // end of for - cell pointer
 
 		
-		debug("finished STEP2 -> cellpoint array completed");
+		AppLog.debug("finished STEP2 -> cellpoint array completed");
 
 		
 		return 0;
@@ -600,34 +555,34 @@ public class RollbackJournalReader extends Base {
 		}
 
 		List<TableDescriptor> tab = tables;
-		debug(" tables :: " + tables.size());
+		AppLog.debug(" tables :: " + tables.size());
 
 		if (null != tdesc) {
 			/* there is a schema for this page */
 			tab = new LinkedList<TableDescriptor>();
 			tab.add(tdesc);
-			debug(" added tdsec ");
+			AppLog.debug(" added tdsec ");
 		} else {
-			warning(" No component description!");
+			AppLog.warning(" No component description!");
 			tab = tables;
 		}
 
 		LinkedList<Gap> gaps = findGaps();
 		if (gaps.size() == 0) {
-			debug("no gaps anymore. Stopp search");
+			AppLog.debug("no gaps anymore. Stopp search");
 			return;
 		}
 
 		/* try out all component schema(s) */
 		for (int n = 0; n < tab.size(); n++) {
 			tdesc = tab.get(n);
-			debug("pagenumber :: " + pagenumber_maindb + " component size :: " + tab.size());
-			debug("n " + n);
+			AppLog.debug("pagenumber :: " + pagenumber_maindb + " component size :: " + tab.size());
+			AppLog.debug("n " + n);
 			// TableDescriptor tdb = tab.get(n);
 
 			/* access pattern for a particular component */
 			String tablename = tab.get(n).tblname;
-			if (tablename.startsWith("__UNASSIGNED"))
+			if (tablename.startsWith("__FREELIST"))
 				continue;
 			/* create matcher object for constrain check */
 			SerialTypeMatcher stm = new SerialTypeMatcher(buffer);
@@ -641,7 +596,7 @@ public class RollbackJournalReader extends Base {
 				if (next.to - next.from > 10)
 					/* do we have at least one match ? */
 					if (c.carve(next.from + 4, next.to, stm, CarverTypes.NORMAL, tab.get(n)) != Global.CARVING_ERROR) {
-						debug("*****************************  STEP NORMAL finished with matches");
+						AppLog.debug("*****************************  STEP NORMAL finished with matches");
 
 					}
 			}
@@ -653,7 +608,7 @@ public class RollbackJournalReader extends Base {
 				Gap next = gaps.get(a);
 
 				if (c.carve(next.from + 4, next.to, stm, CarverTypes.COLUMNSONLY, tab.get(n)) != Global.CARVING_ERROR) {
-					debug("*****************************  STEP COLUMNSONLY finished with matches");
+					AppLog.debug("*****************************  STEP COLUMNSONLY finished with matches");
 
 				}
 			}
@@ -665,7 +620,7 @@ public class RollbackJournalReader extends Base {
 				Gap next = gaps.get(a);
 
 				if (c.carve(next.from + 4, next.to, stm, CarverTypes.FIRSTCOLUMNMISSING, tab.get(n))!= Global.CARVING_ERROR) {
-					debug("*****************************  STEP FIRSTCOLUMNMISSING finished with matches");
+					AppLog.debug("*****************************  STEP FIRSTCOLUMNMISSING finished with matches");
 
 				}
 
@@ -709,7 +664,7 @@ public class RollbackJournalReader extends Base {
 
 		} // end of tables ( component fingerprint )
 
-		debug("End of journal parse");
+		AppLog.debug("End of journal parse");
 		
 	}
 	
@@ -721,7 +676,7 @@ public class RollbackJournalReader extends Base {
 	{
 		if (job.gui != null) {
 			
-			info("Number of records recovered: " + output.size());
+			AppLog.info("Number of records recovered: " + output.size());
 			//String[] lines = output.toArray(new String[0]);
 			//Arrays.sort(lines);
 
@@ -734,12 +689,12 @@ public class RollbackJournalReader extends Base {
 			{
 				LinkedList<String> line = lines.next();
 		
-			 	/* if table name is empty -> assign data record to table __UNASSIGNED */
+			 	/* if table name is empty -> assign data record to table __FREELIST */
 			   	if (line.getFirst().trim().length()==0)
 			   	{
 			 
 			        // Add the new element add the begin 
-			        line.set(0,"__UNASSIGNED"); 			   	
+			       // line.set(0,"__FREELIST"); 			   	
 			   	}
 				
 			   	// is there already a data set for this particular table
@@ -877,35 +832,35 @@ public class RollbackJournalReader extends Base {
 		}
 
 		List<TableDescriptor> tab = tables;
-		debug(" tables :: " + tables.size());
+		AppLog.debug(" tables :: " + tables.size());
 
 		if (null != tdesc) {
 			/* there is a schema for this page */
 			tab = new LinkedList<TableDescriptor>();
 			tab.add(tdesc);
-			debug(" added tdsec ");
+			AppLog.debug(" added tdsec ");
 		} else {
-			warning(" No component description!");
+			AppLog.warning(" No component description!");
 			tab = tables;
 		}
 
 		LinkedList<Gap> gaps = findGaps();
 		if (gaps.size() == 0) {
-			debug("no gaps anymore. Stopp search");
+			AppLog.debug("no gaps anymore. Stopp search");
 			return;
 		}
 
 		/* try out all component schema(s) */
 		for (int n = 0; n < tab.size(); n++) {
 			tdesc = tab.get(n);
-			debug("pagenumber :: " + pagenumber_maindb + " component size :: " + tab.size());
-			debug("n " + n);
+			AppLog.debug("pagenumber :: " + pagenumber_maindb + " component size :: " + tab.size());
+			AppLog.debug("n " + n);
 			// TableDescriptor tdb = tab.get(n);
 
 			/* access pattern for a particular component */
 			String tablename = tab.get(n).tblname;
-			debug("Check component : " + tablename);
-			if (tablename.startsWith("__UNASSIGNED"))
+			AppLog.debug("Check component : " + tablename);
+			if (tablename.startsWith("__FREELIST"))
 				continue;
 			/* create matcher object for constrain check */
 			SerialTypeMatcher stm = new SerialTypeMatcher(buffer);
@@ -919,7 +874,7 @@ public class RollbackJournalReader extends Base {
 				if (next.to - next.from > 10)
 					/* do we have at least one match ? */
 					if (c.carve(next.from + 4, next.to, stm, CarverTypes.NORMAL, tab.get(n)) != Global.CARVING_ERROR) {
-						debug("*****************************  STEP NORMAL finished with matches");
+						AppLog.debug("*****************************  STEP NORMAL finished with matches");
 
 					}
 			}
@@ -931,7 +886,7 @@ public class RollbackJournalReader extends Base {
 				Gap next = gaps.get(a);
 
 				if (c.carve(next.from + 4, next.to, stm, CarverTypes.COLUMNSONLY, tab.get(n)) != Global.CARVING_ERROR) {
-					debug("*****************************  STEP COLUMNSONLY finished with matches");
+					AppLog.debug("*****************************  STEP COLUMNSONLY finished with matches");
 
 				}
 			}
@@ -943,7 +898,7 @@ public class RollbackJournalReader extends Base {
 				Gap next = gaps.get(a);
 
 				if (c.carve(next.from + 4, next.to, stm, CarverTypes.FIRSTCOLUMNMISSING, tab.get(n)) != Global.CARVING_ERROR) {
-					debug("*****************************  STEP FIRSTCOLUMNMISSING finished with matches");
+					AppLog.debug("*****************************  STEP FIRSTCOLUMNMISSING finished with matches");
 
 				}
 

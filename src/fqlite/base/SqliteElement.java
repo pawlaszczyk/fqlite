@@ -26,23 +26,24 @@ public class SqliteElement {
 		this.serial = serial;
 	}
 	
-	public final String getBLOB(byte[] value){
+	public final String getBLOB(byte[] value, boolean truncBLOB){
 		
-		/* we took only the first 32 characters of the byte array to display */
-		
-		String s = toString(value,false);
-		String v = null;
-		if (s.length() > 64)
-			v = s.substring(0,64);
+		/* we took only the first 32 characters of the byte array 
+		 * to display if truncBLOB is true */
+		String s;
+		if (truncBLOB)
+			s = toString(value,false,true);
 		else
-			 v = s;
-		return parseBLOB(v) + v;
+			s = toString(value,false,false);
+		
+		return parseBLOB(s)+s;
 	}
 	
 	
 
-	public final String toString(byte[] value, boolean withoutQuotes) {
-					
+	public final String toString(byte[] value, boolean withoutQuotes, boolean truncBLOB) {
+		
+		try {
 		//System.out.println("type:::: " + type + " " + " Serial " + serial);
 		if (type == SerialTypes.INT0)
 			return String.valueOf(0);
@@ -52,7 +53,7 @@ public class SqliteElement {
 		   	return "";
 		}
 		else if (value.length == 0) {
-			System.out.println("Achtung!!! länge null type:: " + type);
+			//System.out.println("Achtung!!! länge null type:: " + type);
 			return "";
 		}
 		else if (type == SerialTypes.STRING)
@@ -81,12 +82,18 @@ public class SqliteElement {
 			return String.valueOf(decodeFloat64(value));
 		else if (type == SerialTypes.BLOB)
 			 {  
-			  // String s = parseBLOB(value);
-			  //  if (null != s)
-			  //  	return s;
-			  //  else
-			  return String.valueOf(Auxiliary.bytesToHex(Arrays.copyOfRange(value, 0, 32)));
+			  
+			  if (truncBLOB && value.length > 32)
+				  return String.valueOf(Auxiliary.bytesToHex(Arrays.copyOfRange(value, 0, 32)));
+			  
+			  return String.valueOf(Auxiliary.bytesToHex(Arrays.copyOfRange(value, 0, value.length)));   	
+			  	  
 	    }
+		}catch(Exception err){
+			System.out.println();
+		}
+		
+		
 		return null;
 
 	}
@@ -97,22 +104,28 @@ public class SqliteElement {
 		
 		if(blob.contains("ffd8"))
 			return "<jpg>";
-		if(blob.startsWith("89504e470d0a1a"))
+		if(blob.contains("89504e470d0a1a"))
 		    return "<png>";
 		if(blob.startsWith("003b"))
 		    return "<gif>";
 		if(blob.startsWith("424d"))
 		    return "<bmp>";
-		if(blob.startsWith("25504446"))
+		if(blob.contains("25504446"))
 			return "<pdf>";			
 		if(blob.startsWith("62706c697374"))
 			return "<plist>";			
 		if(blob.startsWith("49492a00") || blob.startsWith("4D4D002A"))
 			return "<tiff>";			
-		if(blob.startsWith("474946383761") || blob.startsWith("474946383961"))
+		if(blob.contains("474946383761") || blob.startsWith("474946383961"))
 			return "<gif>";			
+		if(blob.startsWith("1f8b"))
+			return "<gzip>";
 		if(blob.contains("66747970686569") || blob.contains("667479706d"))
-			return "<heic>";			
+			return "<heic>";
+		if(blob.startsWith("aced0005"))
+			return "<java>";
+		if(blob.startsWith("4f626a")) 
+			return "<avro>";
 		return "";
 	}
 	

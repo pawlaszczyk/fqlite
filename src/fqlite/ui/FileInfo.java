@@ -6,6 +6,7 @@ import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.Date;
 import java.util.Map;
 
 import org.apache.commons.codec.digest.DigestUtils;
@@ -49,10 +50,15 @@ public class FileInfo {
 		    sb.append(String.format("%80s%n",  "FQlite Forensic Report"));
 		    sb.append(String.format("%80s%n",  "created with version " + Global.FQLITE_VERSION));
 		    sb.append(String.format("%80s%n",  "created by " + "[" + System.getProperty("user.name") + "]" ));
-		 
+		    sb.append(String.format("%80s%n",  "Operating System " + System.getProperty("os.name")));
+		    
+		    
 		    sb.append("--------------------------------------------------------------------------------\n");
 		    sb.append("\n");
-		 
+		    sb.append(String.format(" Current Local Time: " + (new Date()).toString()));
+		    sb.append("\n");
+
+		    
 		    sb.append(" File: " + p.getFileName());
 		    sb.append("\n");
 		    sb.append(" Path: " + path);
@@ -87,14 +93,12 @@ public class FileInfo {
 
 				 
 			} catch (Exception e) {
-				// TODO Auto-generated catch block
 				e.printStackTrace();
 			} //SHA, MD2, MD5, SHA-256, SHA-384...
 	  
 		
 		
 		} catch (IOException e) {
-			// TODO Auto-generated catch block
 			e.printStackTrace();
 		}
 		
@@ -109,11 +113,7 @@ public class FileInfo {
 			md5hash = new DigestUtils(org.apache.commons.codec.digest.MessageDigestAlgorithms.MD5).digestAsHex(new File(path));
 			sha1 = new DigestUtils(org.apache.commons.codec.digest.MessageDigestAlgorithms.SHA_1).digestAsHex(new File(path));
 
-			
-			//checksum(path, md);
-			 //printRowShort("" + i++, "sha256 ",hex);
 		} catch (IOException e) {
-			// TODO Auto-generated catch block
 			e.printStackTrace();
 		}
 		 
@@ -121,9 +121,7 @@ public class FileInfo {
     	
     }
 	
-	private void printRowShort(String c0, String c1, Object c2) {
-	    sb.append(String.format("%s %-10s %s%n", c0, c1, String.valueOf(c2)));
-	}
+
 
 	private void printRow(String c0, String c1, Object c2, Object c3 ) {
 		sb.append(String.format("%s %s %-30s %-15s%n", c0, c1, String.valueOf(c2), c3 instanceof Integer ? "$" + c3 : c3));
@@ -144,13 +142,7 @@ public class FileInfo {
         return String.format("%" + before + "s%-" + rest + "s", "", text);  
     }
 	
-	//public static void main(String [] args)
-	//{
-	//	FileInfo f = new FileInfo("/Users/pawlaszc/Desktop/FQLite/cookies.sqlite");
 		
-	//	System.out.println(f.sb);
-	//}
-	
 	public void print()
 	{
 		System.out.println(sb);

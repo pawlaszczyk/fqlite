@@ -97,7 +97,7 @@ public class WALPropertyPanel extends StackPane {
 	}
 	
 	
-	@SuppressWarnings("rawtypes")
+	@SuppressWarnings({ "rawtypes", "unchecked" })
 	private void fillTable(TableView table, String[][] data)
 	{
 		// define array list for all table rows 

@@ -62,7 +62,6 @@ public class Worker implements Runnable {
 		}
 		//long end = System.currentTimeMillis();
 		
-		//System.out.println("Workerthread job:" + (end-start) + " ms");
 		
 	}
 

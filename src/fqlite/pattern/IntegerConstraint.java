@@ -14,7 +14,7 @@ public class IntegerConstraint implements Constraint {
 	@Override
 	public boolean match(int value) {
 		
-		if (value <= max  && value >= min)
+		if ((value <= max  && value >= min) || value == 8 || value == 9)
 		{
 			return true;
 		}
@@ -23,7 +23,7 @@ public class IntegerConstraint implements Constraint {
 	
 	@Override
 	public String toString(){
-		return "0" + min + "..06";
+		return "0" + min + "..06" + " OR 08|09";
 	}
 
 

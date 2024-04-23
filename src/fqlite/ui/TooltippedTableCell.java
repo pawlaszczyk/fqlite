@@ -1,23 +1,16 @@
 package fqlite.ui;
 
 import java.util.Iterator;
-
-import org.apache.commons.codec.binary.Base64;
-import org.apache.commons.codec.binary.Base64InputStream;
-
-import fqlite.base.GUI;
 import fqlite.base.Job;
+import fqlite.descriptor.IndexDescriptor;
 import fqlite.descriptor.TableDescriptor;
-import fqlite.util.Auxiliary;
 import javafx.beans.property.ObjectProperty;
 import javafx.beans.property.SimpleObjectProperty;
 import javafx.collections.ObservableList;
 import javafx.scene.control.Cell;
 import javafx.scene.control.TableCell;
 import javafx.scene.control.TableColumn;
-import javafx.scene.control.Tooltip;
-import javafx.scene.image.Image;
-import javafx.scene.image.ImageView;
+import javafx.stage.Stage;
 import javafx.util.Callback;
 import javafx.util.StringConverter;
 import javafx.util.converter.DefaultStringConverter;
@@ -35,13 +28,14 @@ public class TooltippedTableCell<S, T> extends TableCell<S, T> {
   
 	private String tablename = null;
 	private Job job = null;
+	private Stage s = null;
 		
-	public static <S> Callback<TableColumn<S, String>, TableCell<S, String>> forTableColumn(String tablename, Job job) {
-        return forTableColumn(new DefaultStringConverter(), tablename, job);
+	public static <S> Callback<TableColumn<S, String>, TableCell<S, String>> forTableColumn(String tablename, Job job, Stage s) {
+        return forTableColumn(new DefaultStringConverter(), tablename, job, s);
     }
 
-    public static <S, T> Callback<TableColumn<S, T>, TableCell<S, T>> forTableColumn(final StringConverter<T> converter, String tablename, Job job) {
-        return list -> new TooltippedTableCell<>(converter,tablename, job);
+    public static <S, T> Callback<TableColumn<S, T>, TableCell<S, T>> forTableColumn(final StringConverter<T> converter, String tablename, Job job, Stage s) {
+        return list -> new TooltippedTableCell<>(converter,tablename, job, s);
     }
 	
 	public static <S> Callback<TableColumn<S, String>, TableCell<S, String>> forTableColumn() {
@@ -65,194 +59,96 @@ public class TooltippedTableCell<S, T> extends TableCell<S, T> {
     	this.job = job;
     }
     
-    private void updateItem(final Cell<T> cell, final StringConverter<T> converter) {
-
-    	
+	CustomTooltip ctt = new CustomTooltip("");
+    String coltype = null;
+    Long hash = -1L;
+    
+  
+    @SuppressWarnings("unchecked")
+	private void updateItem(final Cell<T> cell, final StringConverter<T> converter) {
+    	    	
+    	if(null != s && !s.isFocused())
+    		return;
+    		
         if (cell.isEmpty()) {
-            cell.setText(null);
-            cell.setTooltip(null);
+           cell.setText(null);
+           return;
         } 
-        else {
-                	
-        	//System.out.println(" tooltip>>>" + this.getTableColumn().getText());
-        	
-        	if(this.getTableColumn().getText().equals("")){
-        		Tooltip tooltip = new Tooltip("state (deleted, updated ...) \n empty .. regular dataset");
-	            //tooltip.prefWidthProperty().bind(cell.widthProperty());
-	            cell.setTooltip(tooltip);	 
-	        	String s = getItemText(cell, converter);
-	        	cell.setText(s);     
-	            return;
+        else{
+            
+        	/* determine column data type (INT,BLOB,VARCHAR...) */
+        	if(null == coltype) {
+	           	
+	        	Iterator<TableDescriptor> tbls = job.headers.iterator();
+	        	while(tbls.hasNext()){
+	        		TableDescriptor td = tbls.next();
+	        		
+	        		if(td.tblname.equals(tablename)) {
+		        		coltype = td.getSqlTypeForColumn(this.getTableColumn().getText());
+		            	
+	        		}	
+	        	}
         	}
         	
-        	if(this.getTableColumn().getText().equals("Offset")){
-        		Tooltip tooltip = new Tooltip("byte position");
-	            //tooltip.prefWidthProperty().bind(cell.widthProperty());
-	            cell.setTooltip(tooltip);	 
-	        	String s = getItemText(cell, converter);
-	        	cell.setText(s);     
-	            return;
-        	}
-        	
-        	if(this.getTableColumn().getText().trim().equals("PLL")){
-        		Tooltip tooltip = new Tooltip("payload length");
-	            //tooltip.prefWidthProperty().bind(cell.widthProperty());
-	            cell.setTooltip(tooltip);	 
-	        	String s = getItemText(cell, converter);
-	        	cell.setText(s);     
-	            return;
-        	}
-        	
-        	if(this.getTableColumn().getText().trim().equals("HL")){
-        		Tooltip tooltip = new Tooltip("header length");
-	            //tooltip.prefWidthProperty().bind(cell.widthProperty());
-	            cell.setTooltip(tooltip);	 
-	        	String s = getItemText(cell, converter);
-	        	cell.setText(s);     
-	            return;
+        	/* not a table ? -> check the index table list */
+        	if(coltype == null){
+        		
+        		Iterator<IndexDescriptor> idxs = job.indices.iterator();
+        	    
+        		while(idxs.hasNext())
+        		{
+        			IndexDescriptor id = idxs.next();
+        		    if(id.idxname.equals(tablename)){      
+        		    	coltype = id.getSqlTypeForColumn(this.getTableColumn().getText());
+                    	break;
+        		    }
+        		}
+        		
+        		
         	}
         	
         	String s = getItemText(cell, converter);
-        	cell.setText(s);
+        	        	
+        	/* for each BLOB column we need to know the offset of the data record */
+        	if(s.contains("BLOB-")) {
         	
-        	
-        	String tttype = null;
-        	/* determine column type for tooltip info panel */
-        	
-        	Iterator<TableDescriptor> tbls = job.headers.iterator();
-        	while(tbls.hasNext()){
-        		TableDescriptor td = tbls.next();
+        		int row = -1;
+        		// we need the row number
+        		try {
         		
-        		if(td.tblname.equals(tablename)) {
-	        		tttype = td.getToolTypeForColumn(this.getTableColumn().getText());
-	            	
-        		}	
-        	}
-        	
-        	/* if no table description could be found -> lookup index table */
-//        	if(tttype == null){
-//        		
-//        		Iterator<IndexDescriptor> idxs = job.indices.iterator();
-//        		while(idxs.hasNext()){
-//        			
-//        			IndexDescriptor id = idxs.next();
-//        			
-//        			tttype = id.getToolTypeForColumn(this.getTableColumn().getText());
-//        			
-//        		}
-//        		
-//        		
-//        	}
-        	
-        	if(tttype == null){
+        			javafx.scene.control.TableRow<S> tr = this.getTableRow();
         		
-        		tttype = "";
-        	}
-        	
-        	
-        	if(s.contains("[BLOB")){
+        			if (tr == null)
+        				return;
         		
-        		
-        		// we need the column name 
-        		// the table name 
-        		//System.out.println("Column name >>>>" + this.getTableColumn().getText());
-        		int row = this.getTableRow().getIndex();
-        		//System.out.println("row " + row);
-             	ObservableList<String> hl = (ObservableList<String>)this.getTableView().getItems().get(row);
-        	    //System.out.println("Original Size in Byte >>>" + hl.get(2));
-        	    //System.out.println("Tablename :" + tablename);
-        	    //System.out.println("Job : " + job.path);
-        	    
-        	    //System.out.println("Get Thumbnail from hashset for keyn" + hl.get(5));
-        	    //Long hash = Long.parseLong(hl.get(5)) + this.getTableColumn().getText().hashCode();
-        	    int from = s.indexOf("BLOB-");
-        	    int to = s.indexOf("]");
-        	    String number = s.substring(from+5, to);
-        	    //System.out.println("BLOB >>>>" + s);
-        	    
-        	    int id = Integer.parseInt(number);
-        	    Long hash = Long.parseLong(hl.get(5)) + id;
-        	    
-        	    Image ii = job.Thumbnails.get(hash);
-        	    
-        	    //if (null != ii && (s.contains("<bmp>") || s.contains("<jpg>") || s.contains("<png>") || s.contains("<gif>")))
-        	    if(null != ii)
-        	    {
-        	    	
-        	    	//System.out.println("JPEG|PNG|GIF Gefunden!");
-        	    	//Add text as tooltip so that user can read text without editing it.
-    	            Tooltip tooltip = new Tooltip();
-        	 
-      	    		ImageView iv = new ImageView(ii);
-      	          	tooltip.setGraphic(iv);   
-    	            cell.setTooltip(tooltip);
-        	    }
-        	    else
-        	    {
-        	    	String text = Auxiliary.hex2ASCII(getItemText(cell, converter));   
-        	    	
-        	    	
-            	    //Add text as tooltip so that user can read text without editing it.
-    	            Tooltip tooltip = new Tooltip(text);
-    	            tooltip.setWrapText(true);
-    	            tooltip.prefWidthProperty().bind(cell.widthProperty());
-    	            if(null!=tttype)
-    	            	cell.setTooltip(tooltip);
-    	            
-    	            s = GUI.class.getResource("/hex-32.png").toExternalForm();
-    	    		ImageView iv = new ImageView(s);
-    	    		tooltip.setGraphic(iv);   
-        	    
-        	    
-        	    }
-        	    	
-        	 
-        	}
-        	else{
-        		Tooltip tooltip = null;
-        		
-        		
-        		
-        		String bb = (String)cell.getItem();
-        		//System.out.println(">>>" + bb + " " + job.timestamps.size());
-        		if(job.timestamps.containsKey(bb)){
-        			Object value = job.timestamps.get(bb);        			
-        			tooltip = new Tooltip(">>>[" + tttype + "] " +  value);
-        		    return;
+        			row = tr.getIndex();
+            	
+        		}
+        		catch(Exception err){
+        		   // There is a bug actually under windows -> no idea why	
+        		   return;
         		}
         		
-        		//@SuppressWarnings("deprecation")
-    			//boolean isBase64 = Base64.isBase64(s);
-
-                //if(isBase64 && s.length() > 2 ){
-                //    try {
-                  //  	byte[] decodedBytes = java.util.Base64.getDecoder().decode(s);
-                  //  	String decodedString = new String(decodedBytes);
-                   
-	              //  	if (tttype == null || tttype == "")
-	            	//		tooltip = new Tooltip(s);
-	            	//	else
-	            	//		tooltip = new Tooltip("[" + tttype + "] " + s);
-	    	        //    tooltip.setWrapText(true);
-	    	        //    tooltip.prefWidthProperty().bind(cell.widthProperty());
-	    	        //    cell.setTooltip(tooltip);	            
-	                	
-	             //   	return;
-                 //   }catch(Exception err){
-                    	
-                 //   }
-                //}
-                	
+        		ObservableList<String> hl = (ObservableList<String>)this.getTableView().getItems().get(row);
         		
-        		//Add text as tooltip so that user can read text without editing it.
-        		if (tttype == null || tttype == "")
-        			tooltip = new Tooltip(getItemText(cell, converter));
-        		else
-        			tooltip = new Tooltip("[" + tttype + "] " + getItemText(cell, converter));
-	            tooltip.setWrapText(true);
-	            tooltip.prefWidthProperty().bind(cell.widthProperty());
-	            cell.setTooltip(tooltip);	            
+        		if (hl.get(5)== null || hl.get(5).trim().equals(""))
+        			return;
+        		hash = Long.parseLong(hl.get(5));
+	
         	}
+        	
+        	if(true) {
+        		synchronized(this) {
+        	
+		        
+        			ctt.addCellText(tablename,hash,job,coltype,s,this,cell,converter);
+        			/* there is one tooltip object for the complete table */
+        			cell.setTooltip(ctt);
+        			cell.setText(s);  
+        		}
+		        return;
+        	}
+        	
         }
     }
 
@@ -274,10 +170,11 @@ public class TooltippedTableCell<S, T> extends TableCell<S, T> {
         setConverter(converter);
     }
 
-    public TooltippedTableCell(StringConverter<T> converter,String tablename, Job job) {
+    public TooltippedTableCell(StringConverter<T> converter,String tablename, Job job, Stage s) {
         this.getStyleClass().add("tooltipped-table-cell");
         setConverter(converter);
         setTablename(tablename);
+        this.s = s;
         setJob(job);
     }
 
@@ -298,7 +195,14 @@ public class TooltippedTableCell<S, T> extends TableCell<S, T> {
 
     @Override
     public void updateItem(T item, boolean empty) {
-        super.updateItem(item, empty);
+    	
+    	if(null != s && !s.isFocused())
+    		return;
+    	
+    	super.updateItem(item, empty);
         updateItem(this, getConverter());
     }
+    
+    
+    
 }

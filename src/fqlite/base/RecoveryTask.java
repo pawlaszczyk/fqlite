@@ -1,16 +1,17 @@
 package fqlite.base;
 
 import java.nio.ByteBuffer;
+import java.util.ArrayList;
 import java.util.BitSet;
 import java.util.LinkedList;
 import java.util.List;
 
 import fqlite.descriptor.AbstractDescriptor;
 import fqlite.descriptor.TableDescriptor;
+import fqlite.log.AppLog;
 import fqlite.pattern.SerialTypeMatcher;
 import fqlite.types.CarverTypes;
 import fqlite.util.Auxiliary;
-import fqlite.util.Logger;
 import javafx.collections.FXCollections;
 import javafx.collections.ObservableList;
 
@@ -22,13 +23,13 @@ import javafx.collections.ObservableList;
  * @author pawlaszc
  *
  */
-public class RecoveryTask extends Base implements Runnable {
+public class RecoveryTask implements Runnable {
 
 	public int pagesize;
 	public long offset;
 	public ByteBuffer buffer;
 	public BitSet visit;
-	public static List<TableDescriptor> tables = new LinkedList<TableDescriptor>();
+	public static List<AbstractDescriptor> tables = new LinkedList<AbstractDescriptor>();
 	public int pagenumber;
     private Job job;
 	private Auxiliary ct;
@@ -60,9 +61,9 @@ public class RecoveryTask extends Base implements Runnable {
 	
 	public void carveOnly()
 	{
-		debug("carveOnly()::" + offset);
+		AppLog.debug("carveOnly()::" + offset);
 		/* read the db page into buffer */
-		buffer = job.readPageWithOffset(offset, pagesize);
+		buffer = job.readDBPageWithOffset(offset, pagesize);
 		/* convert byte array into a string representation */
 		String content = Auxiliary.bytesToHex(buffer);
 		
@@ -81,9 +82,10 @@ public class RecoveryTask extends Base implements Runnable {
 		
 		try {
 			
-			debug("Offset in recover()::" + offset);
+			AppLog.debug("Offset in recover()::" + offset);
+			
 			/* read the db page into buffer */
-			buffer = job.readPageWithOffset(offset, pagesize);
+			buffer = job.readDBPageWithOffset(offset, pagesize);
 			/* convert byte array into a string representation */
 			if (null == buffer)
 				return -1;
@@ -98,6 +100,20 @@ public class RecoveryTask extends Base implements Runnable {
 			/* mark bytes as visited */
 			visit.set(0, 2);
 
+			/* first page -> we need to check from offset 100 */
+			if(offset == 0 || offset == 100){
+				// offset 0
+				//buffer.position(100);
+
+				/* check type of the page by reading the first two bytes */
+				type = Auxiliary.getPageType(content);
+
+				/* mark bytes as visited */
+				visit.set(0,102);
+
+			}
+			
+			
 			/************** component page was dropped ******************/
 
 			/*
@@ -134,28 +150,28 @@ public class RecoveryTask extends Base implements Runnable {
 
 			// no leaf page -> skip this page
 			if (type < 0) {
-				info("No Data page. " + pagenumber);
+				AppLog.debug("No Data page. " + pagenumber);	
 				return -1;
 			} 
 			else if(type == 5){
-			    info("Inner Table page (only references no data). Page:" + pagenumber);
-			    return 0;
+			    AppLog.debug("Inner Table page (only references no data). Page:" + pagenumber);
+			  
+			    
+			    if(pagenumber == 1)
+			    	return 0;
 			}
-			else if (type == 12) {
-				info("Internal Table page " + pagenumber);
-				return 0;
-			} else if (type == 10) {
-				info("Index leaf page " + pagenumber);	
+		    else if (type == 10) {
+				AppLog.debug("Index leaf page " + pagenumber);	
 				// note: WITHOUT ROWID tables are saved here.
 				withoutROWID=true;
 			} else {
-				info("Data page " + pagenumber + " Offset: " + offset);
-
+				AppLog.debug("Data page " + pagenumber + " Offset: " + offset);
+                 	
 			}
 
 			/************** regular leaf page with data ******************/
 
-			if (type == 8)
+			if (type == 8 || type == 13)
 			{
 				// offset 1-2 let us find the first free block offset for carving
 				byte fboffset[] = new byte[2];
@@ -172,7 +188,10 @@ public class RecoveryTask extends Base implements Runnable {
 			
 			}	
 				
-			int ccrstart = job.ps;
+			//int ccrstart = job.ps;
+			
+			//if(offset == 100)
+			//	ccrstart = job.ps-100;
 
 			// found Data-Page - determine number of cell pointers at offset 3-4 of this page
 			byte cpn[] = new byte[2];
@@ -184,8 +203,12 @@ public class RecoveryTask extends Base implements Runnable {
 			buffer.position(5);
 			buffer.get(ccr);
 			
-			ByteBuffer contentregionstart = ByteBuffer.wrap(ccr);
-			ccrstart = Auxiliary.TwoByteBuffertoInt(contentregionstart);
+			//ByteBuffer contentregionstart = ByteBuffer.wrap(ccr);
+			//ccrstart = Auxiliary.TwoByteBuffertoInt(contentregionstart);
+			
+			//if(offset == 100){
+			//	ccrstart -= 100;
+			//}
 			
 			/* mark as visited */
 			visit.set(2, 8);
@@ -193,10 +216,10 @@ public class RecoveryTask extends Base implements Runnable {
 			ByteBuffer size = ByteBuffer.wrap(cpn);
 			int cp = Auxiliary.TwoByteBuffertoInt(size);
 
-			debug(" number of cells: " + cp + " type of page " +  type);
+			AppLog.debug(" number of cells: " + cp + " type of page " +  type);
 			job.numberofcells.addAndGet(cp);
 			if (0 == cp)
-				debug(" Page seems to be dropped. No cell entries.");
+				AppLog.debug(" Page seems to be dropped. No cell entries.");
 
 			int pageheaderend = 8 + (cp * 2);
 			visit.set(0, pageheaderend);
@@ -224,16 +247,23 @@ public class RecoveryTask extends Base implements Runnable {
 					// read the next 2 bytes -> this value represents the length of the
 					// freeblock. Remember: The maximum size of a database page is 64kb (2^16 bytes)
 					buffer.get(dword);
-			    	ByteBuffer blocklength = ByteBuffer.wrap(dword);
-					int length = Auxiliary.TwoByteBuffertoInt(blocklength);
+			    	//ByteBuffer blocklength = ByteBuffer.wrap(dword);
+					//int length = Auxiliary.TwoByteBuffertoInt(blocklength);
 					//System.out.println(" Length of next free block:" + length);
 					
 					//String rc;
-					LinkedList<String> record;
+					//LinkedList<String> record;
 					
 					byte[] header = new byte[6];
-					buffer.get(header);
-					String parsed = Auxiliary.bytesToHex(header);
+					try {
+					
+						buffer.get(header);
+				
+					}catch(Exception err){
+						goon = false;
+						continue;
+					}
+					//String parsed = Auxiliary.bytesToHex(header);
 					//System.out.println(">>" + parsed);
 					
 					if(next > 0 && next < job.ps){
@@ -247,13 +277,7 @@ public class RecoveryTask extends Base implements Runnable {
 			
 			}
 			
-			
-			
-			
-			
-			
-			
-			
+				
 			
 			/***************************************************************
 			 * STEP 2:
@@ -276,27 +300,73 @@ public class RecoveryTask extends Base implements Runnable {
 				ByteBuffer celladdr = ByteBuffer.wrap(pointer);
 				int celloff = Auxiliary.TwoByteBuffertoInt(celladdr);
 
+				if (offset == 100){
+					celloff-=100;
+				}
+				
 				if (last > 0) {
 					if (celloff == last) {
 						continue;
 					}
 				}
 				last = celloff;
-				if (Logger.LOGLEVEL == Logger.DEBUG)
-				{	
-					String hls = Auxiliary.Int2Hex(celloff); // Integer.toHexString(celloff);
-					Logger.out.debug(pagenumber + " -> " + celloff + " " + "0" + hls);
-				}
+				
+				String hls = Auxiliary.Int2Hex(celloff); // Integer.toHexString(celloff);
+				AppLog.debug(pagenumber + " -> " + celloff + " " + "0" + hls);
+				
 					
 				//String rc;
 				LinkedList<String> record;
 				
 				record = ct.readRecord(celloff, buffer, pagenumber, visit, type, Integer.MAX_VALUE, firstcol,withoutROWID,Global.REGULAR_DB_FILE,-1);
-								
+				
+				
 				// add new line to output
 				if (null != record && record.size() > 0) {
 					
 					int p;
+					
+					// check for fts3/4 tables
+					
+					if ((p = record.getFirst().indexOf("_content")) > 0)
+					{	
+						String rc = record.getFirst();
+						String tbln = rc.substring(0, p);
+						if (job.virtualTables.containsKey(tbln))
+						{
+							TableDescriptor tds = job.virtualTables.get(tbln);
+							if (tds.modulname.equals("fts4")|| tds.modulname.equals("fts3"))
+							{
+								// take the columns and create a record for the virtual table
+								System.out.println("Stopp");	 
+								
+                            	LinkedList<String> ftsrecord = new LinkedList<String>();
+
+                            	ftsrecord.add(tbln + "");  // start a new row for the virtual component 
+                            	ftsrecord.add("");
+                            	ftsrecord.add("");
+                            	ftsrecord.add("");
+                            	ftsrecord.add("");
+                                
+                            	/**
+                            	 * The leftmost column of the "%_content" table is an INTEGER PRIMARY KEY 
+                            	 * field named "docid". Following this is one column for each column of 
+                            	 * the FTS virtual table as declared by the user, named by prepending the 
+                            	 * column name supplied by the user with "cN", where N is the index of the 
+                            	 * column within the table, numbered from left to right starting with 0. 
+                            	 * Data types supplied as part of the virtual table declaration are not 
+                            	 * used as part of the %_content table declaration.
+                            	 */
+								for(int ii = 6; ii < record.size(); ii++) {
+									
+									ftsrecord.add(record.get(ii));		
+								}
+								
+	                            updateResultSet(ftsrecord);
+
+							}
+						}
+					}
 					
 					if ((p = record.getFirst().indexOf("_node")) > 0)
 					{
@@ -314,16 +384,25 @@ public class RecoveryTask extends Base implements Runnable {
 							 */
 							
 				            String data = record.get(6);  //rc.substring(pp+1);
-						
+						    int endofprefix = data.indexOf("] ");
+				            if (endofprefix > 0)
+				            	data = data.substring(endofprefix+2);
+				            System.out.println("data length " + data.length());
+				            
 							/* transform String data into an byte array */
 							byte[] binary = Auxiliary.decode(data);
 							ByteBuffer bf = ByteBuffer.wrap(binary);
-                            
+							
+							//bf.position(0);
+							bf.rewind();
+							
 							/* skip the first two bytes */
 							bf.getShort();
 							/* first get the total number of entries for this rtree branch */
                             int entries = bf.getShort();
 					
+                            System.out.println("Virtual Table "+ tbln + " entries ::" + entries);  
+                            
                             /* create a new line for every data row */ 
                             while(entries>0)
                             {
@@ -337,23 +416,37 @@ public class RecoveryTask extends Base implements Runnable {
                             	rtreerecord.add("");
                             	
                             	// The first column is always a 64-bit signed integer primary key.
-                            	long primarykey = bf.getLong();
-                            	rtreerecord.add(String.valueOf(primarykey));
+                            	try {
+                            		long primarykey = bf.getLong();
+                            		rtreerecord.add(String.valueOf(primarykey));
+                            	}
+                            	catch(Exception err){
+                            		rtreerecord.add("null");
+                            	}
                             	
                             	//Each R*Tree indices is a virtual component with an odd number of columns between 3 and 11
                             	//The other columns are pairs, one pair per dimension, containing the minimum and maximum values for that dimension, respectively.
                             	int number = tds.columnnames.size() - 1;
+                            	//entries-=;
                             	
                             	while (number > 0)
                             	{	
-	                            	float rv = bf.getFloat();
-	                            	rtreerecord.add(String.valueOf(rv));
-	                            	number--;
+                            		try {
+                            			if (bf.limit() - bf.position() >= 4)
+                            			{
+                            				float rv = bf.getFloat();
+                            				rtreerecord.add(String.valueOf(rv));
+                                			
+                            			}
+                            			number--;
+                            		}catch(Exception err){
+                            			System.out.println(" Fehler " + number);
+                            		}
                             	}
                             	
-	                            	
-	                            updateResultSet(rtreerecord);
 	                            entries--;
+	                            updateResultSet(rtreerecord);
+	                           
 	                            
                             }	
 							
@@ -461,8 +554,12 @@ public class RecoveryTask extends Base implements Runnable {
 			 * 
 			 ***************************************************************/
 			
-			/* now we are ready to carve the rest of the page */
-			carve(content,null);
+			
+			if(job.pages[pagenumber]!=null && job.pages[pagenumber].getName().equals("__SQLiteMaster"))
+				return 0;
+						
+			if(offset != 100)
+				carve(content,null);
 			
 		} catch (Exception err) {
 			err.printStackTrace();
@@ -471,6 +568,9 @@ public class RecoveryTask extends Base implements Runnable {
 
 		return 0;
 	}
+	
+	
+	
 	
 	private void updateResultSet(LinkedList<String> line) 
 	{
@@ -545,7 +645,7 @@ public class RecoveryTask extends Base implements Runnable {
 					else {
 						Gap g = new Gap(from, to);
 						if (!gaps.contains(g))
-						debug("ohne match : " + (job.ps * (pagenumber - 1) + from) + " - "
+						AppLog.debug("ohne match : " + (job.ps * (pagenumber - 1) + from) + " - "
 								+ (job.ps * (pagenumber - 1) + to) + " Bytes");
 						gaps.add(g);
 					}
@@ -560,6 +660,7 @@ public class RecoveryTask extends Base implements Runnable {
 		return gaps;
 	}
 
+	
 	/**
 	 * This method is called to carve a data page for records.
 	 * 
@@ -567,6 +668,10 @@ public class RecoveryTask extends Base implements Runnable {
 	 */
 	public void carve(String content, Carver crv) {
 
+		/* if file is bigger than 5 MB skip intense scan */
+		if(job.size > 5242880)  //1024*1024)// 5242880)
+			return;
+		
 		Carver c = crv;
 		
 		if (null == c)
@@ -577,7 +682,7 @@ public class RecoveryTask extends Base implements Runnable {
 
 
 		/* try to get component schema for the current page, if possible */
-		TableDescriptor tdesc = null;
+		AbstractDescriptor tdesc = null;
 		if (job.pages.length > pagenumber)
 		{
 			AbstractDescriptor ad = job.pages[pagenumber]; 
@@ -585,135 +690,173 @@ public class RecoveryTask extends Base implements Runnable {
 					tdesc = (TableDescriptor)ad;
 		}
 			
-		List<TableDescriptor> tab = tables;
-		debug(" tables :: " + tables.size());
+		List<AbstractDescriptor> tab = new ArrayList<AbstractDescriptor>();//tables;
+		AppLog.debug(" tables :: " + tables.size());
 
 		if (null != tdesc) {
 			/* there is a schema for this page */
-			tab = new LinkedList<TableDescriptor>();
+			tab = new LinkedList<AbstractDescriptor>();
 			tab.add(tdesc);
-			debug(" added tdsec ");
+			AppLog.debug(" added tdsec ");													
 		} else {
-			warning(" No component description!");
+			AppLog.debug(" No component description!");
 			tab = tables;
 		}
+		
+			
+	
 		
 		List<Gap> gaps = findGaps();
 
 		if (gaps.size() == 0)
 		{
-			debug("no gaps anymore. Stopp search");
+			AppLog.debug("no gaps anymore. Stopp search");
 			return;
 		}	
 		
 		/* try out all component schema(s) */
-		for (int n = 0; n < tab.size(); n++) {
-			tdesc = tab.get(n);
-			debug("pagenumber :: " + pagenumber + " component size :: " + tab.size());
-			debug("n " + n);
-			//TableDescriptor tdb = tab.get(n);
-		
-			/* access pattern for a particular component */
-			String tablename = tab.get(n).tblname;
-			if (tablename.startsWith("__UNASSIGNED"))
-				continue;
-			/* create matcher object for constrain check */
-			SerialTypeMatcher stm = new SerialTypeMatcher(buffer);
-
-			gaps = findGaps();
+		for(int hh = 0; hh<3; hh++) {
+	 
+			//int oldhash = 0;
 			
-			for (int a = 0; a < gaps.size(); a++) {
-			
-				Gap next = gaps.get(a);
-
+			for (int n = 0; n < tab.size(); n++) {
+				tdesc = tab.get(n);
 				
-				if (next.to - next.from > 5)
-					/* do we have at least one match ? */
-					if (c.carve(next.from,next.to, stm, CarverTypes.NORMAL, tab.get(n))!= Global.CARVING_ERROR) {
-						debug("*****************************  STEP NORMAL finished with matches");
-						
+				
+				if(tdesc != null && tdesc.serialtypes != null && tdesc.serialtypes.size()>0 && tdesc.serialtypes.get(0).equals("BLOB"))
+					continue;
+				
+				if(tdesc != null && tdesc.serialtypes != null){
+					if (tdesc.serialtypes.size()>1 && tdesc.serialtypes.size()<4){
+						if (tdesc.serialtypes.get(1) == "BLOB" || tdesc.serialtypes.get(1) == "TEXT"){
+							continue;
+						}
 					}
-			}
-				
-			gaps = findGaps();
-			
-			for (int a = 0; a < gaps.size(); a++) {
-				
-				Gap next = gaps.get(a);
-				
- 				if (c.carve(next.from,next.to, stm, CarverTypes.COLUMNSONLY, tab.get(n)) != Global.CARVING_ERROR) {
-					debug("*****************************  STEP COLUMNSONLY finished with matches");
 					
 				}
-			}
+				
+				AppLog.debug("pagenumber :: " + pagenumber + " component size :: " + tab.size());
+				AppLog.debug("n " + n);
+				//TableDescriptor tdb = tab.get(n);
 			
-			gaps = findGaps();
-			
-			int oldhash = gaps.hashCode();
-			
-			
-			for (int a = 0; a < gaps.size(); a++) {
-			
-				Gap next = gaps.get(a);
-			
-			if (c.carve(next.from,next.to, stm, CarverTypes.FIRSTCOLUMNMISSING, tab.get(n))!= Global.CARVING_ERROR) {
-					debug("RecoveryTask *****************************  STEP FIRSTCOLUMNMISSING finished with matches");
+				/* access pattern for a particular component */
+				String tablename = tab.get(n).getName();
+				if (tablename.startsWith("__FREELIST"))
+					continue;
+				/* create matcher object for constrain check */
+				SerialTypeMatcher stm = new SerialTypeMatcher(buffer);
+	
+				if (hh==0) {
+					gaps = findGaps();
 					
-				}
-			
-			}
-			
-			
+					//oldhash = gaps.hashCode();
+					
+					
+					for (int a = 0; a < gaps.size(); a++) {
+					
+						Gap next = gaps.get(a);
 		
-			/**
-			 * When a record deletion occurs, the first 2 bytes of the cell are set to the
-			 * offset value of next free block and latter 2 bytes covers the length of the
-			 * current free block. Because of this, the first 4 bytes of a deleted cell
-			 * differ startRegion the normal data. Accordingly, we need a different approach to
-			 * recover the data records.
-			 * 
-			 * In most cases, at least the header length information is overwritten. Boyond
-			 * this, sometimes, also the first column type field is overwritten too.
-			 * 
-			 * We have to cases:
-			 * 
-			 * (1) only the first column of the header is missing, but the rest of the
-			 * header is intact.
-			 * 
-			 * (2) both header length field plus first column are overwritten.
-			 * 
-			 * [cell size | rowid | header size | header bytes | payload ]
-			 * 
-			 * for a deleted cell is looks maybe like this
-			 * 
-			 * [offset of next free block | length of the current free block | ]
-			 */
-
-
-			
-			/* There are still gaps? */
-			gaps = findGaps();
-			
-			int newhash = gaps.hashCode();
-			
-			
-			for (int a = 0; a < gaps.size(); a++) {
+						
+						if (next.to - next.from > 5)
+							/* do we have at least one match ? */
+							if (c.carve(next.from,next.to, stm, CarverTypes.NORMAL, tab.get(n))!= Global.CARVING_ERROR) {
+								AppLog.debug("*****************************  STEP NORMAL finished with matches");
+								
+							}
+					}
+		    	}	
 				
+				if (hh==1) {
+					gaps = findGaps();
+					
+					//oldhash = gaps.hashCode();
+					
+					
+					for (int a = 0; a < gaps.size(); a++) {
+						
+						Gap next = gaps.get(a);
+						
+		 				if (c.carve(next.from,next.to, stm, CarverTypes.COLUMNSONLY, tab.get(n)) != Global.CARVING_ERROR) {
+							AppLog.debug("*****************************  STEP COLUMNSONLY finished with matches");
+							
+						}
+					}
+				}
 				
-				Gap next = gaps.get(a);
-			
+				if(hh==2) {
+					
+					gaps = findGaps();
+					
+					//oldhash = gaps.hashCode();
+					
+					
+					for (int a = 0; a < gaps.size(); a++) {
+					
+						Gap next = gaps.get(a);
+					
+					if (c.carve(next.from,next.to, stm, CarverTypes.FIRSTCOLUMNMISSING, tab.get(n))!= Global.CARVING_ERROR) {
+							AppLog.debug("RecoveryTask *****************************  STEP FIRSTCOLUMNMISSING finished with matches");
+							
+						}
+					
+					}
+
+				}
 				
-				if (oldhash != newhash){
-			        
-					/* one last try with 4+1 instead of 4 Bytes */
-					c.carve(next.from+4,next.to, stm, CarverTypes.FIRSTCOLUMNMISSING, tab.get(n)); 
-				}	
-			}
 			
-
-		} // end of tables ( component fingerprint )
-
+				/**
+				 * When a record deletion occurs, the first 2 bytes of the cell are set to the
+				 * offset value of next free block and latter 2 bytes covers the length of the
+				 * current free block. Because of this, the first 4 bytes of a deleted cell
+				 * differ startRegion the normal data. Accordingly, we need a different approach to
+				 * recover the data records.
+				 * 
+				 * In most cases, at least the header length information is overwritten. Boyond
+				 * this, sometimes, also the first column type field is overwritten too.
+				 * 
+				 * We have to cases:
+				 * 
+				 * (1) only the first column of the header is missing, but the rest of the
+				 * header is intact.
+				 * 
+				 * (2) both header length field plus first column are overwritten.
+				 * 
+				 * [cell size | rowid | header size | header bytes | payload ]
+				 * 
+				 * for a deleted cell is looks maybe like this
+				 * 
+				 * [offset of next free block | length of the current free block | ]
+				 */
+	
+	
+//				if(hh==2) {
+//					
+//				/* There are still gaps? */
+//			
+//				gaps = findGaps();
+//				
+//				int newhash = gaps.hashCode();
+//				
+//					for (int a = 0; a < gaps.size(); a++) {
+//						
+//						
+//						Gap next = gaps.get(a);
+//					
+//						
+//						//if (oldhash != newhash){
+//					        
+//							/* one last try with 4+1 instead of 4 Bytes */
+//							c.carve(next.from+4,next.to, stm, CarverTypes.FIRSTCOLUMNMISSING, tab.get(n)); 
+//						//}	
+//					}
+//				}
+				
+	
+			} // end of tables ( component fingerprint )
+		}
 	}
+	
+	
 
 	@Override
 	public void run() {

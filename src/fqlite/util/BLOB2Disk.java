@@ -18,16 +18,19 @@ public class BLOB2Disk {
 		this.job = job;
 	}
 	
+	/**
+	 * @deprecated
+	 */
 	public void export(){
 		
-		if(job.BLOBs == null)
+		if(job.bincache == null)
 			return;
 		
-		Set<Long> keys = job.BLOBs.keySet();
-		Iterator<Long> iter = keys.iterator();
+		Set<String> keys = job.bincache.keySet();
+		Iterator<String> iter = keys.iterator();
 	    while(iter.hasNext()){
-	    	 Long key = iter.next();
-	         BLOBElement e = job.BLOBs.get(key);
+	    	 String key = iter.next();
+	         BLOBElement e = job.bincache.get(key);
 	         if (e != null){
 	            String extension = ".bin";
 	            
@@ -49,6 +52,8 @@ public class BLOB2Disk {
 											break;
 	             	case PLIST: extension = ".plist";
 	             							break;
+	             	case GZIP: extension = ".gzip";
+	             							break;
 	                default: extension = ".bin";
 	            }
 	            
@@ -57,7 +62,7 @@ public class BLOB2Disk {
 	        		job.FileCache.put(key,"" + GUI.baseDir + "/"+ job.filename + "_" + key + extension);
 	        		
 					BufferedOutputStream buffer = new BufferedOutputStream(new FileOutputStream("" + GUI.baseDir + "/"+ job.filename + "_" + key + extension));
-					System.out.println(" Write BLOB to file ::"+ "" + GUI.baseDir + "/" + job.filename + "_" + key + extension);
+					//System.out.println(" Write BLOB to file ::"+ "" + GUI.baseDir + "/" + job.filename + "_" + key + extension);
 					buffer.write(e.binary);
 					buffer.close();
 					
@@ -69,9 +74,8 @@ public class BLOB2Disk {
 	         }
 	    }
 	    
-	    job.BLOBs.clear();
-	    
-	    System.gc();
+	    //job.BLOBs.clear();
+	    //System.gc();
 	
 	}
 	

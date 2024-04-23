@@ -10,18 +10,18 @@ import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.BitSet;
 import java.util.Enumeration;
+import java.util.HashMap;
 import java.util.Hashtable;
 import java.util.Iterator;
 import java.util.LinkedList;
 import java.util.List;
-import java.util.Set;
-import java.util.SortedMap;
 import java.util.TreeMap;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.Future;
-
 import fqlite.descriptor.AbstractDescriptor;
 import fqlite.descriptor.TableDescriptor;
+import fqlite.log.AppLog;
 import fqlite.pattern.SerialTypeMatcher;
 import fqlite.types.CarverTypes;
 import fqlite.util.Auxiliary;
@@ -42,7 +42,7 @@ import javafx.collections.ObservableList;
  * @author pawlaszc
  *
  */
-public class WALReader extends Base {
+public class WALReader{
 	
 	
 	/* checkpoints is a data structure 
@@ -59,11 +59,17 @@ public class WALReader extends Base {
 	 */
 	TreeMap<Long,LinkedList<WALFrame>> checkpoints = new TreeMap<Long,LinkedList<WALFrame>>();
 	
+	
+	
+	/* this is a multi-threaded program -> all data are saved to the list first*/
+	public ConcurrentHashMap<String,ObservableList<LinkedList<String>>> resultlist = new ConcurrentHashMap<>();
+
+	
 	/* An asynchronous channel for reading, writing, and manipulating a file. */
 	public AsynchronousFileChannel file;
 
 	/* This buffer holds WAL-file in RAM */
-	ByteBuffer wal;
+	public ByteBuffer wal;
 
 	/* total size of WAL-file in bytes */
 	long size;
@@ -91,7 +97,7 @@ public class WALReader extends Base {
 	long hchecksum2;
 	
 	/* path to WAL-file */
-	String path;
+	public String path;
 
 	/* flag for already visited Bytes of the page */
 	BitSet visit = null;
@@ -126,6 +132,7 @@ public class WALReader extends Base {
 	/* outputlist */
 	ConcurrentLinkedQueue<LinkedList<String>> output = new ConcurrentLinkedQueue<LinkedList<String>>();
 	
+	public HashMap<Integer,ByteBuffer> overflow = new HashMap<Integer,ByteBuffer>();
 	
 
 	/**
@@ -164,7 +171,7 @@ public class WALReader extends Base {
 		try {
 			file = AsynchronousFileChannel.open(p, StandardOpenOption.READ);
 		} catch (Exception e) {
-            this.err("Cannot open WAL-file" + p.getFileName());
+            AppLog.error("Cannot open WAL-file" + p.getFileName());
 			return;
 		}
 
@@ -192,7 +199,7 @@ public class WALReader extends Base {
 		try {
 			if(file.size() <= 32)
 			{	
-				    info("WAL-File is empty. Skip analyzing.");
+				    AppLog.info("WAL-File is empty. Skip analyzing.");
 					return;
 			}
 		} catch (IOException e) {
@@ -223,18 +230,18 @@ public class WALReader extends Base {
 		if (Auxiliary.bytesToHex(header).equals(MAGIC_HEADER_STRING1))
 		{		
 				headerstring = MAGIC_HEADER_STRING1;
-				info("header is okay. seems to be an write ahead log file.");
+				AppLog.info("header is okay. seems to be an write ahead log file.");
 		}
 		else
 		if (Auxiliary.bytesToHex(header).equals(MAGIC_HEADER_STRING2))
 		{
 			headerstring = MAGIC_HEADER_STRING2;
-			info("header is okay. seems to be an write ahead log file.");
+			AppLog.info("header is okay. seems to be an write ahead log file.");
 			
 		}
 		else {
-			info("sorry. doesn't seem to be an WAL file. Wrong header.");
-			err("Doesn't seem to be an valid WAL file. Wrong header");
+			AppLog.info("sorry. doesn't seem to be an WAL file. Wrong header.");
+			AppLog.error("Doesn't seem to be an valid WAL file. Wrong header");
 		}
 
 		/*******************************************************************/
@@ -243,7 +250,7 @@ public class WALReader extends Base {
 		buffer.position(4);
 		
 		ffversion = buffer.getInt();
-		info(" file format version " + ffversion);
+		AppLog.info(" file format version " + ffversion);
 		
 		ps = buffer.getInt();
 
@@ -259,7 +266,7 @@ public class WALReader extends Base {
 		if (ps == 0 || ps == 1)
 			ps = 65536;
 
-		info("page size " + ps + " Bytes ");
+		AppLog.info("page size " + ps + " Bytes ");
 
 		
 	
@@ -267,32 +274,32 @@ public class WALReader extends Base {
 		 * Offset 12 Size 4 Checkpoint sequence number 
 		 */
 		csn = buffer.getInt();
-		info(" checkpoint sequence number " + csn);
+		AppLog.info(" checkpoint sequence number " + csn);
 
 	
 		/*
 		 * Offset 16 Size 4 Salt-1: random integer incremented with each checkpoint 
 		 */
 		hsalt1 = Integer.toUnsignedLong(buffer.getInt());
-		info(" salt1 " + hsalt1);
+		AppLog.info(" salt1 " + hsalt1);
 
 		
 		/*
 		 * Offset 20 Size 4 Salt-2: Salt-2: a different random number for each checkpoint 
 		 */
 		hsalt2 = Integer.toUnsignedLong(buffer.getInt());
-		info(" salt2 " + hsalt2);
+		AppLog.info(" salt2 " + hsalt2);
 
 		
 		/* Offset 24 Checksum-1: First part of a checksum on the first 24 bytes of header */
 		hchecksum1 = Integer.toUnsignedLong(buffer.getInt());
-		info(" checksum-1 of first frame header " + hchecksum1);
+		AppLog.info(" checksum-1 of first frame header " + hchecksum1);
 
 		
 		
 		/* Offset 28 Checksum-2: Second part of the checksum on the first 24 bytes of header  */
 		hchecksum2 = Integer.toUnsignedLong(buffer.getInt());
-		info(" checksum-2 second part ot the checksum on the first frame header " + hchecksum2);
+		AppLog.info(" checksum-2 second part ot the checksum on the first frame header " + hchecksum2);
 
 		
 		/* initialize the BitSet for already visited location within a wal-page */
@@ -332,6 +339,8 @@ public class WALReader extends Base {
 
 		boolean next = false;
 		int numberofpages = 0;
+		long start = System.currentTimeMillis();
+
 		do
 		{
 			/* 24 Byte - with six 4-Byte big endian values */
@@ -346,15 +355,15 @@ public class WALReader extends Base {
 			/* number or size of pages for a commit header, otherwise zero. */
 			int commit = fheader.getInt();
 			if (commit > 0)
-				info(" Information of the WAL-archive has been commited successful. ");
+				AppLog.info(" Information of the WAL-archive has been commited successful. ");
 			else
-				info(" No commit so far. this frame holds the latest! version of the page ");
+				AppLog.info(" No commit so far. this frame holds the latest! version of the page ");
 			
 			long fsalt1 = Integer.toUnsignedLong(fheader.getInt());
-			info("fsalt1 " + fsalt1);
+			AppLog.info("fsalt1 " + fsalt1);
 			
 			long fsalt2 = Integer.toUnsignedLong(fheader.getInt());
-			info("fsalt2" + fsalt2);
+			AppLog.info("fsalt2" + fsalt2);
 			
 			/* A frame is considered valid if and only if the following conditions are true:
 			 * 
@@ -367,16 +376,16 @@ public class WALReader extends Base {
 			
 			if (hsalt1 == fsalt1 && hsalt2 == fsalt2)
 			{
-				 info("seems to be an valid frame. Condition 1 is true at least. ");
+				 AppLog.info("seems to be an valid frame. Condition 1 is true at least. ");
 			}	
 				
 	
-			debug("pagenumber of frame in main db " + pagenumber_maindb);
-			
+			AppLog.debug("pagenumber of frame in main db " + pagenumber_maindb);
 	
 			/* now we can read the page - it follows immediately after the frame header */
 	
 			/* read the db page into buffer */
+			//System.out.println(" page number of frame in main db " + pagenumber_maindb);
 			buffer = readPage();
 	
 			numberofpages++;
@@ -384,10 +393,7 @@ public class WALReader extends Base {
 
 			
 			WALFrame frame = updateCheckpoint(pagenumber_maindb, framenumber,fsalt1, fsalt2,(commit==0)? false: true);
-			
-			
 			analyzePage(frame);
-
 
 			
 			framestart += ps +  24;
@@ -406,16 +412,23 @@ public class WALReader extends Base {
 			
 		}while(next);
 
-		info("Lines after WAL-file recovery: " + output.size());
-		info("Number of pages in WAL-file" + numberofpages);
-	
+
 		
-		info("Checkpoints " + checkpoints.toString());
+		AppLog.info("Lines after WAL-file recovery: " + output.size());
+		AppLog.info("Number of pages in WAL-file" + numberofpages);
+		long end = System.currentTimeMillis();
+		System.out.println("WAL Import duration in ms: " + (end-start));
+		
+		AppLog.info("Checkpoints " + checkpoints.toString());
+	
 	}
+	
+	
 	
 	private WALFrame updateCheckpoint(int pagenumber, int framenumber,long salt1, long salt2, boolean committed){
 		
 		WALFrame f = new WALFrame(pagenumber, framenumber , salt1, salt2,  committed);
+		//checkpointlist.add(f);
 
 		
 		/* new checkpoint/transaction id? */
@@ -424,7 +437,6 @@ public class WALReader extends Base {
 			LinkedList<WALFrame> trx = new LinkedList<WALFrame>();
 			trx.add(f);
 			checkpoints.put(salt1, trx);
-			
 		}
 		else
 		{
@@ -478,9 +490,10 @@ public class WALReader extends Base {
 			Integer checksum = buffer.getInt();
 			/* was page dropped ? */
 			if (checksum == 0) {
-				System.out.println(" DROPPED PAGE !!!");
+				// System.out.println(" DROPPED PAGE !!!");
 				/* no overflow page -> carve for data records - we do our best! ;-) */
-				carve(content, null);
+				//if(Global.intenseScan)
+				//	carve(content, null);
 			}
 			/*
 			 * otherwise it seems to be a overflow page - however, that is not 100% save !!!
@@ -490,27 +503,47 @@ public class WALReader extends Base {
 			return 0;
 		}
 
+		if (pagenumber_wal == 12)
+		{
+			System.out.println(" page 12 type ::" + type);
+		}
+		
+			
 		/************** skip unkown page types ******************/
 
 		// no leaf page -> skip this page
 		if (type < 0) {
-			info("No Data page. " + pagenumber_wal);
+			AppLog.info("No Data page. " + pagenumber_wal);
+			//System.out.println(" write page to overflow. skip page for now " + pagenumber_maindb);
+		    overflow.put(pagenumber_maindb,buffer);
 			return -1;
-		} else if (type == 5) {
-			info("Internal Table page " + pagenumber_wal);
+		}
+		else if (type == 2){
+			AppLog.debug("WAL Internal Index page " + pagenumber_wal);
+			//System.out.println("WAL Internal Index page " + pagenumber_wal);
+			//System.out.println("WALReader:analyzePage() -> Internal index page found" + pagenumber_wal);
+			return -1;
+		}	
+		else if (type == 5) {
+			AppLog.info("WAL Internal Table page " + pagenumber_wal);
+			//System.out.println("WAL Internal Table page " + pagenumber_wal);
+			//System.out.println("WALReader:analyzePage() -> Internal page found" + pagenumber_wal);
 			return -1;
 		} else if (type == 10) {
-			info("Index leaf page " + pagenumber_wal);
+			AppLog.debug("WAL Index leaf page " + pagenumber_wal);
+			//System.out.println("WAL Index leaf page " + pagenumber_wal);		
 			// note: WITHOUT ROWID tables are saved here.
-			withoutROWID = true;
+		 	withoutROWID = true;
 		} else {
-			info("Data page " + pagenumber_wal + " Offset: " + (wal.position()));
+			// 0x0D -> 13 value is 8 (see Auxiliary)
+			AppLog.debug("WAL Data page " + pagenumber_wal + " Offset: " + (wal.position()) + " Type " + type);
+			//System.out.println("WAL Data page " + pagenumber_wal + " Offset: " + (wal.position()) + " Type " + type);
 		}
 
 		/************** regular leaf page with data ******************/
 
 		// boolean freeblocks = false;
-		if (type == 8) {
+		if (type == 8 || type == 13) {
 			// offset 1-2 let us find the first free block offset for carving
 			byte fboffset[] = new byte[2];
 			buffer.position(1);
@@ -539,10 +572,10 @@ public class WALReader extends Base {
 		ByteBuffer size = ByteBuffer.wrap(cpn);
 		int cp = Auxiliary.TwoByteBuffertoInt(size);
 
-		debug(" number of cells: " + cp + " type of page " + type);
+		AppLog.debug(" number of cells: " + cp + " type of page " + type);
 		job.numberofcells.addAndGet(cp);
 		if (0 == cp)
-			debug(" Page seems to be dropped. No cell entries.");
+			AppLog.debug(" Page seems to be dropped. No cell entries.");
 
 		int headerend = 8 + (cp * 2);
 		visit.set(0, headerend);
@@ -562,9 +595,18 @@ public class WALReader extends Base {
 			byte pointer[] = new byte[2];
 			if (type == 5)
 				buffer.position(12 + 2 * i);
+			else {
+				if (buffer.position() + 8 + 2 * i < buffer.limit())
+					buffer.position(8 + 2 * i);
+				else
+					continue;
+			}
+			
+			if (buffer.position() + 2 < buffer.limit())
+			   buffer.get(pointer);
 			else
-				buffer.position(8 + 2 * i);
-			buffer.get(pointer);
+			   continue;
+			
 			ByteBuffer celladdr = ByteBuffer.wrap(pointer);
 			int celloff = Auxiliary.TwoByteBuffertoInt(celladdr);
 
@@ -588,29 +630,30 @@ public class WALReader extends Base {
 				e.printStackTrace();
 			}
 
-			/* adding WAL-Frame fields to output line */
+			if(rc.size()==0)
+				System.out.println("rc ist leer");
+	
 			
+			/* adding WAL-Frame fields to output line */
+		
 			//String info = frame.committed + "," + frame.pagenumber + "," + frame.framenumber + "," + frame.salt1 + "," +  frame.salt2;
 			rc.add(5,""+frame.salt2);
 			rc.add(5,""+frame.salt1);
 			rc.add(5,""+frame.framenumber);
-			rc.add(5,""+frame.pagenumber);
+			rc.add(5,""+pagenumber_maindb);
 			rc.add(5,""+frame.committed);
 								
 			// add new line to output
 			if (null != rc && rc.size() > 0) {
-
-				int p1;
-				if ((p1 = rc.indexOf("_node;")) > 0) {
-
-				}			
+		
 				output.add(rc);
+				updateResultSet(rc);
 			}
 
 		} // end of for - cell pointer
 
 		
-		debug("finished STEP2 -> cellpoint array completed");
+		AppLog.debug("finished STEP2 -> cellpoint array completed");
 		
 	try 
 	{	
@@ -625,9 +668,11 @@ public class WALReader extends Base {
 		
 		/* before we go to the free blocks an gaps let us first check the area between the header and 
 		   the start byte of the cell content region */
-		
-		buffer.position(headerend);
-		
+		if (headerend < buffer.limit())
+			buffer.position(headerend);
+		else
+			return -1;
+			
 		/* 	Although we have already reached the official end of the cell pointer array, 
 		 *  there may be more pointers startRegion deleted records. They do not belong to the
 		 *  official content region. We have to skip them, before we can search for more 
@@ -659,11 +704,6 @@ public class WALReader extends Base {
 		
 		/* go back one byte */
 		buffer.position(buffer.position()-1);
-	
-		//System.out.println("First none-zero Byte " + zerob);
-		
-		//System.out.println("Cell Content Region start offset : " + ccrstart);
-		//System.out.println("First none zero byte in unallocated space : " + buffer.position());
 		
 		/* only if there is a significant number of bytes in the unallocated area, evaluate it more closely. */
 		if (ccrstart - buffer.position() > 3)
@@ -678,12 +718,10 @@ public class WALReader extends Base {
 			// add new line to output
 			if (null != rc) { 
 				
+
 				String secondcol = rc.get(1);
 				secondcol = Global.DELETED_RECORD_IN_PAGE  + secondcol;
 				rc.set(1,secondcol);
-				
-				//if (job.doublicates.add(rc.hashCode()))
-				//job.resultlist.add(rc);
 				updateResultSet(rc);
 			}
 			
@@ -698,7 +736,7 @@ public class WALReader extends Base {
 		 ***************************************************************/
 		
 		/* now we are ready to carve the rest of the page */
-		carve(content,null);
+		//carve(content,null);
 		
 	} catch (Exception err) {
 		err.printStackTrace();
@@ -713,9 +751,9 @@ public class WALReader extends Base {
 	private void updateResultSet(LinkedList<String> line) 
 	{
 		// entry for table name already exists  
-		if (job.resultlist.containsKey(line.getFirst()))
+		if (resultlist.containsKey(line.getFirst()))
 		{
-			     ObservableList<LinkedList<String>> tablelist = job.resultlist.get(line.getFirst());
+			     ObservableList<LinkedList<String>> tablelist = resultlist.get(line.getFirst());
 			     tablelist.add(line);  // add row 
 		}
 		
@@ -723,7 +761,7 @@ public class WALReader extends Base {
 		else {
 		          ObservableList<LinkedList<String>> tablelist = FXCollections.observableArrayList();
 				  tablelist.add(line); // add row 
-				  job.resultlist.put(line.getFirst(),tablelist);  	
+				  resultlist.put(line.getFirst(),tablelist);  	
 		}
 	}
 
@@ -769,6 +807,8 @@ public class WALReader extends Base {
 		wal.position(0);
 
 	}
+	
+	
 
 	/**
 	 * Starting with the current position of the wal-ByteBuffer read the next
@@ -810,35 +850,35 @@ public class WALReader extends Base {
 		}
 
 		List<TableDescriptor> tab = tables;
-		debug(" tables :: " + tables.size());
+		AppLog.debug(" tables :: " + tables.size());
 
 		if (null != tdesc) {
 			/* there is a schema for this page */
 			tab = new LinkedList<TableDescriptor>();
 			tab.add(tdesc);
-			debug(" added tdsec ");
+			AppLog.debug(" added tdsec ");
 		} else {
-			warning(" No component description!" + content);
+			AppLog.warning(" No component description!" + content);
 			tab = tables;
 		}
 
 		LinkedList<Gap> gaps = findGaps();
 		if (gaps.size() == 0) {
-			debug("no gaps anymore. Stopp search");
+			AppLog.debug("no gaps anymore. Stopp search");
 			return;
 		}
 
 		/* try out all component schema(s) */
 		for (int n = 0; n < tab.size(); n++) {
 			tdesc = tab.get(n);
-			debug("pagenumber :: " + pagenumber_maindb + " component size :: " + tab.size());
-			debug("n " + n);
+			AppLog.debug("pagenumber :: " + pagenumber_maindb + " component size :: " + tab.size());
+			AppLog.debug("n " + n);
 			// TableDescriptor tdb = tab.get(n);
 
 			/* access pattern for a particular component */
 			String tablename = tab.get(n).tblname;
-			debug("WALReader Check component : " + tablename);
-			if (tablename.startsWith("__UNASSIGNED"))
+			AppLog.debug("WALReader Check component : " + tablename);
+			if (tablename.startsWith("__FREELIST"))
 				continue;
 			/* create matcher object for constrain check */
 			SerialTypeMatcher stm = new SerialTypeMatcher(buffer);
@@ -852,7 +892,7 @@ public class WALReader extends Base {
 				if (next.to - next.from > 10)
 					/* do we have at least one match ? */
 					if (c.carve(next.from + 4, next.to, stm, CarverTypes.NORMAL, tab.get(n))!= Global.CARVING_ERROR) {
-						debug("*****************************  STEP NORMAL finished with matches");
+						AppLog.debug("*****************************  STEP NORMAL finished with matches");
 
 					}
 			}
@@ -864,7 +904,7 @@ public class WALReader extends Base {
 				Gap next = gaps.get(a);
 
 				if (c.carve(next.from + 4, next.to, stm, CarverTypes.COLUMNSONLY, tab.get(n)) != Global.CARVING_ERROR) {
-					debug("*****************************  STEP COLUMNSONLY finished with matches");
+					AppLog.debug("*****************************  STEP COLUMNSONLY finished with matches");
 
 				}
 			}
@@ -876,7 +916,7 @@ public class WALReader extends Base {
 				Gap next = gaps.get(a);
 
 				if (c.carve(next.from + 4, next.to, stm, CarverTypes.FIRSTCOLUMNMISSING, tab.get(n)) != Global.CARVING_ERROR) {
-					debug("*****************************  STEP FIRSTCOLUMNMISSING finished with matches");
+					AppLog.debug("*****************************  STEP FIRSTCOLUMNMISSING finished with matches");
 
 				}
 
@@ -920,7 +960,7 @@ public class WALReader extends Base {
 
 		} // end of tables ( component fingerprint )
 
-		debug("End of WALReader:parse()");
+		AppLog.debug("End of WALReader:parse()");
 
 		
 	}
@@ -933,11 +973,12 @@ public class WALReader extends Base {
 	 */
 	public void output()
 	{
+		// Are we in GUI mode or in cli mode?
 		if (job.gui != null) {
 			
 			
 			System.out.println("Number of WAL records recovered: " + output.size());
-
+	
 			Iterator<LinkedList<String>> lines = output.iterator();
 			
 			// holds all data sets for all tables, whereas the tablename represents the key
@@ -948,16 +989,15 @@ public class WALReader extends Base {
 
 			
 				LinkedList<String> line = lines.next();
-				String[] rec = line.toArray(new String[0]);
 
 			   	
-			   	/* if table name is empty -> assign data record to table __UNASSIGNED */
+			   	/* if table name is empty -> assign data record to table __FREELIST */
 			   	if (line.getFirst().trim().length()==0)
 			   	{
 			 
 			        // Add the new element add the begin 
-			        line.set(0,"__UNASSIGNED"); 
-			        line.add(3,Global.DELETED_RECORD_IN_PAGE);
+			        //line.add(0,"__FREELIST"); 
+			 
 			   	}
 	
 			   	
@@ -992,19 +1032,14 @@ public class WALReader extends Base {
 						continue;
 		
 					String walpath = job.guiwaltab.get(tablename);
-					System.out.println("WALReader:: called update_table for " + tablename + " path  :: " + walpath);			
+					if (walpath == null)
+						continue;
+					//System.out.println("WALReader:: called update_table for " + tablename + " path  :: " + walpath);			
 					job.gui.update_table(walpath,dataSets.get(tablename),true);
 					
 			}	
 				
 			
-		
-			/* create a hex viewer object for the wal-file */
-			//Platform.runLater(() -> {
-			//	fqlite.ui.HexViewFX hex = new fqlite.ui.HexViewFX(GUI.topContainer,this.path,this.wal);
- 			//    hexview = hex; 
-			//});
-
 		} 
 		else 
 		{
@@ -1105,35 +1140,35 @@ public class WALReader extends Base {
 		}
 
 		List<TableDescriptor> tab = tables;
-		debug(" tables :: " + tables.size());
+		AppLog.debug(" tables :: " + tables.size());
 
 		if (null != tdesc) {
 			/* there is a schema for this page */
 			tab = new LinkedList<TableDescriptor>();
 			tab.add(tdesc);
-			debug(" added tdsec ");
+			AppLog.debug(" added tdsec ");
 		} else {
-			warning(" No component description!");
+			AppLog.warning(" No component description!");
 			tab = tables;
 		}
 
 		LinkedList<Gap> gaps = findGaps();
 		if (gaps.size() == 0) {
-			debug("no gaps anymore. Stopp search");
+			AppLog.debug("no gaps anymore. Stopp search");
 			return;
 		}
 
 		/* try out all component schema(s) */
 		for (int n = 0; n < tab.size(); n++) {
 			tdesc = tab.get(n);
-			debug("pagenumber :: " + pagenumber_maindb + " component size :: " + tab.size());
-			debug("n " + n);
+			AppLog.debug("pagenumber :: " + pagenumber_maindb + " component size :: " + tab.size());
+			AppLog.debug("n " + n);
 			// TableDescriptor tdb = tab.get(n);
 
 			/* access pattern for a particular component */
 			String tablename = tab.get(n).tblname;
-			debug("Check component : " + tablename);
-			if (tablename.startsWith("__UNASSIGNED"))
+			AppLog.debug("Check component : " + tablename);
+			if (tablename.startsWith("__FREELIST"))
 				continue;
 			/* create matcher object for constrain check */
 			SerialTypeMatcher stm = new SerialTypeMatcher(buffer);
@@ -1147,7 +1182,7 @@ public class WALReader extends Base {
 				if (next.to - next.from > 10)
 					/* do we have at least one match ? */
 					if (c.carve(next.from + 4, next.to, stm, CarverTypes.NORMAL, tab.get(n)) != Global.CARVING_ERROR) {
-						debug("*****************************  STEP NORMAL finished with matches");
+						AppLog.debug("*****************************  STEP NORMAL finished with matches");
 
 					}
 			}
@@ -1159,7 +1194,7 @@ public class WALReader extends Base {
 				Gap next = gaps.get(a);
 
 				if (c.carve(next.from + 4, next.to, stm, CarverTypes.COLUMNSONLY, tab.get(n)) != Global.CARVING_ERROR) {
-					debug("*****************************  STEP COLUMNSONLY finished with matches");
+					AppLog.debug("*****************************  STEP COLUMNSONLY finished with matches");
 
 				}
 			}
@@ -1171,7 +1206,7 @@ public class WALReader extends Base {
 				Gap next = gaps.get(a);
 
 				if (c.carve(next.from + 4, next.to, stm, CarverTypes.FIRSTCOLUMNMISSING, tab.get(n)) != Global.CARVING_ERROR) {
-					debug("*****************************  STEP FIRSTCOLUMNMISSING finished with matches");
+					AppLog.debug("*****************************  STEP FIRSTCOLUMNMISSING finished with matches");
 
 				}
 
@@ -1180,31 +1215,5 @@ public class WALReader extends Base {
 		}
 	}
 	
-	class WALFrame
-	{
-		int pagenumber;
-		int framenumber;
-		long salt1;
-	    long salt2;
-		boolean committed = false;
-		
-		@Override
-		public String toString()
-		{
-			return "{pagenumber=" + pagenumber + " framenumber=" + framenumber + " committed=" + committed +"}";
-			
-		}
-		
-		
-		public WALFrame(int pagenumber, int framenumber, long salt1, long salt2, boolean committed)
-		{
-			this.salt1 = salt1;
-			this.salt2 = salt2;
-			this.pagenumber = pagenumber;
-			this.framenumber  = framenumber;
-			this.committed = committed;
-		}
-		
-		
-	}
+	
 }

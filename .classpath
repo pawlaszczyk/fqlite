@@ -1,11 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <classpath>
 	<classpathentry kind="src" path="src"/>
-	<classpathentry kind="con" path="org.eclipse.jdt.launching.JRE_CONTAINER/org.eclipse.jdt.internal.debug.ui.launcher.StandardVMType/JavaSE-17">
-		<attributes>
-			<attribute name="module" value="true"/>
-		</attributes>
-	</classpathentry>
 	<classpathentry kind="lib" path="/Users/pawlaszc/javafx/lib/javafx.base.jar">
 		<attributes>
 			<attribute name="module" value="true"/>
@@ -47,7 +42,42 @@
 		</attributes>
 	</classpathentry>
 	<classpathentry kind="lib" path="lib/antlr-4.8-complete.jar"/>
+	<classpathentry kind="lib" path="lib/avro-1.11.1.jar"/>
+	<classpathentry kind="lib" path="lib/bplist.jar"/>
+	<classpathentry kind="lib" path="lib/bson-3.6.0.jar"/>
 	<classpathentry kind="lib" path="lib/commons-codec-1.15.jar"/>
-	<classpathentry kind="lib" path="/FQLiteFX/lib/FxTextEditor.jar"/>
+	<classpathentry kind="lib" path="lib/commons-io-2.14.0.jar"/>
+	<classpathentry kind="lib" path="lib/commons-lang3-3.13.0.jar"/>
+	<classpathentry kind="lib" path="lib/commons-logging-1.2.jar"/>
+	<classpathentry kind="lib" path="lib/controlsfx-11.1.2.jar"/>
+	<classpathentry kind="lib" path="lib/cssfx-11.5.1.jar"/>
+	<classpathentry kind="lib" path="lib/fontbox-3.0.0.jar"/>
+	<classpathentry kind="lib" path="lib/FxTextEditor.jar"/>
+	<classpathentry kind="lib" path="lib/hamcrest-core-1.3.jar"/>
+	<classpathentry kind="lib" path="lib/ikonli-core-12.3.1.jar"/>
+	<classpathentry kind="lib" path="lib/ikonli-javafx-12.3.1.jar"/>
+	<classpathentry kind="lib" path="lib/ikonli-materialdesign-pack-12.3.1.jar"/>
+	<classpathentry kind="lib" path="lib/indriya-2.1.2.jar"/>
+	<classpathentry kind="lib" path="lib/jackson-annotations-2.16.0.jar"/>
+	<classpathentry kind="lib" path="lib/jackson-core-2.16.0.jar"/>
+	<classpathentry kind="lib" path="lib/jackson-databind-2.15.2.jar"/>
+	<classpathentry kind="lib" path="lib/javax.inject-1.jar"/>
+	<classpathentry kind="lib" path="lib/junit-4.13.2.jar"/>
+	<classpathentry kind="lib" path="lib/msgpack-core-0.9.0.jar"/>
+	<classpathentry kind="lib" path="lib/pdfbox-3.0.0.jar"/>
+	<classpathentry kind="lib" path="lib/pdfbox-io-3.0.0.jar"/>
+	<classpathentry kind="lib" path="lib/pdfviewfx-3.0.0.jar"/>
+	<classpathentry kind="lib" path="lib/readablethrift-1.0.0-all.jar"/>
+	<classpathentry kind="lib" path="lib/SerializationDumper-v1.13.jar"/>
+	<classpathentry kind="lib" path="lib/slf4j-api-2.0.9.jar"/>
+	<classpathentry kind="lib" path="lib/unit-api-2.2.jar"/>
+	<classpathentry kind="lib" path="lib/unitfx-1.0.10.jar"/>
+	<classpathentry kind="lib" path="lib/uom-lib-common-2.1.jar"/>
+	<classpathentry kind="con" path="org.eclipse.jdt.launching.JRE_CONTAINER/org.eclipse.jdt.internal.launching.macosx.MacOSXType/Java SE 20.0.2 [20.0.2]">
+		<attributes>
+			<attribute name="module" value="true"/>
+		</attributes>
+	</classpathentry>
+	<classpathentry kind="lib" path="lib/dd-plist.jar"/>
 	<classpathentry kind="output" path="bin"/>
 </classpath>

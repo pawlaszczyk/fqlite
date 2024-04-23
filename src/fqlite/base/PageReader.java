@@ -6,7 +6,7 @@ import java.util.BitSet;
 import java.util.LinkedList;
 import java.util.concurrent.atomic.AtomicInteger;
 
-import fqlite.parser.SQLiteSchemaParser;
+import fqlite.log.AppLog;
 import fqlite.types.SerialTypes;
 import fqlite.types.StorageClass;
 import fqlite.util.Auxiliary;
@@ -21,7 +21,7 @@ import fqlite.util.CarvingResult;
  * @author pawlaszc
  *
  */
-public class PageReader extends Base {
+public class PageReader{
 
 	public AtomicInteger found = new AtomicInteger();
 	public AtomicInteger inrecover = new AtomicInteger();
@@ -88,130 +88,7 @@ public class PageReader extends Base {
 		this.job = job;
 	}
 
-	/**
-	 * An important step in data recovery is the analysis of the database schema.
-	 * This method allows to read in the schema description into a ByteBuffer.
-	 * 
-	 * @param job
-	 * @param start
-	 * @param buffer
-	 * @param header
-	 * @throws IOException
-	 */
-	public void readMasterTableRecord(Job job, int start, ByteBuffer buffer, String header) throws IOException {
-		
-		SqliteElement[] columns;
 
-		buffer.position(start);
-		
-		columns = toColumns(header);
-
-		if (null == columns)
-			return;
-		
-		// use the header information to reconstruct 
-		int pll = Auxiliary.computePayloadLengthS(header);
-
-		int so = Auxiliary.computePayloadS(pll,job.ps);
-
-		int overflow = -1;
-
-		if (so < pll) {
-			int phl = header.length() / 2;
-
-			int last = buffer.position();
-			debug(" spilled payload ::" + so);
-			debug(" pll payload ::" + pll);
-			buffer.position(buffer.position() + so - phl - 1);
-
-			overflow = buffer.getInt();
-			debug(" overflow::::::::: " + overflow + " " + Integer.toHexString(overflow));
-			buffer.position(last);
-		
-				/*
-				 * we need to increment page number by one since we start counting with zero for
-				 * page 1
-				 */
-				byte[] extended = readOverflow(overflow -1);
-
-				byte[] c = new byte[pll + job.ps];
-
-				buffer.position(0);
-				
-				/* method array() cannot be called, since we backed an array*/
-				byte [] originalbuffer = new byte[job.ps];
-				for (int bb = 0; bb < job.ps; bb++)
-				{
-				   originalbuffer[bb] = buffer.get(bb);	
-				}	
-				
-				buffer.position(last);
-				
-				/* copy spilled overflow of current page into extended buffer */
-				System.arraycopy(originalbuffer, buffer.position(), c, 0, so - phl);
-				/* append the rest startRegion the overflow pages to the buffer */
-				System.arraycopy(extended, 0, c, so - phl -1, extended.length); //- so);
-			  	ByteBuffer bf = ByteBuffer.wrap(c);
-
-			  	buffer = bf;
-				
-			
-				// set original buffer pointer to the end of the spilled payload
-				// just before the next possible record
-				buffer.position(0);
-		} 
-
-		int con = 0;
-		
-		String tablename = null;
-		int rootpage = -1;
-		String statement = null;
-		
-		 /* start reading the content */
-		for (SqliteElement en : columns) {
-		
-			
-			if (en == null) {
-				continue;
-			}
-			
-			byte[] value = null;
-			
-			if (con == 5)
-				value = new byte[en.length];
-			else
-				value = new byte[en.length];
-				
-			buffer.get(value);
-		
-			/* column 3 ? -> tbl_name TEXT */
-			if (con == 3)
-			{	
-				tablename = en.toString(value,true);
-			}
-				
-			/* column 4 ?  -> root page Integer */
-			if (con == 4)
-			{	
-				rootpage = SqliteElement.decodeInt8(value[0]);
-			}
-		
-			/* read sql statement */
-			
-			if (con == 5)
-			{	
-				statement = en.toString(value,true);				
-			}
-		
-			
-			
-		    con++;
-			
-		}	
-		//finally, we have all information in place to parse the CREATE statement
-		SQLiteSchemaParser.parse(job,tablename, rootpage, statement);
-
-	}
 
 	/**
 	 * This method is used to extract a previously deleted record startRegion a page. 
@@ -240,9 +117,6 @@ public class PageReader extends Base {
 		if (null == columns)
 			return null;
 
-		//StringBuffer lineUTF = new StringBuffer();
-		// String[] row = new String[columns.length]; // set to maximum page size
-		int co = 0;
 		String fp = null;
 		try {
 			fp = Auxiliary.getTableFingerPrint(columns);
@@ -252,11 +126,9 @@ public class PageReader extends Base {
 		}
 		if (null == fp)
 			fp = "unkown";
-		// String idxname = Signatures.getTable(fp);
 
 		boolean error = false;
 
-		//lineUTF.append(((pagenumber - 1) * job.ps + buffer.position()) + ";");
 		record.add(((pagenumber - 1) * job.ps + buffer.position())+"");
 		
 		/* use the header information to reconstruct */
@@ -270,12 +142,11 @@ public class PageReader extends Base {
 			int phl = header.length() / 2;
 
 			int last = buffer.position();
-			debug(" deleted spilled payload ::" + so);
-			debug(" deleted pll payload ::" + pll);
+			AppLog.debug(" deleted spilled payload ::" + so);
+			AppLog.debug(" deleted pll payload ::" + pll);
 			buffer.position(buffer.position() + so - phl - 1);
 
 			overflow = buffer.getInt();
-			debug(" deleted overflow::::::::: " + overflow + " " + Integer.toHexString(overflow));
 			buffer.position(last);
 
 			ByteBuffer bf;
@@ -322,10 +193,8 @@ public class PageReader extends Base {
 
 				bf.get(value);
 
-				//lineUTF.append(write(co, en, value));
-				record.add(en.toString(value,false));
+				record.add(en.toString(value,false,true));
 				
-				co++;
 			}
 
 			// set original buffer pointer to the end of the spilled payload
@@ -347,9 +216,7 @@ public class PageReader extends Base {
 				}
 				buffer.get(value);
 
-				//lineUTF.append(write(co, en, value));
-                record.add(en.toString(value,false));
-				co++;
+                record.add(en.toString(value,false,true));
 
 			}
 
@@ -359,16 +226,10 @@ public class PageReader extends Base {
 
 		/* mark bytes as visited */
 		bs.set(recordstart, buffer.position()-1, true);
-		debug("Besucht :: " + recordstart + " bis " + buffer.position());
+		AppLog.debug("Besucht :: " + recordstart + " bis " + buffer.position());
 		int cursor = ((pagenumber - 1) * job.ps) + buffer.position();
-		debug("Besucht :: " + (((pagenumber - 1) * job.ps) + recordstart) + " bis " + cursor);
-        
-		
-		//lineUTF.append("\n");
-		
-		// if (!tables.containsKey(idxname))
-		// tables.put(idxname, new ArrayList<String[]>());
-		//debug(lineUTF.toString());
+		AppLog.debug("Besucht :: " + (((pagenumber - 1) * job.ps) + recordstart) + " bis " + cursor);
+        		
 		return new CarvingResult(buffer.position(),cursor, new StringBuffer(), record);
 	}
 
@@ -389,272 +250,19 @@ public class PageReader extends Base {
 	 * @param value the actual value
 	 * @return  the converted StringBuffer value
 	 */
-	private StringBuffer write(int col, SqliteElement en, byte[] value) {
+	public StringBuffer write(int col, SqliteElement en, byte[] value) {
 
 		StringBuffer val = new StringBuffer();
 
 		if (col > 0)
 			val.append(";");
 
-		val.append(en.toString(value,false));
+		val.append(en.toString(value,false,true));
 
 		return val;
 	}
 
-	/**
-	 * This method can be used to read an active data record.
-	 * 
-	 * A regular cell has the following structure
-	 * 
-	 * [Cell Size / Payload][ROW ID] [Header Size][Header Columns] [Data] varint
-	 * varint varint varint ...
-	 * 
-	 * We only need to parse the headerbytes including the serial types of each
-	 * column. Afterwards we can read each data cell of the tablerow and convert
-	 * into an UTF8 string. 
-	 * 
-	 * 
-	 **/
-//	public String readRecord(int cellstart, ByteBuffer buffer, int pagenumber, BitSet bs, int pagetype, int maxlength)
-//			throws IOException {
-//
-//		boolean unkown = false;
-//
-//		// first byte of the buffer
-//		buffer.position(0);
-//
-//		// prepare the string for the return value
-//		StringBuffer lineUTF = new StringBuffer();
-//
-//		/* first, add component name if known */
-//		if (null != job.pages[pagenumber]) {
-//			lineUTF.append(job.pages[pagenumber].getName() + ";");
-//		} else {
-//			warning("Unkown Table.");
-//			//lineUTF.append("Unkown;");
-//			unkown = true;
-//		}
-//
-//		// lineUTF.append((pagenumber-1)*job.ps + buffer.position()+";");
-//		lineUTF.append((pagenumber - 1) * job.ps + cellstart + ";");
-//
-//		// length of payload as varint
-//		buffer.position(cellstart);
-//		int pll = readUnsignedVarInt(buffer);
-//		
-//		//debug("Length of payload int : " + pll + " as hex : " + Integer.toHexString(pll));
-//		
-//		int rowid = 0;
-//		
-//		if (unkown)
-//		{
-//			rowid = readUnsignedVarInt(buffer);
-//			debug("rowid: " + Integer.toHexString(rowid));
-//		}
-//		else
-//		{
-//			if (job.pages[pagenumber].ROWID)
-//			{
-//				// read rowid as varint
-//				rowid = readUnsignedVarInt(buffer);
-//				debug("rowid: " + Integer.toHexString(rowid));
-//			    // we do not use this key in the moment - but we have to read the value 
-//			}
-//				
-//		}
-//	
-//		// now read the header length as varint
-//		int phl = readUnsignedVarInt(buffer);
-//
-//		if (phl == 0) {
-//			debug(" Headerlength is 0 ");
-//			return null;
-//		}
-//
-//		debug("Header Length int: " + phl + " as hex : " + Integer.toHexString(phl));
-//
-//		phl = phl - 1;
-//		
-//		if (phl > job.ps)
-//		{
-//			debug(" Invalid Headerlength ");
-//			return null;
-//		}	
-//
-//		/* maxlength field says something about the maximum bytes we can read before in unallocated space,
-//		 * before we reach the cell content area (ppl + rowid header + data). Note: Sometimes the data record is already
-//		 * partly overwritten by a regular data record. We have only an artifact and not a complete data record.
-//		 * 
-//		 * For a regular data field startRegion the content area the value of maxlength should be INTEGER.max_value 2^32
-//		 */
-//		System.out.println(" bufferposition :: " + buffer.position() + " headerlength " + phl );
-//		maxlength = maxlength - phl; //- buffer.position();
-//		
-//		
-//		// read header bytes with serial types for each column
-//		// Attention: this takes most of the time during a run
-//		SqliteElement[] columns;
-//		columns = getColumns(phl, buffer);
-//
-//		if (null == columns) {
-//			debug(" No valid header. Skip recovery.");
-//			return null;
-//		}
-//
-//		int co = 0;
-//		try {
-//			if (unkown) { 
-//				/* this has only be done, when component name is unkown */
-//			
-//				String serial = null;
-//				serial = Auxiliary.getSerial(columns);
-//				
-//				String tablename = job.tblSig.get(serial);
-//				debug(" tablename found " + tablename);
-//				if (null == tablename)
-//					lineUTF.append("Unkown;");
-//				else 
-//					lineUTF.append(tablename+";");
-//				
-//				debug("serial " + serial);
-//				
-//				if (null == serial)
-//				  serial = "unkown";
-//				
-//			}
-//		} catch (NullPointerException err) {
-//			// System.err.println(err);
-//		}
-//
-//		boolean error = false;
-//
-//		int so = Auxiliary.computePayloadS(pll,job.ps);
-//		
-//		int overflow = -1;
-//
-//		if (so < pll) {
-//			int last = buffer.position();
-//			debug("regular spilled payload ::" + so);
-//			buffer.position(buffer.position() + so - phl - 1);
-//
-//			overflow = buffer.getInt();
-//			debug("regular overflow::::::::: " + overflow + " " + Integer.toHexString(overflow));
-//			buffer.position(last);
-//
-//			/*
-//			 * we need to increment page number by one since we start counting with zero for
-//			 * page 1
-//			 */
-//			byte[] extended = readOverflow(overflow - 1);
-//
-//			byte[] c = new byte[pll + job.ps];
-//			
-//			
-//			buffer.position(0);
-//			byte [] originalbuffer = new byte[job.ps];
-//			for (int bb = 0; bb < job.ps; bb++)
-//			{
-//			   originalbuffer[bb] = buffer.get(bb);	
-//			}	
-//			
-//			buffer.position(last);
-//		    /* copy spilled overflow of current page into extended buffer */
-//			System.arraycopy(originalbuffer, buffer.position(), c, 0, so - phl);
-//			/* append the rest startRegion the overflow pages to the buffer */
-//			System.arraycopy(extended, 0, c, so - phl, pll - so);
-//
-//			ByteBuffer bf = ByteBuffer.wrap(c);
-//			bf.position(0);
-//
-//			co = 0;
-//			/* start reading the content */
-//			for (SqliteElement en : columns) {
-//				if (en == null) {
-//					lineUTF.append(";NULL");
-//					continue;
-//				}
-//				
-//				checkROWID(co,en,rowid,lineUTF);	
-//
-//				byte[] value = new byte[en.length];
-//				bf.get(value);
-//
-//				lineUTF.append(write(co, en, value));
-//
-//				co++;
-//			}
-//
-//			// set original buffer pointer to the end of the spilled payload
-//			// just before the next possible record
-//			buffer.position(last + so - phl - 1);
-//
-//		} 
-//		else 
-//		{	
-//			/*
-//			 * record is not spilled over different pages - no overflow, just a regular
-//			 * record
-//			 *
-//			 * start reading the content */
-//			co = 0;
-//			
-//			/* there is a max length set - because we are in the unallocated space 
-//			   and may not read beyond the content area start*/
-//			for (SqliteElement en : columns) {
-//				if (en == null) {
-//					//if (en.serial == StorageClass.INT || en.serial == StorageClass.FLOAT)
-//					//	lineUTF.append(";0");
-//					//else
-//						lineUTF.append(";");
-//					continue;
-//				}
-//				
-//				checkROWID(co,en,rowid,lineUTF);	
-//
-//				byte[] value = null;
-//				if (maxlength >= en.length)
-//					value = new byte[en.length];
-//				else
-//					if (maxlength > 0)
-//						value = new byte[maxlength];
-//				maxlength -= en.length;
-//				
-//				if (null == value)
-//					break;
-//				
-//				try {
-//					buffer.get(value);
-//				} catch (BufferUnderflowException err) {
-//					System.out.println("ERROR " + err);
-//					 err.printStackTrace();
-//					return null;
-//				}
-//		
-//				lineUTF.append(write(co, en, value));
-//
-//				co++;
-//				
-//				if (maxlength <= 0)
-//					break;
-//			}
-//
-//		}
-//		
-//		lineUTF.append("\n");
-//
-//		/* mark as visited */
-//		debug("visted " + cellstart + " bis " + buffer.position());
-//		bs.set(cellstart, buffer.position());
-//
-//		if (error) {
-//			err("spilles overflow page error ...");
-//			return "";
-//		}
-//		// if (!tables.containsKey(idxname))
-//		// tables.put(idxname, new ArrayList<String[]>());
-//		debug(lineUTF.toString());
-//		return lineUTF.toString();
-//	}
+
 
 	/**
 	 * Reads the specified page as overflow. 
@@ -678,11 +286,11 @@ public class PageReader extends Base {
 
 		overflowpage.position(0);
 		int overflow = overflowpage.getInt();
-		debug(" overflow:: " + overflow);
+		//AppLog.debug(" overflow:: " + overflow);
 
 		if (overflow == 0) {
 			// termination condition for the recursive callup's
-			debug("No further overflow pages");
+			AppLog.debug("No further overflow pages");
 			/* startRegion the last overflow page - do not copy the zero bytes. */
 		} else {
 			/* recursively call next overflow page in the chain */
@@ -773,7 +381,7 @@ public class PageReader extends Base {
 			System.out.println("ERROR " + err.toString());
 		}
 		
-		debug("Header: " + Auxiliary.bytesToHex(header));
+		AppLog.debug("Header: " + Auxiliary.bytesToHex(header));
 		
 		return get(header);
 	}

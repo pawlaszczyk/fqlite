@@ -1,5 +1,6 @@
 package fqlite.parser;
 
+import fqlite.base.Job;
 import fqlite.descriptor.IndexDescriptor;
 import fqlite.descriptor.TableDescriptor;
 
@@ -93,11 +94,11 @@ public class TableParser {
 	 * @param stmt
 	 * @return a IndexDesriptor Object with all information about the component.
 	 */
-	public IndexDescriptor parseCREATEIndexStatement(String stmt)
+	public IndexDescriptor parseCREATEIndexStatement(Job job, String stmt)
 	{
 		
 		SimpleSQLiteParser parser = new SimpleSQLiteParser();
-		IndexDescriptor idx = parser.parseIndex(stmt);
+		IndexDescriptor idx = parser.parseIndex(job, stmt);
 		
 		return idx;
 	}

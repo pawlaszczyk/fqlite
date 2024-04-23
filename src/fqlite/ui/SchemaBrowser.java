@@ -1,13 +1,15 @@
 package fqlite.ui;
 
 import java.io.File;
+import java.io.FileOutputStream;
+import java.io.OutputStream;
+import java.io.PrintStream;
+import java.nio.file.FileSystems;
+
 import javafx.geometry.HPos;
 import javafx.geometry.VPos;
-import javafx.scene.Node;
-
 import javafx.scene.image.ImageView;
 import javafx.scene.layout.HBox;
-import javafx.scene.layout.Priority;
 import javafx.scene.layout.Region;
 import javafx.scene.web.WebEngine;
 import javafx.scene.web.WebView;
@@ -18,35 +20,36 @@ public class SchemaBrowser extends Region {
 	 
 	    final ImageView selectedImage = new ImageView();
 	    final WebView browser = new WebView();
-	    final WebEngine webEngine = browser.getEngine();
+	    WebEngine webEngine = browser.getEngine();
+	   
 	 
 	    public SchemaBrowser(String schema) {       
-	        //apply the styles
+	    	 webEngine.setJavaScriptEnabled(true);
+
+	    	//apply the styles
 	        getStyleClass().add("browser");
 	        
-	      //  try {
+	        try {
+				File baseDir = new File(System.getProperty("user.home"), ".fqlite");
+				String pfad = baseDir.getAbsolutePath() + FileSystems.getDefault().getSeparator() + "schema.html";  
 	        
-	        	// OutputStream htmlfile= new FileOutputStream(new File("temp.html"));
-	            // PrintStream printhtml = new PrintStream(htmlfile);
-	            // printhtml.println(schema);
-	        	// printhtml.close();
-	       // }
-	        //catch(Exception err)
-	        //{ }
+	        	OutputStream htmlfile= new FileOutputStream(new File(pfad));
+	        	PrintStream printhtml = new PrintStream(htmlfile);
+	        	printhtml.println(schema);
+	        	printhtml.close();
 	        
 	        // load the schema page        
-	        File f = new File("temp.html");
-            //webEngine.load(f.toURI().toString());
-	        webEngine.loadContent(schema);
+	        File f = new File(pfad);
+	        webEngine.load(f.toURI().toString());
 	        getChildren().add(browser); 
-	       
+	        }
+	        catch(Exception err)
+	        { 
+	        	System.out.println(err);
+	        }
+	        
 	    }
 	 
-	    private Node createSpacer() {
-	        Region spacer = new Region();
-	        HBox.setHgrow(spacer, Priority.ALWAYS);
-	        return spacer;
-	    }
 	 
 	    @Override protected void layoutChildren() {
 	        double w = getWidth();

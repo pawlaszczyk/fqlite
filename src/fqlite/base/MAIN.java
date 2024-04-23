@@ -2,6 +2,7 @@
 
 import java.lang.reflect.InvocationTargetException;
 import java.util.concurrent.ExecutionException;
+import java.util.logging.Level;
 
 /**
 * This is the main class, as the name says :-).
@@ -107,27 +108,23 @@ public class MAIN {
 						
 					    switch(loglv){
 					    
-						    case "ERROR" :  Global.LOGLEVEL = Base.ERROR; 
-											Job.LOGLEVEL = Base.ERROR;
+						    case "ERROR" :  Global.LOGLEVEL = Level.SEVERE; 
 						    				System.out.println("Loglevel was set to ERROR");
 						    			    break;  
 						    	
-						    case "INFO" :   Global.LOGLEVEL = Base.INFO; 
-						    				Job.LOGLEVEL = Base.INFO;
+						    case "INFO" :   Global.LOGLEVEL = Level.INFO; 
 						    				System.out.println("Loglevel was set to INFO");
 						    				break;  
 						    	
-						    case "DEBUG" :  Global.LOGLEVEL = Base.DEBUG; 
-						    				Job.LOGLEVEL = Base.DEBUG;
+						    case "DEBUG" :  Global.LOGLEVEL = Level.FINEST; 
 						    				System.out.println("Loglevel was set to DEBUG");
 						    				break;  
 						    
-						    case "ALL" :  	Global.LOGLEVEL = Base.ALL;
-						    				Job.LOGLEVEL = Base.ALL;
+						    case "ALL" :  	Global.LOGLEVEL = Level.ALL;
 						    				System.out.println("Loglevel was set to ALL");
 						    				break;  
 						    				
-						    default: Global.LOGLEVEL = Base.ERROR;
+						    default: Global.LOGLEVEL = Level.INFO;
 					    } 
 						
 					}

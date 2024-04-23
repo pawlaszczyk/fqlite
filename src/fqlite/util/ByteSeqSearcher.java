@@ -1,8 +1,8 @@
 package fqlite.util;
 
 
-import java.nio.ByteBuffer;
 import java.util.Arrays;
+import fqlite.base.BigByteBuffer;
 
 /**
  * An efficient byte buffer searching class based on the Knuth-Morris-Pratt algorithm.
@@ -39,7 +39,7 @@ public class ByteSeqSearcher{
 	     * Searches for the next occurrence of the pattern in the buffer
 	     * starting startRegion the given position
 	     */
-	     public int indexOf(ByteBuffer buffer, int start)
+	     public long indexOf(BigByteBuffer buffer, long start)
 	     {
 	    	buffer.position(start);
 	    	return indexOf(buffer);
@@ -54,17 +54,18 @@ public class ByteSeqSearcher{
 	     *
 	     * @return bytes consumed if found, -1 otherwise.
 	     */
-	    public int indexOf(ByteBuffer buffer) 
+	    public long indexOf(BigByteBuffer buffer) 
 	    {
 	    	//int size = buffer.capacity() - buffer.position();
 	        
 	        int b;
 	        int j = 0;
 
+	        //System.out.println(" position " + buffer.position() + " limit " + buffer.limit());
 	        while (buffer.position() < buffer.limit())
 	        {
 	        	b = buffer.get();
-	         
+	        	
 	            while (j >= 0 && (byte) b != pattern_[j])
 	            {
 	                j = borders_[j];
@@ -77,6 +78,7 @@ public class ByteSeqSearcher{
 	            // following the pattern match.
 	            if (j == pattern_.length)
 	            {
+	            	//System.out.println("MATCH" + buffer.position());
 	                return buffer.position();
 	            }
 	        }

@@ -2,6 +2,8 @@ package fqlite.descriptor;
 
 import java.util.List;
 
+import fqlite.pattern.HeaderPattern;
+
 
 /**
  * Objects of this class are used to represent a component. 
@@ -64,6 +66,23 @@ public class ViewDescriptor extends AbstractDescriptor {
 	public void setColumntypes(List<String> columntypes) {
 		this.columntypes = columntypes;
 	}
+
+
+
+	@Override
+	public boolean checkMatch(String match) {
+		
+		return false;
+	}
+
+
+
+	@Override
+	public HeaderPattern getHpattern() {
+		// TODO Auto-generated method stub
+		return null;
+	}
+
 
 
 }

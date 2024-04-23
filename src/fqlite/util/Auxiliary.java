@@ -2,13 +2,13 @@ package fqlite.util;
 
 import java.awt.Graphics2D;
 import java.awt.image.BufferedImage;
+import java.io.BufferedOutputStream;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
-import java.io.File;
+import java.io.EOFException;
+import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
-import java.math.BigDecimal;
-import java.math.BigInteger;
 import java.nio.Buffer;
 import java.nio.BufferUnderflowException;
 import java.nio.ByteBuffer;
@@ -16,25 +16,28 @@ import java.time.Instant;
 import java.time.ZoneOffset;
 import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.BitSet;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.ListIterator;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
-
 import javax.imageio.ImageIO;
-
-import org.apache.commons.codec.digest.DigestUtils;
-
-import fqlite.base.Base;
+import fqlite.base.BigByteBuffer;
+import fqlite.base.GUI;
 import fqlite.base.Global;
 import fqlite.base.Job;
 import fqlite.base.SqliteElement;
+import fqlite.base.WALFrame;
 import fqlite.descriptor.AbstractDescriptor;
 import fqlite.descriptor.IndexDescriptor;
 import fqlite.descriptor.TableDescriptor;
+import fqlite.log.AppLog;
 import fqlite.parser.SQLiteSchemaParser;
 import fqlite.pattern.HeaderPattern;
 import fqlite.pattern.IntegerConstraint;
@@ -43,12 +46,11 @@ import fqlite.types.BLOBTYPE;
 import fqlite.types.SerialTypes;
 import fqlite.types.StorageClass;
 import fqlite.types.TimeStamp;
+import fqlite.ui.FQTableView;
 import javafx.collections.ObservableList;
 import javafx.embed.swing.SwingFXUtils;
-import javafx.scene.Node;
-import javafx.scene.control.TableView;
+import javafx.scene.control.TablePosition;
 import javafx.scene.image.Image;
-import javafx.scene.layout.VBox;
 
 /**
  * This class offers a number of useful methods that are needed from time to
@@ -57,7 +59,7 @@ import javafx.scene.layout.VBox;
  * @author pawlaszc
  *
  */
-public class Auxiliary extends Base {
+public class Auxiliary{
 
 	public AtomicInteger found = new AtomicInteger();
 	public AtomicInteger inrecover = new AtomicInteger();
@@ -136,10 +138,11 @@ public class Auxiliary extends Base {
 	 * @param header
 	 * @throws IOException
 	 */
-	public boolean readMasterTableRecord(Job job, int start, ByteBuffer buffer, String header) throws IOException {
+	public boolean readMasterTableRecord(Job job, long start, BigByteBuffer buffer, String header) throws IOException {
 
-		System.out.println("in readMasterTableRecord() " + start + " " + buffer);
-
+		int mt = (int)start/job.ps;
+		job.mastertable.add(mt+1);
+		
 		SqliteElement[] columns;
 
 		columns = MasterRecordToColumns(header);
@@ -155,8 +158,7 @@ public class Auxiliary extends Base {
 		int so;
 
 		buffer.position(start + 8);
-		System.out.println(buffer.toString());
-
+	
 		// determine overflow that is not fitting
 		so = computePayload(pll);
 
@@ -164,12 +166,10 @@ public class Auxiliary extends Base {
 
 		/* Do we have overflow-page(s) ? */
 		if (so < pll) {
-			int phl = header.length() / 2;
+			//int phl = header.length() / 2;
 
-			int last = buffer.position();
-			System.out.println(" readMasterTableRecord() spilled payload ::" + so);
-			System.out.println(" pll payload ::" + pll);
-
+			long last = buffer.position();
+	
 			// get the last 4 byte of the first page -> this should contain the
 			// page number of the first overflow page
 			overflow = buffer.getInt(job.ps - 4);
@@ -177,6 +177,10 @@ public class Auxiliary extends Base {
 			if (overflow > job.numberofpages)
 				return false;
 
+			/* remember all pages with schema information */
+			job.mastertable.add(overflow);
+			//System.out.println("Mastertables pages " + job.mastertable);
+			
 			/*
 			 * we need to increment page number by one since we start counting with zero for
 			 * page 1
@@ -194,7 +198,7 @@ public class Auxiliary extends Base {
 			outputStream.write(extended);
 
 			byte c[] = outputStream.toByteArray();
-			ByteBuffer bf = ByteBuffer.wrap(c);
+			BigByteBuffer bf = BigByteBuffer.wrap(c);
 
 			buffer = bf;
 
@@ -205,10 +209,14 @@ public class Auxiliary extends Base {
 
 		int con = 0;
 
+		String objecttype = null;
+		String namespace = null;
 		String tablename = null;
 		int rootpage = -1;
 		String statement = null;
 
+		boolean autoindex = false;
+		
 		/* start reading the content */
 		for (SqliteElement en : columns) {
 
@@ -226,50 +234,109 @@ public class Auxiliary extends Base {
 			} catch (BufferUnderflowException bue) {
 				return false;
 			}
+			if (con == 0) {
+				objecttype = en.toString(value, true, true);
+			}
+		    
+			if (con == 1) {
+				namespace = en.toString(value, true, true);
+				/* look for autoindex */
+				if(namespace.startsWith("sqlite_autoindex_")) {
+ 					/* 
+ 					 * UNIQUE and PRIMARY KEY constraints on tables cause SQLite to create internal indexes with names 
+ 					 * of the form "sqlite_autoindex_TABLE_N" where TABLE is replaced by the name of the table that 
+ 					 * contains the constraint and N is an integer beginning with 1 and increasing by one with each 
+ 					 * constraint seen in the table definition.
+ 					 */
+					autoindex = true;
+					//System.out.println("Found sqlite_autoindex_ - table" + namespace);
+				}
+			}
+				
 
 			/* column 3 ? -> tbl_name TEXT */
 			if (con == 2) {
-				tablename = en.toString(value, true);
-				System.out.println(" Tablename " + tablename);
+				tablename = en.toString(value, true, true);
+				//System.out.println(" Tablename " + tablename);
 
 			}
 
 			/* column 4 ? -> root page Integer */
 			if (con == 3) {
 				if (value.length == 0)
-					debug("Seems to be a virtual component -> no root page ;)");
+					AppLog.debug("Seems to be a virtual component -> no root page ;)");
 				else {
-
-					/* root page of table is decoded a BE integer value */
-
-					if (en.type == SerialTypes.INT8)
-						rootpage = SqliteElement.decodeInt8(value[0]);
-					else if (en.type == SerialTypes.INT16)
-						rootpage = SqliteElement.decodeInt16(new byte[] { value[0], value[1] });
-					else if (en.type == SerialTypes.INT24)
-						rootpage = SqliteElement.decodeInt24(new byte[] { value[0], value[1], value[2] });
-					else if (en.type == SerialTypes.INT32)
-						rootpage = SqliteElement.decodeInt32(new byte[] { value[0], value[1], value[2], value[3] });
-
+                    try {
+						/* root page of table is decoded a BE integer value */
+	
+						if (en.type == SerialTypes.INT8)
+							rootpage = SqliteElement.decodeInt8(value[0]);
+						else if (en.type == SerialTypes.INT16)
+							rootpage = SqliteElement.decodeInt16(new byte[] { value[0], value[1] });
+						else if (en.type == SerialTypes.INT24)
+							rootpage = SqliteElement.decodeInt24(new byte[] { value[0], value[1], value[2] });
+						else if (en.type == SerialTypes.INT32)
+							rootpage = SqliteElement.decodeInt32(new byte[] { value[0], value[1], value[2], value[3] });
+						else 
+							return false;
+                    }catch(Exception err){
+                    	return false;
+                    }
+                }
+				
+				if(autoindex) {
+					
+					createAutoIndexRecord(objecttype,namespace,tablename,rootpage);
+				    
+					break;
 				}
 			}
 
 			/* read sql statement */
 
 			if (con == 4) {
-				statement = en.toString(value, true);
-				System.out.println(" SQL statement::" + statement);
+				statement = en.toString(value, true, true);
+				//System.out.println(" SQL statement::" + statement);
 				break; // do not go further - we have everything we need
 			}
 
 			con++;
 
 		}
-		// finally, we have all information in place to parse the CREATE statement
-		SQLiteSchemaParser.parse(job, tablename, rootpage, statement);
-
+		
+		if (!autoindex)
+		{	// finally, we have all information in place to parse the CREATE statement
+			SQLiteSchemaParser.parse(job, tablename, rootpage, statement);
+		}
+		else {
+			autoindex=false;
+		}
+		
+		job.mastertable.add(mt);
 		return true;
 	}
+	
+
+	
+	private boolean createAutoIndexRecord(String objecttype,String namespace,String tablename, int rootpage){
+		
+		ArrayList<String> colnames = new ArrayList<String>();
+		colnames.add("col1");
+		
+		IndexDescriptor ids = new IndexDescriptor(job,namespace,tablename,"",colnames);
+		ids.root = rootpage;
+ 
+		if (!job.indices.contains(ids))
+		{	
+			job.indices.add(ids);         
+			ids.root = rootpage;
+		}	
+			
+		return true;
+	}
+	
+
+
 
 	/**
 	 * This method is used to extract a previously deleted record in unused space a
@@ -288,18 +355,20 @@ public class Auxiliary extends Base {
 			int pagenumber, String fallback) throws IOException {
 
 		LinkedList<String> record = new LinkedList<String>();
-		SqliteElement[] columns;
+		List<SqliteElement> columns;
 		int rowid = -1;
 
 		/* set the pointer directly after the header */
 		buffer.position(m.end);
 
+		//int co = 0;
+		
 		/**
 		 * CASE 1: We have a found a complete but deleted record let us try to read the
 		 * ROWID of this record if possible
 		 **/
 		if (m.match.startsWith("RI")) {
-			System.out.println(" need to determine rowid " + m.end);
+			//System.out.println(" need to determine rowid " + m.end);
 
 			// need to check plausibility
 			String withoutRI = m.match.substring(2);
@@ -319,14 +388,12 @@ public class Auxiliary extends Base {
 				byte[] beforeheader = new byte[4];
 				buffer.get(beforeheader);
 
-				System.out.println(beforeheader[2] + " " + beforeheader[3]);
-
 				int[] values = readVarInt(beforeheader);
 
 				int rd = -1;
 				if (values != null && values.length > 0) {
 					rd = values[values.length - 1];
-					System.out.println("rowid ??? " + rd);
+					//System.out.println("rowid ??? " + rd);
 					rowid = rd;
 
 				}
@@ -357,9 +424,6 @@ public class Auxiliary extends Base {
 
 			byte[] freeblockinfo = new byte[2];
 			buffer.get(freeblockinfo);
-
-			System.out.println(freeblockinfo[0] + " " + freeblockinfo[1]);
-
 			buffer.position(buffer.position() - 2);
 
 			short lg = buffer.getShort(); // 1
@@ -370,9 +434,7 @@ public class Auxiliary extends Base {
 
 				if (nextmatch < m.begin + lg) {
 
-					System.out.println("  lg vorher " + lg);
 					lg = (short) (lg - (short) (m.begin + lg - (next.begin)));
-					System.out.println(" korrigierter Wert für lg" + lg);
 				}
 
 			}
@@ -381,10 +443,9 @@ public class Auxiliary extends Base {
 			/* compute the length of the missing first column */
 
 			int first = lg - 4 - headerlength - getPayloadLength(match);
-			System.out.println("length of 1st column " + first);
-			System.out
-					.println(" lg " + lg + " minus 4 " + "minus " + headerlength + " minus " + getPayloadLength(match));
-			System.out.println(" first ::" + first);
+			//System.out.println("length of 1st column " + first);
+			//System.out.println(" lg " + lg + " minus 4 " + "minus " + headerlength + " minus " + getPayloadLength(match));
+			//System.out.println(" first ::" + first);
 
 			if (first < 0) {
 				if (header.startsWith("XX")) {
@@ -397,7 +458,7 @@ public class Auxiliary extends Base {
 				header = header.replace("XX", repl);
 			} else { // fallback strategy
 				header = header.replace("XX", "02");// fallback);
-				System.out.println("fallback strategy" + header);
+				//System.out.println("fallback strategy" + header);
 
 			}
 			buffer.position(m.end);
@@ -408,7 +469,7 @@ public class Auxiliary extends Base {
 
 		/* in case of an error -> skip */
 		if (null == columns) {
-			debug(" no valid header-string: " + header);
+			AppLog.debug(" no valid header-string: " + header);
 			return null;
 		}
 
@@ -421,7 +482,6 @@ public class Auxiliary extends Base {
 
 		int so = computePayload(pll);
 
-		int co = 0;
 		boolean error = false;
 
 		/* in the output string we first start with the offset */
@@ -434,12 +494,12 @@ public class Auxiliary extends Base {
 			int phl = header.length() / 2;
 
 			int last = buffer.position();
-			debug(" deleted spilled payload ::" + so);
-			debug(" deleted pll payload ::" + pll);
+			AppLog.debug(" deleted spilled payload ::" + so);
+			AppLog.debug(" deleted pll payload ::" + pll);
 			buffer.position(buffer.position() + so - phl - 1);
 
 			overflow = buffer.getInt();
-			debug(" deleted overflow::::::::: " + overflow + " " + Integer.toHexString(overflow));
+			AppLog.debug(" deleted overflow::::::::: " + overflow + " " + Integer.toHexString(overflow));
 			buffer.position(last);
 
 			ByteBuffer bf;
@@ -496,47 +556,25 @@ public class Auxiliary extends Base {
 
 				bf.get(value);
 				if (en.serial == StorageClass.BLOB) {
-					//System.out.println("BLOB column detected");
-					// record.add("[BLOB] " + en.getBLOB(value) + "..");
-
-					blobcolidx++;
-					String tablecelltext = en.getBLOB(value);
-					record.add("[BLOB-" + blobcolidx + "] " + tablecelltext + "..");
-
-					/* by default the record offset is used as key for a BLOB */
-					Long hash = Long.parseLong(record.get(2)) + blobcolidx;
-
-					if (tablecelltext.contains("jpg"))
-						job.BLOBs.put(hash, new BLOBElement(value, BLOBTYPE.JPG));
-					else if (tablecelltext.contains("png"))
-						job.BLOBs.put(hash, new BLOBElement(value, BLOBTYPE.PNG));
-					else if (tablecelltext.contains("gif"))
-						job.BLOBs.put(hash, new BLOBElement(value, BLOBTYPE.GIF));
-					else if (tablecelltext.contains("bmp"))
-						job.BLOBs.put(hash, new BLOBElement(value, BLOBTYPE.BMP));
-					else if (tablecelltext.contains("tiff"))
-						job.BLOBs.put(hash, new BLOBElement(value, BLOBTYPE.TIFF));
-					else if (tablecelltext.contains("heic"))
-						job.BLOBs.put(hash, new BLOBElement(value, BLOBTYPE.HEIC));
-					else if (tablecelltext.contains("pdf"))
-						job.BLOBs.put(hash, new BLOBElement(value, BLOBTYPE.PDF));
-					else if (tablecelltext.contains("pdf"))
-						job.BLOBs.put(hash, new BLOBElement(value, BLOBTYPE.PLIST));					
-					else
-						job.BLOBs.put(hash, new BLOBElement(value, BLOBTYPE.UNKOWN));
-
-					if (tablecelltext.contains("jpg") || tablecelltext.contains("png") || tablecelltext.contains("gif")
-							|| tablecelltext.contains("bmp")) {
-						/* for the tooltip preview we need to shrink the pictures */
-						Image img = scaledown(value);
-						if (null != img)
-							job.Thumbnails.put(hash, img);
-					}
+					
+					//if(isVT);
+					
+					String tablecelltext = en.getBLOB(value,true);
+					
+					if(tablecelltext.length() > 0) 
+				    {
+						record.add("[BLOB-" + blobcolidx + "] " + tablecelltext + "..");	
+						storeBLOB(record, blobcolidx, tablecelltext,value,2);
+						blobcolidx++;
+				    }
+				    else{
+						record.add("");	
+				    }
 
 				} else {
-					record.add(en.toString(value, false));
+					record.add(en.toString(value, false, true));
 				}
-				co++;
+				//co++;
 			}
 
 			// set original buffer pointer to the end of the spilled payload
@@ -565,55 +603,38 @@ public class Auxiliary extends Base {
 					if (rowid >= 0 && en.length == 0 && m.rowidcolum >= 0) {
 						if (m.rowidcolum == number) {
 							record.add(rowid + "");
-							co++;
+							//co++;
 							continue;
 						}
 					}
 
 					buffer.get(value);
 					if (en.serial == StorageClass.BLOB) {
-						//System.out.println("BLOB column detected");
+				
+						//if(isVT);
 
-						// record.add("[BLOB] " + en.getBLOB(value) + "..");
+						String tablecelltext = en.getBLOB(value,true);
+					    if(tablecelltext.length() > 0) 
+					    {
+					    	String vv = "[BLOB-" + blobcolidx + "] " + tablecelltext;
+					        if(tablecelltext.length() > 32)
+					        	vv +=  "..";
+							record.add(vv);	
+							storeBLOB(record, blobcolidx, tablecelltext,value,0);
+							blobcolidx++;
+					    }
+					    else{
+							record.add("");	
+					    }   
+					    
+					} 
+					else
+						record.add(en.toString(value, false, true));
 
-						blobcolidx++;
-						String tablecelltext = en.getBLOB(value);
-						record.add("[BLOB-" + blobcolidx + "] " + tablecelltext + "..");
-
-						/* by default the record offset is used as key for a BLOB */
-						Long hash = Long.parseLong(record.get(2)) + blobcolidx;
-
-						if (tablecelltext.contains("jpg"))
-							job.BLOBs.put(hash, new BLOBElement(value, BLOBTYPE.JPG));
-						else if (tablecelltext.contains("png"))
-							job.BLOBs.put(hash, new BLOBElement(value, BLOBTYPE.PNG));
-						else if (tablecelltext.contains("gif"))
-							job.BLOBs.put(hash, new BLOBElement(value, BLOBTYPE.GIF));
-						else if (tablecelltext.contains("bmp"))
-							job.BLOBs.put(hash, new BLOBElement(value, BLOBTYPE.BMP));
-						else if (tablecelltext.contains("tiff"))
-							job.BLOBs.put(hash, new BLOBElement(value, BLOBTYPE.TIFF));
-						else if (tablecelltext.contains("heic"))
-							job.BLOBs.put(hash, new BLOBElement(value, BLOBTYPE.HEIC));
-						else if (tablecelltext.contains("pdf"))
-							job.BLOBs.put(hash, new BLOBElement(value, BLOBTYPE.PDF));
-						else if (tablecelltext.contains("plist"))
-							job.BLOBs.put(hash, new BLOBElement(value, BLOBTYPE.PLIST));
-						else
-							job.BLOBs.put(hash, new BLOBElement(value, BLOBTYPE.UNKOWN));
-
-						if (tablecelltext.contains("jpg") || tablecelltext.contains("png")
-								|| tablecelltext.contains("gif") || tablecelltext.contains("bmp")) {
-							/* for the tooltip preview we need to shrink the pictures */
-							Image img = scaledown(value);
-							if (null != img)
-								job.Thumbnails.put(hash, img);
-						}
-
-					} else
-						record.add(en.toString(value, false));
-
-					co++;
+					
+					
+					
+					//co++;
 
 				}
 
@@ -625,14 +646,15 @@ public class Auxiliary extends Base {
 
 				// no overflow - try to recover at least a partial record
 
-				for (int cc = 0; cc < columns.length; cc++) {
+				int cc = 0;
+				for (SqliteElement v : columns) {
 
 					if (partial) {
 						record.add("");
 						continue;
 					}
 
-					SqliteElement en = columns[cc];
+					SqliteElement en = v;
 
 					if (en == null) {
 						continue;
@@ -641,7 +663,9 @@ public class Auxiliary extends Base {
 					if (rowid >= 0 && en.length == 0 && m.rowidcolum >= 0) {
 						if (m.rowidcolum == cc) {
 							record.add(rowid + "");
-							co++;
+							//co++;
+							
+							
 							continue;
 						}
 					}
@@ -668,46 +692,22 @@ public class Auxiliary extends Base {
 								// record.add(en.toString(value,false));
 
 								if (en.serial == StorageClass.BLOB) {
-									//System.out.println("BLOB column detected");
-
-									// record.add("[BLOB] " + en.getBLOB(value) + "..");
-
-									blobcolidx++;
-									String tablecelltext = en.getBLOB(value);
-									record.add("[BLOB-" + blobcolidx + "] " + tablecelltext + "..");
-
-									/* by default the record offset is used as key for a BLOB */
-									Long hash = Long.parseLong(record.get(2)) + blobcolidx;
-
-									if (tablecelltext.contains("jpg"))
-										job.BLOBs.put(hash, new BLOBElement(value, BLOBTYPE.JPG));
-									else if (tablecelltext.contains("png"))
-										job.BLOBs.put(hash, new BLOBElement(value, BLOBTYPE.PNG));
-									else if (tablecelltext.contains("gif"))
-										job.BLOBs.put(hash, new BLOBElement(value, BLOBTYPE.GIF));
-									else if (tablecelltext.contains("bmp"))
-										job.BLOBs.put(hash, new BLOBElement(value, BLOBTYPE.BMP));
-									else if (tablecelltext.contains("tiff"))
-										job.BLOBs.put(hash, new BLOBElement(value, BLOBTYPE.TIFF));
-									else if (tablecelltext.contains("heic"))
-										job.BLOBs.put(hash, new BLOBElement(value, BLOBTYPE.HEIC));
-									else if (tablecelltext.contains("pdf"))
-										job.BLOBs.put(hash, new BLOBElement(value, BLOBTYPE.PDF));
-									else if (tablecelltext.contains("plist"))
-										job.BLOBs.put(hash, new BLOBElement(value, BLOBTYPE.PLIST));								
-									else
-										job.BLOBs.put(hash, new BLOBElement(value, BLOBTYPE.UNKOWN));
-
-									if (tablecelltext.contains("jpg") || tablecelltext.contains("png")
-											|| tablecelltext.contains("gif") || tablecelltext.contains("bmp")) {
-										/* for the tooltip preview we need to shrink the pictures */
-										Image img = scaledown(value);
-										if (null != img)
-											job.Thumbnails.put(hash, img);
-									}
+								
+									//if(isVT);
+									
+									String tablecelltext = en.getBLOB(value,true);
+								    if(tablecelltext.length() > 0) 
+								    {
+										record.add("[BLOB-" + blobcolidx + "] " + tablecelltext + "..");	
+										storeBLOB(record, blobcolidx, tablecelltext,value,0);
+										blobcolidx++;
+								    }
+								    else{
+										record.add("");	
+								    }
 
 								} else {
-									record.add(en.toString(value, false));
+									record.add(en.toString(value, false, true));
 								}
 
 							}
@@ -719,51 +719,33 @@ public class Auxiliary extends Base {
 						buffer.get(value);
 
 						if (en.serial == StorageClass.BLOB) {
-							//System.out.println("BLOB column detected");
-							// record.add("[BLOB] " + en.getBLOB(value) + "..");
+							
+							//if(isVT);
+							
+							String tablecelltext = en.getBLOB(value,true);
+						    if(tablecelltext.length() > 0) 
+						    {
+								record.add("[BLOB-" + blobcolidx + "] " + tablecelltext + "..");	
+								storeBLOB(record, blobcolidx, tablecelltext,value,0);
+								blobcolidx++;
+						    }
+						    else{
+								record.add("");	
+						    }
 
-							blobcolidx++;
-							String tablecelltext = en.getBLOB(value);
-							record.add("[BLOB-" + blobcolidx + "] " + tablecelltext + "..");
-
-							/* by default the record offset is used as key for a BLOB */
-							Long hash = Long.parseLong(record.get(2)) + blobcolidx;
-
-							if (tablecelltext.contains("jpg"))
-								job.BLOBs.put(hash, new BLOBElement(value, BLOBTYPE.JPG));
-							else if (tablecelltext.contains("png"))
-								job.BLOBs.put(hash, new BLOBElement(value, BLOBTYPE.PNG));
-							else if (tablecelltext.contains("gif"))
-								job.BLOBs.put(hash, new BLOBElement(value, BLOBTYPE.GIF));
-							else if (tablecelltext.contains("bmp"))
-								job.BLOBs.put(hash, new BLOBElement(value, BLOBTYPE.BMP));
-							else if (tablecelltext.contains("tiff"))
-								job.BLOBs.put(hash, new BLOBElement(value, BLOBTYPE.TIFF));
-							else if (tablecelltext.contains("heic"))
-								job.BLOBs.put(hash, new BLOBElement(value, BLOBTYPE.HEIC));
-							else if (tablecelltext.contains("pdf"))
-								job.BLOBs.put(hash, new BLOBElement(value, BLOBTYPE.PDF));
-							else if (tablecelltext.contains("plist"))
-								job.BLOBs.put(hash, new BLOBElement(value, BLOBTYPE.PLIST));
-							else
-								job.BLOBs.put(hash, new BLOBElement(value, BLOBTYPE.UNKOWN));
-
-							if (tablecelltext.contains("jpg") || tablecelltext.contains("png")
-									|| tablecelltext.contains("gif") || tablecelltext.contains("bmp")) {
-								/* for the tooltip preview we need to shrink the pictures */
-								Image img = scaledown(value);
-								if (null != img)
-									job.Thumbnails.put(hash, img);
-							}
-
+						    
+						    
+						    
 						} else {
-							record.add(en.toString(value, false));
+							
+							
+							record.add(en.toString(value, false, true));
 						}
 
 					}
 
-					co++;
-
+					//co++;
+					cc++;
 				}
 			}
 
@@ -773,9 +755,9 @@ public class Auxiliary extends Base {
 
 		/* mark bytes as visited */
 		bs.set(m.end, buffer.position(), true);
-		debug("visited :: " + m.end + " bis " + buffer.position());
-		int cursor = ((pagenumber - 1) * job.ps) + buffer.position();
-		debug("visited :: " + (((pagenumber - 1) * job.ps) + m.end) + " bis " + cursor);
+		AppLog.debug("visited :: " + m.end + " bis " + buffer.position());
+		long cursor = ((pagenumber - 1L) * job.ps) + buffer.position();
+		AppLog.debug("visited :: " + (((pagenumber - 1L) * job.ps) + m.end) + " bis " + cursor);
 
 		record.add(0, "" + pll);
 		record.add(1, "" + header.length() / 2);
@@ -807,18 +789,35 @@ public class Auxiliary extends Base {
 	 * @param value the actual value
 	 * @return the converted StringBuffer value
 	 */
-	private StringBuffer write(int col, SqliteElement en, byte[] value) {
+	public StringBuffer write(int col, SqliteElement en, byte[] value) {
 
 		StringBuffer val = new StringBuffer();
 
 		if (col > 0)
 			val.append(";");
 
-		val.append(en.toString(value, false));
+		val.append(en.toString(value, false, true));
 
 		return val;
 	}
 
+	/**
+	 * Check for weather the table name belongs to a virtual table 
+	 * or not.
+	 * 
+	 * @param tblname
+	 * @return
+	 */
+	private boolean isVirtualTable(String tblname){
+		int p;
+		if ((p = tblname.indexOf("_node")) > 0){
+			String tbln = tblname.substring(0, p);
+			return job.virtualTables.containsKey(tbln);
+		}
+		return false;
+	}
+	
+	
 	/**
 	 * This method can be used to read an active data record.
 	 * 
@@ -836,12 +835,13 @@ public class Auxiliary extends Base {
 	public LinkedList<String> readRecord(int cellstart, ByteBuffer buffer, int pagenumber_db, BitSet bs, int pagetype,
 			int maxlength, StringBuffer firstcol, boolean withoutROWID, int filetype, long offset) throws IOException {
 
+		
 		/* we use a list to hold the fields of the data record to read */
 		LinkedList<String> record = new LinkedList<String>();
 
 		/* true, if table a therefore record structure of page is unkown */
 		boolean unkown = false;
-
+		boolean isVT = false;		
 		int rowid_col = -1;
 
 		// first byte of the buffer
@@ -860,11 +860,12 @@ public class Auxiliary extends Base {
 				if (ad instanceof TableDescriptor) {
 					td = (TableDescriptor) ad;
 				}			
+				isVT = isVirtualTable(ad.getName());
 				record.add(job.pages[pagenumber_db].getName());
 			} 
 			else {
 				record.add(Global.DELETED_RECORD_IN_PAGE);
-				record.add("__UNASSIGNED");
+				//record.add("__FREELIST");
 			}
 
 			record.add(Global.REGULAR_RECORD);
@@ -885,6 +886,7 @@ public class Auxiliary extends Base {
 			ad = job.pages[pagenumber_db];
 			if (ad instanceof TableDescriptor) {
 				td = (TableDescriptor) ad;
+				isVT = isVirtualTable(ad.getName());
 			}
 			record.add(ad.getName());
 			record.add(Global.REGULAR_RECORD);
@@ -893,7 +895,8 @@ public class Auxiliary extends Base {
 			 * for a regular db-file the offset is derived from the page number, since all
 			 * pages are a multiple of the page size (ps).
 			 */
-			record.add((((pagenumber_db - 1) * job.ps) + cellstart) + "");
+			record.add((((pagenumber_db - 1L) * job.ps) + cellstart) + "");
+			
 			rowid_col = job.pages[pagenumber_db].rowid_col;
 
 		} else {
@@ -904,18 +907,17 @@ public class Auxiliary extends Base {
 			unkown = true;
 		}
 
-
-
-		debug("cellstart for pll: " + (((pagenumber_db - 1) * job.ps) + cellstart));
+		AppLog.debug("cellstart for pll: " + (((pagenumber_db - 1L) * job.ps) + cellstart));
+			
 		// length of payload as varint
 		try {
 			buffer.position(cellstart);
 		} catch (Exception err) {
-			System.err.println("ERROR: cellstart not in buffer" + cellstart);
+			System.err.println("ERROR: cellstart not in buffer" + cellstart + " pagenumber_db " + (pagenumber_db - 1L) + " page size " + job.ps);
 			return null;
 		}
 		int pll = readUnsignedVarInt(buffer);
-		debug("Length of payload int : " + pll + " as hex : " + Integer.toHexString(pll));
+		AppLog.debug("Length of payload int : " + pll + " as hex : " + Integer.toHexString(pll));
 
 		if (pll < 4)
 			return null;
@@ -927,7 +929,7 @@ public class Auxiliary extends Base {
 
 			if (unkown) {
 				rowid = readUnsignedVarInt(buffer);
-				debug("rowid: " + Integer.toHexString(rowid));
+				AppLog.debug("rowid: " + Integer.toHexString(rowid));
 			} else {
 				if (pagenumber_db >= job.pages.length) {
 
@@ -935,7 +937,7 @@ public class Auxiliary extends Base {
 				else if (null == job.pages[pagenumber_db] || job.pages[pagenumber_db].ROWID) {
 					// read rowid as varint
 					rowid = readUnsignedVarInt(buffer);
-					debug("rowid: " + Integer.toHexString(rowid));
+					AppLog.debug("rowid: " + Integer.toHexString(rowid));
 					// We do not use this key in the moment.
 					// However, we have to read the value.
 				}
@@ -951,7 +953,7 @@ public class Auxiliary extends Base {
 			return null;
 		}
 
-		debug("Header Length int: " + phl + " as hex : " + Integer.toHexString(phl));
+		AppLog.debug("Header Length int: " + phl + " as hex : " + Integer.toHexString(phl));
 
 		phl = phl - 1;
 
@@ -965,13 +967,11 @@ public class Auxiliary extends Base {
 		 * For a regular data field startRegion the content area the value of maxlength
 		 * should be INTEGER.max_value 2^32
 		 */
-		// System.out.println(" bufferposition :: " + buffer.position() + " headerlength
-		// " + phl );
 		maxlength = maxlength - phl; // - buffer.position();
 
 		// read header bytes with serial types for each column
 		// Attention: this takes most of the time during a run
-		SqliteElement[] columns;
+		List<SqliteElement> columns;
 
 		if (phl == 0)
 			return null;
@@ -980,35 +980,36 @@ public class Auxiliary extends Base {
 		String hh = getHeaderString(phl, buffer);
 		buffer.position(pp);
 
-		int[] values = readVarInt(decode(hh));
-
-		columns = getColumns(phl, buffer, firstcol);
+		columns = getColumns(phl, buffer);
 
 		if (null == columns) {
-			debug(" No valid header. Skip recovery.");
+			AppLog.debug(" No valid header. Skip recovery.");
 			return null;
 		}
 
-		debug("Number of columns: " + columns.length);
+		//AppLog.debug("Number of columns: " + columns.size());
 
 		int co = 0;
 		try {
+		
+			// What about WAL-Archive ????
 			if (unkown) {
 
 				td = matchTable(columns);
 
-				/* this is only neccessesary, when component name is unkown */
+				/* this is only necessary, when component name is unknown */
 				if (null == td) {
 					record.add(Global.DELETED_RECORD_IN_PAGE);
-					record.add("__UNASSIGNED");
+					//record.add("__FREELIST");
 				} else {
 					record.add(td.tblname);
 					job.pages[pagenumber_db] = td;
+					isVT = isVirtualTable(ad.getName());
 					rowid_col = td.rowid_col;
 				}
 
 				record.add(Global.REGULAR_RECORD);
-				record.add((((pagenumber_db - 1) * job.ps) + cellstart) + "");
+				record.add((((pagenumber_db - 1L) * job.ps) + cellstart) + "");
 			}
 		} catch (NullPointerException err) {
 			System.err.println(err);
@@ -1022,7 +1023,8 @@ public class Auxiliary extends Base {
 
 		if (so < pll) {
 			int last = buffer.position();
-			debug("regular spilled payload ::" + so);
+			AppLog.debug("regular spilled payload ::" + so);
+			//System.out.println("regular spilled payload ::" + so);
 			if ((buffer.position() + so - phl - 1) > (buffer.limit() - 4)) {
 				return null;
 			}
@@ -1030,26 +1032,38 @@ public class Auxiliary extends Base {
 				/* read overflow */
 				buffer.position(buffer.position() + so - phl - 1);
 				overflow = buffer.getInt();
+				//System.out.println("Overflow page for db page " + pagenumber_db + " overflow " + overflow  + " 1. overflow page to read");
 			} catch (Exception err) {
 				return null;
 			}
 
 			if (overflow < 0)
 				return null;
-			debug("regular overflow::::::::: " + overflow + " " + Integer.toHexString(overflow));
+			AppLog.debug("regular overflow::::::::: " + overflow + " " + Integer.toHexString(overflow));
 			/*
 			 * This is a regular overflow page - remember this decision & don't analyze this
 			 * page
 			 */
-			job.overflowpages.add(overflow);
 			buffer.position(last);
 
-			/*
-			 * we need to increment page number by one since we start counting with zero for
-			 * page 1
-			 */
-			byte[] extended = readOverflowIterativ(overflow - 1, false);
-
+			byte[] extended;
+			if (filetype == Global.WAL_ARCHIVE_FILE) {
+				// write ahead log  overflow
+				//System.out.println("Read overflow for page" + pagenumber_db);
+				System.out.println("pll: " + pll);
+				extended = readOverflowIterativ(overflow , true);
+				//System.out.println("Groesse des Overflows insgesamt:: " + extended.length);
+			}
+			else {
+				/*
+				 * we need to decrement page number by one since we start counting with zero for
+				 * page 1
+				 */
+				
+				// regular overflow
+				extended = readOverflowIterativ(overflow - 1, false);
+			}
+			
 			byte[] c = new byte[pll + job.ps];
 
 			buffer.position(0);
@@ -1060,7 +1074,8 @@ public class Auxiliary extends Base {
 
 			buffer.position(last);
 			/* copy spilled overflow of current page into extended buffer */
-			System.arraycopy(originalbuffer, buffer.position(), c, 0, so - phl); // - phl
+			if(so-phl > 0)
+				System.arraycopy(originalbuffer, buffer.position(), c, 0, so - phl); // - phl
 			/* append the rest startRegion the overflow pages to the buffer */
 			try {
 				if (null != extended)
@@ -1083,7 +1098,7 @@ public class Auxiliary extends Base {
 			/* start reading the content of each column */
 			for (SqliteElement en : columns) {
 				
-				
+			
 				if (en == null) {
 					record.add("NULL");
 					continue;
@@ -1116,49 +1131,35 @@ public class Auxiliary extends Base {
 					return null;
 				}	
 			
-					if (en.serial == StorageClass.BLOB) {
-						//System.out.println("BLOB column detected");
-
-						// record.add("[BLOB] " + en.getBLOB(value) + "..");
+				if (en.serial == StorageClass.BLOB) {
+					
+					String tablecelltext;
+					
+					if(isVT)
+						/* do not trunc the hex-string to 32 if the record belongs to a
+						 * virtual table
+						 */
+						tablecelltext = en.getBLOB(value,false);
+					else
+						/*
+						 * standard case: trunc blob string to only the first 32 bytes
+						 */
+					    tablecelltext = en.getBLOB(value,true);
+				
+					if(tablecelltext.length() > 0) 
+				    {
+						if (isVT)
+							System.out.println(" Table cell text length " + tablecelltext.length());
+						record.add("[BLOB-" + blobcolidx + "] " + tablecelltext + "..");	
+						storeBLOB(record, blobcolidx, tablecelltext,value,2);
 						blobcolidx++;
-						String tablecelltext = en.getBLOB(value);
-						record.add("[BLOB-" + blobcolidx + "] " + tablecelltext + "..");
+				    }
+				    else{
+						record.add("");	
+				    }
+						
 
-						Long hash;
-						/* by default the record offset is used as key for a BLOB */
-						if (record.get(2).length() > 2)
-							hash = Long.parseLong(record.get(2)) + blobcolidx;
-						else
-							hash = (long) blobcolidx;
-
-						if (tablecelltext.contains("jpg"))
-							job.BLOBs.put(hash, new BLOBElement(value, BLOBTYPE.JPG));
-						else if (tablecelltext.contains("png"))
-							job.BLOBs.put(hash, new BLOBElement(value, BLOBTYPE.PNG));
-						else if (tablecelltext.contains("gif"))
-							job.BLOBs.put(hash, new BLOBElement(value, BLOBTYPE.GIF));
-						else if (tablecelltext.contains("bmp"))
-							job.BLOBs.put(hash, new BLOBElement(value, BLOBTYPE.BMP));
-						else if (tablecelltext.contains("tiff"))
-							job.BLOBs.put(hash, new BLOBElement(value, BLOBTYPE.TIFF));
-						else if (tablecelltext.contains("heic"))
-							job.BLOBs.put(hash, new BLOBElement(value, BLOBTYPE.HEIC));
-						else if (tablecelltext.contains("pdf"))
-							job.BLOBs.put(hash, new BLOBElement(value, BLOBTYPE.PDF));
-						else if (tablecelltext.contains("plist"))
-							job.BLOBs.put(hash, new BLOBElement(value, BLOBTYPE.PLIST));
-						else
-							job.BLOBs.put(hash, new BLOBElement(value, BLOBTYPE.UNKOWN));
-
-						if (tablecelltext.contains("jpg") || tablecelltext.contains("png") || tablecelltext.contains("gif")
-								|| tablecelltext.contains("bmp")) {
-							/* for the tooltip preview we need to shrink the pictures */
-							Image img = scaledown(value);
-							if (null != img)
-								job.Thumbnails.put(hash, img);
-						}
-
-					} else {
+				} else {
 
 						String vv = null;
 						boolean istimestamp = false;
@@ -1168,45 +1169,25 @@ public class Auxiliary extends Base {
 							
 							if (co < td.serialtypes.size()) {
 								String coltype = td.sqltypes.get(co);
-								//System.out.println(" Column " + coltype);
+							
 								if (coltype.equals("TIMESTAMP")) {
 
 									TimeStamp ts = timestamp2String(en, value);
 									if (null != ts) {
 										vv = ts.text;									
 										istimestamp = true;
-										System.out.println("<<<< write timestamp key:: " + vv + " ");
+										//System.out.println("Update Timestamps :: " + vv + " ->  " + found);
 										job.timestamps.put(vv, found);
 
 									}
 								}
-//								if (coltype.equals("INTEGER")) {
-	//
-//									TimeStamp ts = Integer2String(en, value);
-//									if (null != ts) {
-//										vv = ts.text;
-//										istimestamp = true;
-//										System.out.println("<<<< write timestamp key:: " + vv + " ");
-//										job.timestamps.put(vv, found);
-	//
-//									}
-//								} else if (coltype.equals("REAL")) {
-	//
-//									TimeStamp ts = Real2String(en, value);
-//									if (null != ts) {
-//										vv = ts.text;
-//										istimestamp = true;
-//										System.out.println("<<<< write timestamp key:: " + vv + " ");
-//										job.timestamps.put(vv, found);
-	//
-//									}
-//								}
+
 
 							}
 							
 						} else {
 							/* no table description (td) avail. -> take the raw-value */
-							record.add(en.toString(value, false));
+							record.add(en.toString(value, false, true));
 							continue;
 						}
 						
@@ -1214,11 +1195,11 @@ public class Auxiliary extends Base {
 						if (!istimestamp) {
 							if (en.type == SerialTypes.PRIMARY_KEY)
 							{	
-								en.toString(value,false);
+								en.toString(value,false,true);
 								vv = null;
 							}
 							else	
-								vv = en.toString(value, false);
+								vv = en.toString(value, false, true);
 							
 						}
 					
@@ -1239,6 +1220,8 @@ public class Auxiliary extends Base {
 						break;
 				
 			}
+			
+			//System.out.println("$$$$$" + record);
 
 		} else {
 			/*
@@ -1271,10 +1254,12 @@ public class Auxiliary extends Base {
 				}
 
 				byte[] value = null;
-				if (maxlength >= en.length)
-					value = new byte[en.length];
-				else if (maxlength > 0)
-					value = new byte[maxlength];
+				if (maxlength >= en.length) {
+				    if (en.length < 0)
+				    	value = new byte[0];
+				    else
+				    	value = new byte[en.length];
+				}
 				maxlength -= en.length;
 
 				if (null == value)
@@ -1286,48 +1271,39 @@ public class Auxiliary extends Base {
 					System.out.println("readRecord():: buffer underflow ERROR " + err);
 					return null;
 				}
+				
 
 				if (en.serial == StorageClass.BLOB) {
-					//System.out.println("BLOB column detected");
 
-					// record.add("[BLOB] " + en.getBLOB(value) + "..");
-					blobcolidx++;
-					String tablecelltext = en.getBLOB(value);
-					record.add("[BLOB-" + blobcolidx + "] " + tablecelltext + "..");
-
-					Long hash;
-					/* by default the record offset is used as key for a BLOB */
-					if (record.get(2).length() > 2)
-						hash = Long.parseLong(record.get(2)) + blobcolidx;
+					String tablecelltext; //= en.getBLOB(value,true);
+				    
+					if(isVT)
+						/* do not trunc the hex-string to 32 if the record belongs to a
+						 * virtual table
+						 */
+						tablecelltext = en.getBLOB(value,false);
 					else
-						hash = (long) blobcolidx;
-
-					if (tablecelltext.contains("jpg"))
-						job.BLOBs.put(hash, new BLOBElement(value, BLOBTYPE.JPG));
-					else if (tablecelltext.contains("png"))
-						job.BLOBs.put(hash, new BLOBElement(value, BLOBTYPE.PNG));
-					else if (tablecelltext.contains("gif"))
-						job.BLOBs.put(hash, new BLOBElement(value, BLOBTYPE.GIF));
-					else if (tablecelltext.contains("bmp"))
-						job.BLOBs.put(hash, new BLOBElement(value, BLOBTYPE.BMP));
-					else if (tablecelltext.contains("tiff"))
-						job.BLOBs.put(hash, new BLOBElement(value, BLOBTYPE.TIFF));
-					else if (tablecelltext.contains("heic"))
-						job.BLOBs.put(hash, new BLOBElement(value, BLOBTYPE.HEIC));
-					else if (tablecelltext.contains("pdf"))
-						job.BLOBs.put(hash, new BLOBElement(value, BLOBTYPE.PDF));
-					else if (tablecelltext.contains("plist"))
-						job.BLOBs.put(hash, new BLOBElement(value, BLOBTYPE.PLIST));
-					else
-						job.BLOBs.put(hash, new BLOBElement(value, BLOBTYPE.UNKOWN));
-
-					if (tablecelltext.contains("jpg") || tablecelltext.contains("png") || tablecelltext.contains("gif")
-							|| tablecelltext.contains("bmp")) {
-						/* for the tooltip preview we need to shrink the pictures */
-						Image img = scaledown(value);
-						if (null != img)
-							job.Thumbnails.put(hash, img);
-					}
+						/*
+						 * standard case: trunc blob string to only the first 32 bytes
+						 */
+					    tablecelltext = en.getBLOB(value,true);
+				
+					
+					
+					
+					if(tablecelltext.length() > 0) 
+				    {
+						record.add("[BLOB-" + blobcolidx + "] " + tablecelltext + "..");	
+						storeBLOB(record, blobcolidx, tablecelltext,value,2);
+						blobcolidx++;
+						
+						
+						
+				    }
+				    else{
+						record.add("");	
+				    }
+											
 
 				} else {
 
@@ -1336,48 +1312,24 @@ public class Auxiliary extends Base {
 
 					if (td != null) {
 						
-						
 						if (co < td.serialtypes.size()) {
 							String coltype = td.sqltypes.get(co);
-							//System.out.println(" Column " + coltype);
 							if (coltype.equals("TIMESTAMP")) {
 
+								
 								TimeStamp ts = timestamp2String(en, value);
 								if (null != ts) {
 									vv = ts.text;									
 									istimestamp = true;
-									System.out.println("<<<< write timestamp key:: " + vv + " ");
-									job.timestamps.put(vv, found);
-
+		
 								}
 							}
-//							if (coltype.equals("INTEGER")) {
-//
-//								TimeStamp ts = Integer2String(en, value);
-//								if (null != ts) {
-//									vv = ts.text;
-//									istimestamp = true;
-//									System.out.println("<<<< write timestamp key:: " + vv + " ");
-//									job.timestamps.put(vv, found);
-//
-//								}
-//							} else if (coltype.equals("REAL")) {
-//
-//								TimeStamp ts = Real2String(en, value);
-//								if (null != ts) {
-//									vv = ts.text;
-//									istimestamp = true;
-//									System.out.println("<<<< write timestamp key:: " + vv + " ");
-//									job.timestamps.put(vv, found);
-//
-//								}
-//							}
 
 						}
 						
 					} else {
 						/* no table description (td) avail. -> take the raw-value */
-						record.add(en.toString(value, false));
+						record.add(en.toString(value, false, true));
 						continue;
 					}
 					
@@ -1385,11 +1337,11 @@ public class Auxiliary extends Base {
 					if (!istimestamp) {
 						if (en.type == SerialTypes.PRIMARY_KEY)
 						{	
-							en.toString(value,false);
+							en.toString(value,false, true);
 							vv = null;
 						}
 						else	
-							vv = en.toString(value, false);
+							vv = en.toString(value, false, true);
 						
 					}
 				
@@ -1416,130 +1368,290 @@ public class Auxiliary extends Base {
 		record.add(1, "" + pll);
 		record.add(2, "" + hh.length() / 2);
 
+		
 		/* mark as visited */
 		if (so < pll) {
-			debug("visted " + cellstart + " bis " + (cellstart + so + 7));
+			AppLog.debug("visted " + cellstart + " bis " + (cellstart + so + 7));
 			bs.set(cellstart, cellstart + so + 4);
 		} else {
-			debug("visted " + cellstart + " bis " + buffer.position());
+			AppLog.debug("visted " + cellstart + " bis " + buffer.position());
 			bs.set(cellstart, buffer.position());
 		}
 		if (error) {
-			err("spilles overflow page error ...");
+			AppLog.error("spilles overflow page error ...");
 			// return "";
 			return null;
+			
 		}
+	
+
+		/* the offset is derived from the name of the table plus primary key / rowid */
+		String archivekey = getPrimaryKey(td,record);
+ 	    //System.out.println("Archiv Key::" + archivekey);
 		
-	    	
-	    if (filetype == Global.ROLLBACK_JOURNAL_FILE && null != ad && !unkown && !withoutROWID) {
-			
-			/* the offset is derived from the name of the table plus the internal rowid */
-			String offs = ad.getName() + "_" + rowid;
-			
-		    if(job.LineHashes.containsKey(offs)){
-		    	//System.out.println("line is still in the database " + offs);
+		
+		if (ad == null)
+    	{	
+			// every record that has no table descriptor assigned should be shown in the __FREELIST table. 
+    		record.set(0,"__FREELIST");
+    	}		
+		
+        /*  Is a Rollback journal file present ? */
+		if (filetype == Global.ROLLBACK_JOURNAL_FILE && null != ad && !unkown && !withoutROWID) {
+		
+			/* first occurrence of this records or already existing ? */
+			if(job.LineHashes.containsKey(archivekey)){
 		    	
-		    	Integer originalhash = job.LineHashes.get(offs);
+		    	Integer originalhash = job.LineHashes.get(archivekey);
 		    	Integer journalhash = computeHash(record);
 		    	
 		    	/* hash of line in database differs from hash in journal file */
 		    	if(!originalhash.equals(journalhash))
 		    	{
-		    		//System.out.println(originalhash + " <> " + journalhash);
-		    		
-		    		record.set(3,"updated");
+		    		//System.out.println(originalhash + " <> " + journalhash);	
+		    		record.set(3,"");
 		    	}
 		    }
 		    else {
-		     	System.out.println("removed record at offset " + offs);
-		     	//System.out.println(record);
-		     	record.set(3,"deleted");
+		     	System.out.println("removed record at offset " + archivekey);
+		     	record.set(3,"");
 		    }
 		
 		}
-		else if (filetype == Global.WAL_ARCHIVE_FILE && !unkown && null != ad && !withoutROWID) {
+		
+		
+		
+		/* Is a WAL archive file present ? */
+		if (filetype == Global.WAL_ARCHIVE_FILE && !unkown && !withoutROWID && null != ad) { 
 			
-			/* the offset is derived from the name of the table plus the internal rowid */
-			String offs = ad.getName() + "_" + rowid;
-			
-		    if(job.TimeLineHashes.containsKey(offs)){
-		    	
-		    //	System.out.println("line is in the database " + offs);
-		    	
-		    	Integer originalhash = job.LineHashes.get(offs);
-		    	Integer journalhash = computeHash(record);
+		    //if (null == archivekey) 
+		    //	return record;
+		   
+			//System.out.println(" Abzweig zu definierten Tabellen A");
+
 		    
-		    //	System.out.println("line is still in the database " + offs + " " + originalhash + "<>" + journalhash);
-			    
-		    	//updateDatarecord(ad.getName(),"test");
-		    	
-		    	/* hash of line in database differs from hash in journal file */
+		    if(job.TimeLineHashes.containsKey(archivekey)){
+		    	    	
+			    	LinkedList<Version> versions = job.TimeLineHashes.get(archivekey);
+			      
+			    	Integer originalhash = computeHash(record);
+			    	Integer journalhash = versions.getFirst().hash;
+			    	//int lvs = 0;
+			    	
+			    	//String status = versions.getFirst().record.get(3);
+			    	//String lastversion = status.substring(0,status.indexOf("."));
+			    	
+			    	//if (null != lastversion){
+			    	//	lvs = Integer.parseInt(lastversion);
+				    //	lvs++;
+			    	//}
+			    	
 		    	if(!originalhash.equals(journalhash))
 		    	{
-		    //		System.out.println(originalhash + " <> " + journalhash);
-		    		
-		    		record.set(3,"updated");
+		    	
+		    	    //record.set(3,String.format("%03d", lvs) + ". version" + " update");
+		    	    record.set(3,"");
+
+		    		//System.out.println("new update record for primary key " + archivekey);
+			     	//System.out.println(record);			   
 		    	}
+		    	else
+		    	{
+		    	    record.set(3,"");
+		    	    //record.set(3,String.format("%03d", lvs)  + ". version" + " (no change)");
+		    	  	//System.out.println("new change record for primary key " + archivekey);
+			     	//System.out.println(record);
+			   
+		    	}
+		    	
+		    	versions.addFirst(new Version(record));
 		    }
 		    else {
-		     	//System.out.println("new record at offset " + offs);
+		     	//System.out.println("new first record for primary key  " + archivekey);
 		     	//System.out.println(record);
-		     	record.set(3,"new");
+		     	//record.set(3,"001. version");
+	    	    record.set(3,"");
+		     	LinkedList<Version> recordlist = new LinkedList<Version>();
+		     	recordlist.add(new Version(record));
+		     	job.TimeLineHashes.put(archivekey,recordlist);
 		    }
 			
 			
 			
 		}
-		else if (!unkown && null != ad && !withoutROWID) {
-			
-		
-		
-				// we need this information to detect differences between current line in database and
-				// value in Journal file
-			
-			    // case 1: Journal File
-			
-				// Note: a missing hash means that a line as added/removed recently, an exsiting offset with
-				// a different hash value compared to the hash of the WAL,Journal means that this line has been 
-				// updated.
-				job.LineHashes.put(ad.getName() + "_" + rowid,computeHash(record));
-				
-				// case 2: WAL File	
-				LinkedList<Integer> ll = new LinkedList<Integer>();
-				ll.add(computeHash(record));
-				job.TimeLineHashes.put(ad.getName() + "_" + rowid, (new LinkedList<Integer>()));
-				
-		}
+//		else if (filetype == Global.WAL_ARCHIVE_FILE  && !unkown && null != ad && !withoutROWID) {
+//			
+//				System.out.println(" Abzweig zu definierten Tabellen B");
+//		
+//				/* only for real tables - index tables are not included */
+//				if (ad instanceof TableDescriptor) {
+//				
+//					String key = null;
+//					
+//					td = (TableDescriptor) ad;
+//				
+//					List<Integer> pk  = td.primarykeycolumnnumbers;
+//					
+//					/* there exists on or even more explicitly defined primary key column */
+//					if(null != pk && pk.size() > 0)
+//					{
+//						Iterator<Integer> pcol = pk.iterator();
+//						StringBuffer sb = new StringBuffer();
+//						while (pcol.hasNext()) {
+//						    // create composite primary key
+//							sb.append( record.get(5+pcol.next()));
+//						}					
+//					
+//					    key = sb.toString();
+//					}
+//					
+//					
+//					/* we do not have a primary key column -> in this case use the rowid */
+//					else
+//					{
+//						key = ad.getName() + "_" + rowid;
+//					}
+//		
+//					if (filetype == Global.ROLLBACK_JOURNAL_FILE) {
+//					
+//						// we need this information to detect differences between current line in database and
+//						// value in Journal file
+//					
+//					    // case 1: Journal File
+//					
+//						// Note: a missing hash means that a line as added/removed recently, an exsiting offset with
+//						// a different hash value compared to the hash of the WAL,Journal means that this line has been 
+//						// updated.
+//						job.LineHashes.put(ad.getName() + "_" + rowid,computeHash(record));
+//						
+//					}
+//					else if (filetype == Global.WAL_ARCHIVE_FILE) {
+//						
+//						// case 2: WAL File	
+//						LinkedList<Version> lll = new LinkedList<Version>();
+//						lll.add(new Version(record));
+//						// append hash as last value
+//						job.TimeLineHashes.put(key, lll);
+//					}
+//				}
+//		}
 	
 		
 		return record;
 	}
 	
-	private void updateDatarecord(int page, String tablename,String RowID, String action){
-		
-		if(job.gui == null)
-			return;
-		
-		
-		
-		Node n = job.gui.tables.get("/"+tablename);
-		
-		if(n != null){
-			
-			
-				if (n instanceof VBox) {
+	private void storeBLOB(LinkedList<String> record, int blobcolidx, String tablecelltext, byte[] value, int offsetidx) {
+	
+	Long hash;
+	/* by default the record offset is used as key for a BLOB */
+	if (record.get(offsetidx).length() > 2)
+		hash = Long.parseLong(record.get(offsetidx));
+	else
+		hash = (long) blobcolidx;
 
-					VBox panel = (VBox)n;
-					TableView<Object> table = (TableView<Object>)panel.getChildren().get(1);  // get the table back
-			
-				    ObservableList<Object> list = table.getItems();
-				    
-				    Object first = list.get(1);
-				}
+	
+	// example shash: /Users/pawlaszc/.fqlite/wickrLocal.sqlite_17633-0.bin
+
+	String shash = GUI.baseDir + Global.separator + job.filename + "_" + hash + "-" + blobcolidx;
+		
+		if (tablecelltext.contains("png")){
+			shash += ".png";
+			job.bincache.put(shash, new BLOBElement(value, BLOBTYPE.PNG));
 		}
+		else if (tablecelltext.contains("gif"))
+		{
+			shash += ".gif";
+			job.bincache.put(shash, new BLOBElement(value, BLOBTYPE.GIF));
+		}
+		else if (tablecelltext.contains("bmp"))
+		{
+			shash += ".bmp";
+			job.bincache.put(shash, new BLOBElement(value, BLOBTYPE.BMP));
+		}
+		else if (tablecelltext.contains("jpg"))
+		{
+			shash += ".jpg";
+			job.bincache.put(shash, new BLOBElement(value, BLOBTYPE.JPG));
+		}
+		else if (tablecelltext.contains("tiff"))
+		{
+			shash += ".tiff";
+			job.bincache.put(shash, new BLOBElement(value, BLOBTYPE.TIFF));
+		}
+		else if (tablecelltext.contains("heic"))
+		{
+			shash += ".heic";
+			job.bincache.put(shash, new BLOBElement(value, BLOBTYPE.HEIC));
+		}
+		else if (tablecelltext.contains("pdf"))
+		{
+			shash += ".pdf";
+			job.bincache.put(shash, new BLOBElement(value, BLOBTYPE.PDF));
+		}
+		else if (tablecelltext.contains("plist"))
+		{
+			shash += ".plist";
+			job.bincache.put(shash, new BLOBElement(value, BLOBTYPE.PLIST));
+		}
+		else if (tablecelltext.contains("gzip"))
+		{
+			shash += ".gzip";
+			job.bincache.put(shash, new BLOBElement(value, BLOBTYPE.GZIP));							
+		}
+		else if (tablecelltext.contains("avro"))
+		{
+			shash += ".avro";
+			job.bincache.put(shash, new BLOBElement(value, BLOBTYPE.AVRO));							
+		}
+		else
+		{
+			shash += ".bin";
+			job.bincache.put(shash, new BLOBElement(value, BLOBTYPE.UNKOWN));
+		}
+		if (tablecelltext.contains("jpg") || tablecelltext.contains("png") || tablecelltext.contains("gif")
+				|| tablecelltext.contains("bmp")) {
+			/* for the tooltip preview we need to shrink the pictures */
+			Image img = scaledown(value);
+			
+			if (null != img)
+			{	
+				job.Thumbnails.put(shash, img);
+			}
+		}
+			  
 	}
 
-	private int computeHash(LinkedList<String> record){
+	
+	private String getPrimaryKey(TableDescriptor td, LinkedList<String> record){
+		
+		String key = null;
+		
+		if(null == td)
+			return null;
+		
+		List<Integer> pk  = td.primarykeycolumnnumbers;
+				
+		/* there exists one or even more explicitly defined primary key column */
+		if(null != pk && pk.size() > 0)
+		{
+			Iterator<Integer> pcol = pk.iterator();
+			StringBuffer sb = new StringBuffer();
+			while (pcol.hasNext()) {
+			    // create composite primary key tablename + 5 walframe columns 
+				int nxt = pcol.next();
+				if(6+nxt < record.size())
+					sb.append( record.get(6 + nxt));
+			}					
+		
+		    key = sb.toString();
+		       
+		}
+		
+		return key;
+	}
+	
+	
+	public static int computeHash(LinkedList<String> record){
 		
 		// we currently work on the original data base file within the readRecord() method		
 		LinkedList<String> ll = new LinkedList<String>();
@@ -1551,6 +1663,80 @@ public class Auxiliary extends Base {
 		return ll.hashCode();
 	}
 	
+
+	final static DateTimeFormatter formatter = DateTimeFormatter.ofPattern("MM/dd/yyyy - HH:mm:ss Z");
+	
+	public static String int2Timestamp(String time){
+			
+		if ((time == null) || time.equals("") || time.equals("null"))  {
+			return "";
+		}
+		
+		long l;
+		try {
+			 l = Long.parseLong(time);
+		}
+		catch(Exception err){
+			return "";
+		}
+		String timestamp = "";
+	
+		if(l > UNIX_MIN_SECONDS && l < UNIX_MAX_SECONDS)
+		{
+			ZonedDateTime utc = ZonedDateTime.ofInstant(Instant.ofEpochSecond(l), ZoneOffset.UTC);
+		    timestamp = utc.format(formatter);
+			//System.out.println(" Unix Epoch: " + l);
+			//System.out.println(" UTC Epoch: " + timestamp);
+			return timestamp;
+		}
+		
+		if (l > MAC_MIN_DATE && l  < MAC_MAX_DATE)
+		{
+			long ut = (978307200 + (long) l);
+			//System.out.println("isMacAbsoluteTime(): " + l + " unix " + ut);
+			ZonedDateTime utc = ZonedDateTime.ofInstant(Instant.ofEpochSecond(ut), ZoneOffset.UTC);
+			DateTimeFormatter formatter = DateTimeFormatter.ofPattern("MM/dd/yyyy - HH:mm:ss Z");
+			timestamp = utc.format(formatter);
+			//System.out.println("time: " + timestamp);
+			return timestamp;
+		}
+		
+		if (l > MAC_NANO_MIN_DATE && l  < MAC_NANO_MAX_DATE)
+		{
+			l = l / 1000000000;
+			long ut = (978307200 + (long) l);
+			ZonedDateTime utc = ZonedDateTime.ofInstant(Instant.ofEpochSecond(ut), ZoneOffset.UTC);
+			DateTimeFormatter formatter = DateTimeFormatter.ofPattern("MM/dd/yyyy - HH:mm:ss Z");
+			timestamp = utc.format(formatter);
+			return timestamp;
+		}
+		
+		if(l > UNIX_MIN_DATE && l < UNIX_MAX_DATE)
+		{
+			ZonedDateTime utc = ZonedDateTime.ofInstant(Instant.ofEpochMilli(l), ZoneOffset.UTC);
+		    timestamp = utc.format(formatter);
+			return timestamp;
+		}
+		
+		if (l > UNIX_MIN_DATE_NANO && l  < UNIX_MAX_DATE_NANO)
+		{
+			l = l/1000; 
+			ZonedDateTime utc = ZonedDateTime.ofInstant(Instant.ofEpochMilli(l), ZoneOffset.UTC);
+			timestamp = utc.format(formatter);	
+			return timestamp;
+		}
+		
+		if (l > UNIX_MIN_DATE_PICO && l  < UNIX_MAX_DATE_PICO)
+		{
+			l = l/1000000; 
+			ZonedDateTime utc = ZonedDateTime.ofInstant(Instant.ofEpochMilli(l), ZoneOffset.UTC);
+			timestamp = utc.format(formatter);	
+			return timestamp;
+		}
+		
+		return timestamp;
+	}
+	
 	
 	/**
 	 * Convert a SQL-TIMESTAMP value into a human readable format.
@@ -1560,65 +1746,70 @@ public class Auxiliary extends Base {
 	 */
 	private TimeStamp timestamp2String(SqliteElement en, byte[] value) {
 
+		
+		
 		if (en.type == SerialTypes.INT48) {
-			System.out.println("INT48 zeit " + en.type);
+			//System.out.println("INT48 zeit " + en.type);
 
 			long l = SqliteElement.decodeInt48ToLong(value) / 100;
 			long time = (978307200 + (long) l);
-			System.out.println("isMacAbsoluteTime(): " + l + " unix " + time);
 			ZonedDateTime utc = ZonedDateTime.ofInstant(Instant.ofEpochSecond(time), ZoneOffset.UTC);
 			DateTimeFormatter formatter = DateTimeFormatter.ofPattern("MM/dd/yyyy - HH:mm:ss Z");
 			String s = utc.format(formatter);
 			return new TimeStamp(s, l);
 
 		} else if (en.type == SerialTypes.INT64) {
-			System.out.println("INT64 zeit " + en.type);
 
 			ByteBuffer bf = ByteBuffer.wrap(value);
 			long l = bf.getLong();
-			// DatetimeConverter.isUnixEpoch(l);
 
 			ZonedDateTime utc = ZonedDateTime.ofInstant(Instant.ofEpochSecond(l), ZoneOffset.UTC);
 			DateTimeFormatter formatter = DateTimeFormatter.ofPattern("MM/dd/yyyy - HH:mm:ss Z");
 			String s = utc.format(formatter);
-			System.out.println(" Unix Epoch: " + l);
-			System.out.println(" UTC Epoch: " + s);
-			System.out.println("time: " + s);
 			return new TimeStamp(s, l);
 		} else if (en.type == SerialTypes.FLOAT64) {
-			System.out.println("FLOAT64 zeit " + en.type);
-			ByteBuffer bf = ByteBuffer.wrap(value);
-			double l = bf.getDouble();
-			//System.out.println(">>" + l);
-
-			long time = (978307200 + (long) l);
-			System.out.println("isMacAbsoluteTime(): " + l + " unix " + time);
-			ZonedDateTime utc = ZonedDateTime.ofInstant(Instant.ofEpochSecond(time), ZoneOffset.UTC);
-			DateTimeFormatter formatter = DateTimeFormatter.ofPattern("MM/dd/yyyy - HH:mm:ss Z");
-			String s = utc.format(formatter);
-			System.out.println("time: " + s);
+			String s = "";
+			double l = 0;
+			try {
+				ByteBuffer bf = ByteBuffer.wrap(value);
+			
+				l = bf.getDouble();
+				
+				long time = (978307200 + (long) l);
+			   
+		    	ZonedDateTime utc = ZonedDateTime.ofInstant(Instant.ofEpochSecond(time), ZoneOffset.UTC);
+		    	DateTimeFormatter formatter = DateTimeFormatter.ofPattern("MM/dd/yyyy - HH:mm:ss Z");
+		    	s = utc.format(formatter);
+			
+		    }catch(Exception err){
+		    	AppLog.debug("DateTimeException: Instant exceeds minimum or maximum instant");
+		        s = "";
+		    }
 			return new TimeStamp(s, l);
 
 		} else if (en.type == SerialTypes.INT32) {
 
-			System.out.println("INT32 zeit " + en.type);
 			ByteBuffer bf = ByteBuffer.wrap(value);
-			int l = bf.getInt();
-
-			long time = (978307200 + (long) l);
-			System.out.println("isMacAbsoluteTime(): " + l + " unix " + time);
-			ZonedDateTime utc = ZonedDateTime.ofInstant(Instant.ofEpochSecond(time), ZoneOffset.UTC);
-			DateTimeFormatter formatter = DateTimeFormatter.ofPattern("MM/dd/yyyy - HH:mm:ss Z");
-			String s = utc.format(formatter);
-			System.out.println("time: " + s);
-			return new TimeStamp(s, l);
+			try {
+				int l = bf.getInt();
+				long time = (978307200 + (long) l);
+				ZonedDateTime utc = ZonedDateTime.ofInstant(Instant.ofEpochSecond(time), ZoneOffset.UTC);
+				DateTimeFormatter formatter = DateTimeFormatter.ofPattern("MM/dd/yyyy - HH:mm:ss Z");
+				String s = utc.format(formatter);
+				return new TimeStamp(s, l);
+			}catch(Exception err){
+				
+			}
 		}
-
+		
+		
 		return new TimeStamp("null", 0);
 	}
 
-	// microseconds (one millionth of a second)
-
+	// UNIX Epoch in milliseconds since 1st January 1970 */
+	final static long UNIX_MIN_SECONDS = 1262304000L; // 01.01.2010
+	final static long UNIX_MAX_SECONDS = 2524608000L; // 01.01.2050
+                                         
 	/* UNIX Epoch in milliseconds since 1st January 1970 */
 	final static long UNIX_MIN_DATE = 1262304000000L; // 01.01.2010
 	final static long UNIX_MAX_DATE = 2524608000000L; // 01.01.2050
@@ -1626,11 +1817,20 @@ public class Auxiliary extends Base {
 	/* UNIX Epoch in nanoseconds since 1st January 1970 */
 	final static long UNIX_MIN_DATE_NANO = 1262304000000000L; // 01.01.2010
 	final static long UNIX_MAX_DATE_NANO = 2524608000000000L; // 01.01.2050
-
+	                                       
+	final static long UNIX_MIN_DATE_PICO = 1262304000000000000L; // 01.01.2010
+	final static long UNIX_MAX_DATE_PICO = 2524608000000000000L; // 01.01.2050	                                   	                                  	                                   	final static long UNIX_MIN_DATE_NANO = 1262304000000000L; // 01.01.2010
+	                                       
+	                              
 	/* CFMACTime Stamps Seconds since 1st January 2001 */
 	final static double MAC_MIN_DATE = 300000000; // 05. Jul. 2010
-	final static double MAC_MAX_DATE = 2010000000; // 10. Sep. 2064
-
+	final static double MAC_MAX_DATE = 800000000; // 10. Sep. 2064
+                        
+	/* CFMACTime Stamp in Nano Seconds (10^9) */
+    final static long MAC_NANO_MIN_DATE = 300000000000000000L; // 05. Jul. 2010
+    final static long MAC_NANO_MAX_DATE = 800000000000000000L; // 10. Sep. 2064
+                                   	
+                                       
 	/* Google Chrome timestamps Microseconds since 1st January 1601 */
 	final static long CHROME_MIN_DATE = 1L;
 
@@ -1644,7 +1844,7 @@ public class Auxiliary extends Base {
 	 * perfectly fine.
 	 */
 
-	private TimeStamp Real2String(SqliteElement en, byte[] value) {
+	protected TimeStamp Real2String(SqliteElement en, byte[] value) {
 
 		if (value.length == 0)
 			return null;
@@ -1680,7 +1880,7 @@ public class Auxiliary extends Base {
 		return null;
 	}
 
-	private TimeStamp Integer2String(SqliteElement en, byte[] value) {
+	public TimeStamp Integer2String(SqliteElement en, byte[] value) {
 
 		long l = -1;
 
@@ -1738,25 +1938,20 @@ public class Auxiliary extends Base {
 		return x & 0x00000000ffffffffL;
 	}
 
-	private TableDescriptor matchTable(SqliteElement[] header) {
+	private TableDescriptor matchTable(List<SqliteElement> header) {
 
 		Iterator<TableDescriptor> itds = job.headers.iterator();
 		while (itds.hasNext()) {
 			TableDescriptor table = itds.next();
 
-			if (table.getColumntypes().size() == header.length) {
+			if (table.getColumntypes().size() == header.size()) {
 				int idx = 0;
 				boolean eq = true;
 
-				// System.out.println("TDS component " + table.tblname + " :: " +
-				// table.columntypes.toString());
-
-				// List<String> tblcolumns = table.columntypes;
-
+	
 				for (SqliteElement s : header) {
 					String type = table.getColumntypes().get(idx);
 
-					// System.out.println(s.serial.name() + " <?>" + type);
 					if (!s.serial.name().equals(type)) {
 						eq = false;
 						break;
@@ -1766,7 +1961,6 @@ public class Auxiliary extends Base {
 
 				if (eq) {
 
-					// System.out.println(" Match found " + table.tblname);
 					return table;
 				}
 			}
@@ -1777,17 +1971,38 @@ public class Auxiliary extends Base {
 
 	private static Image scaledown(byte[] bf) {
 
-		InputStream is = new ByteArrayInputStream(bf);
+		byte[] nbf = null;
+		
+		/* funny THREEMA messenger 1st byte different thing */
+		if(bf[0] == 1)
+		{
+			nbf = Arrays.copyOfRange(bf, 1, bf.length);
+		}	
+		else 
+			nbf = bf;
+		
+		InputStream is = new ByteArrayInputStream(nbf);
 		BufferedImage image = null;
 		try {
 			// class ImageIO is able to read png, tiff, bmp, gif, jpeg formats
-			image = ImageIO.read(is);
+			try {
+				image = ImageIO.read(is);
+			}
+			catch(EOFException eof){
+				
+				System.out.println("ERROR EOF reached");
+			    image = null;
+			}
+			catch(javax.imageio.IIOException err){
+				System.out.println("ERROR No image data present to read");
+			    image = null;
+			}
+			
 			if (image == null)
 				return null;
 			// scaling down to thumbnail
 			java.awt.Image scaled = image.getScaledInstance(100, 100, java.awt.Image.SCALE_FAST);
 
-			//System.out.println(">>> Type:::: " + image.getType());
 			// we need a BufferdImage to convert the awt.Image to fx-graphics
 			BufferedImage bimage = new BufferedImage(100, 100, image.getType());
 			// Draw the image on to the buffered image
@@ -1821,25 +2036,72 @@ public class Auxiliary extends Base {
 	 *
 	 */
 	private byte[] readOverflowIterativ(int pagenumber, boolean fromWAL) {
+	
 		List<ByteBuffer> parts = new LinkedList<ByteBuffer>();
 		boolean more = true;
 		ByteBuffer overflowpage = null;
 		int next = pagenumber;
+		int frame = -1;
+		int saved = -1;
+        
+		if (fromWAL){
+			
 
+			// WAL in memory file
+			ByteBuffer db = job.wal.wal;
+	
+			// overflow pages until here 
+			HashMap<Integer,ByteBuffer> overflow = job.wal.overflow;
+			
+			// save current file pointer position
+			saved = db.position();
+
+			frame = saved / (job.ps +24);
+			frame++; // go to the begin of the next frame/wal page
+		
+			
+		}
+		
+		Set<Integer> visited = new HashSet<Integer>(); 
+		
 		while (more) {
 			/* read next overflow page into buffer */
 			if (fromWAL) {
-				System.out.println(" >>>> Read Overflow Iterativ from WAL Archive");
-				more = false;
-				break;
-			} else {
+				if(visited.contains(next))
+				{
+					System.out.println(" >>>> Cycle page already visited " + next);			
+					more = false;
+					break;
+				}
+				overflowpage = job.readWALOverflowPage(frame, next, job.ps, pagenumber);	
+				visited.add(next);
+			} 
+			else {
+				/* read from database */
 				overflowpage = job.readPageWithNumber(next, job.ps);
 			}
-
 			if (overflowpage != null) {
 				overflowpage.position(0);
-				next = overflowpage.getInt() - 1;
-				info(" next overflow:: " + next);
+				
+				if (fromWAL) {
+					next = overflowpage.getInt();
+					
+					if(next > 0)
+						more = true;
+					else
+						more = false;
+				}
+				else {
+					next = overflowpage.getInt() - 1;	
+					AppLog.debug(" next overflow:: " + next);
+				
+					if(next >= 0)
+						more = true;
+					else 
+						more = false;
+				}
+				
+				
 			} else {
 				more = false;
 				break;
@@ -1856,24 +2118,37 @@ public class Auxiliary extends Base {
 			ByteBuffer part = ByteBuffer.wrap(current);
 			parts.add(part);
 
-			if (next < 0 || next > job.numberofpages) {
+			if (next < 0 ) { //|| next > job.numberofpages) {
 				// termination condition for the recursive callup's
-				debug("No further overflow pages");
+				AppLog.debug("No further overflow pages");
+				//System.out.println("No further overflow pages");
 				/* startRegion the last overflow page - do not copy the zero bytes. */
 				more = false;
 			}
 
 		}
+		
+		if(fromWAL)
+		{
+			if(saved > 0)
+				job.wal.wal.position(saved);
+		}
 
 		/* try to merge all the ByteBuffers into one array */
 		if (parts == null || parts.size() == 0) {
+		
 			return ByteBuffer.allocate(0).array();
+		
+		
 		} else if (parts.size() == 1) {
+			
 			return parts.get(0).array();
+		
 		} else {
 			ByteBuffer fullContent = ByteBuffer.allocate(parts.stream().mapToInt(Buffer::capacity).sum());
 			parts.forEach(fullContent::put);
 			fullContent.flip();
+			
 			return fullContent.array();
 		}
 
@@ -1927,13 +2202,16 @@ public class Auxiliary extends Base {
 		//System.out.println("HEADER" + header);
 		byte[] bcol = Auxiliary.decode(header);
 
-		int[] columns = readVarInt(bcol);
+		//int[] columns = readVarInt(bcol);
+		
+		VIntIter columns = VIntIter.wrap(bcol,1);
 		int pll = 0;
 
 		pll += header.length() / 2 + 1;
 
-		for (int i = 0; i < columns.length; i++) {
-			switch (columns[i]) {
+		while(columns.hasNext()) {
+			int column = columns.next(); 
+			switch (column) {
 			case 0: // zero length - primary key is saved in indices component
 				break;
 			case 1:
@@ -1967,14 +2245,14 @@ public class Auxiliary extends Base {
 				break;
 
 			default:
-				if (columns[i] % 2 == 0) // even
+				if (column % 2 == 0) // even
 				{
 					// BLOB with the length (N-12)/2
-					pll += (columns[i] - 12) / 2;
+					pll += (column - 12) / 2;
 				} else // odd
 				{
 					// String in database encoding (N-13)/2
-					pll += (columns[i] - 13) / 2;
+					pll += (column - 13) / 2;
 				}
 
 			}
@@ -1984,12 +2262,13 @@ public class Auxiliary extends Base {
 		return pll;
 	}
 
+	
 	/**
 	 * 
 	 * @param header
 	 * @return
 	 */
-	public static SqliteElement[] toColumns(String header) {
+	public static List<SqliteElement> toColumns(String header) {
 		/* hex-String representation to byte array */
 		byte[] bcol = Auxiliary.decode(header);
 		return get(bcol);
@@ -2008,14 +2287,18 @@ public class Auxiliary extends Base {
 
 	public static int getPayloadLength(String header) {
 		int sum = 0;
-		SqliteElement[] cols = toColumns(header);
+		List<SqliteElement> cols = toColumns(header);
 		for (SqliteElement e : cols) {
-			sum += e.length;
+			if (e != null)
+				sum += e.length;
 		}
 		return sum;
 	}
 
 	public String getHeaderString(int headerlength, ByteBuffer buffer) {
+		if(headerlength <= 0)
+			return "";
+		
 		byte[] header = new byte[headerlength];
 
 		try {
@@ -2024,10 +2307,11 @@ public class Auxiliary extends Base {
 
 		} catch (Exception err) {
 			System.out.println("ERROR " + err.toString());
+			return "";
 		}
 
-		String sheader = Auxiliary.bytesToHex(header);
-
+		String sheader = bytesToHex(header);
+				
 		return sheader;
 	}
 
@@ -2040,8 +2324,11 @@ public class Auxiliary extends Base {
 	 * @return the column field
 	 * @throws IOException
 	 */
-	public SqliteElement[] getColumns(int headerlength, ByteBuffer buffer, StringBuffer firstcol) throws IOException {
+	public List<SqliteElement> getColumns(int headerlength, ByteBuffer buffer) throws IOException {
 
+		if(headerlength < 0 || headerlength > 1024)
+			return null;
+		
 		byte[] header = new byte[headerlength];
 
 		try {
@@ -2049,16 +2336,9 @@ public class Auxiliary extends Base {
 			buffer.get(header);
 
 		} catch (Exception err) {
-			System.out.println("Auxiliary::ERROR " + err.toString());
+			System.out.println("Auxiliary::ERROR " + err.toString() + " headerlength " + headerlength + " buffer capacity " + buffer.capacity());
 			return null;
 		}
-
-		String sheader = Auxiliary.bytesToHex(header);
-
-		if (sheader.length() > 1) {
-			firstcol.insert(0, sheader.substring(0, 2));
-		}
-		// System.out.println("getColumns():: + Header: " + sheader);
 
 		return get(header);
 	}
@@ -2069,9 +2349,11 @@ public class Auxiliary extends Base {
 		if (null == columns)
 			return null;
 		return getElements(columns);
-
 	}
 
+	
+	static int getCounter = 0;
+	
 	/**
 	 * Converts the header bytes of a record into a field of SQLite elements.
 	 * Exactly one element is created per column type.
@@ -2079,16 +2361,26 @@ public class Auxiliary extends Base {
 	 * @param header
 	 * @return
 	 */
-	private static SqliteElement[] get(byte[] header) {
-		// there are several varint values in the serialtypes header
-		int[] columns = readVarInt(header);
-		if (null == columns)
-			return null;
-
-		// SqliteElement[] column = new SqliteElement[columns.length];
-		return getElements(columns);
+	private static List<SqliteElement> get(byte[] header) {
+			
+		VIntIter columns = VIntIter.wrap(header,3);	
+		List<SqliteElement> result = getElements(columns);
+		return result;
+		
 	}
 
+	
+	static SqliteElement primkey = new SqliteElement(SerialTypes.PRIMARY_KEY, StorageClass.INT, 0);
+	static SqliteElement int8 = new SqliteElement(SerialTypes.INT8, StorageClass.INT, 1);
+	static SqliteElement int16 = new SqliteElement(SerialTypes.INT16, StorageClass.INT, 2);
+	static SqliteElement int24 = new SqliteElement(SerialTypes.INT24, StorageClass.INT, 3);
+	static SqliteElement int32 = new SqliteElement(SerialTypes.INT32, StorageClass.INT, 4);
+    static SqliteElement int48 = new SqliteElement(SerialTypes.INT48, StorageClass.INT, 6);
+    static SqliteElement int64 = new SqliteElement(SerialTypes.INT64, StorageClass.INT, 8);
+    static SqliteElement float64 =  new SqliteElement(SerialTypes.FLOAT64, StorageClass.FLOAT, 8);
+    static SqliteElement const0  =  new SqliteElement(SerialTypes.INT0, StorageClass.INT, 0);
+    static SqliteElement const1  = new SqliteElement(SerialTypes.INT1, StorageClass.INT, 0);
+	
 	private static SqliteElement[] getElements(int[] columns) {
 
 		SqliteElement[] column = new SqliteElement[columns.length];
@@ -2097,34 +2389,34 @@ public class Auxiliary extends Base {
 
 			switch (columns[i]) {
 			case 0: // primary key or null value <empty> cell
-				column[i] = new SqliteElement(SerialTypes.PRIMARY_KEY, StorageClass.INT, 0);
+				column[i] = primkey;
 				break;
 			case 1: // 8bit complement integer
-				column[i] = new SqliteElement(SerialTypes.INT8, StorageClass.INT, 1);
+				column[i] = int8;
 				break;
 			case 2: // 16bit integer
-				column[i] = new SqliteElement(SerialTypes.INT16, StorageClass.INT, 2);
+				column[i] = int16;
 				break;
 			case 3: // 24bit integer
-				column[i] = new SqliteElement(SerialTypes.INT24, StorageClass.INT, 3);
+				column[i] = int24;
 				break;
 			case 4: // 32bit integer
-				column[i] = new SqliteElement(SerialTypes.INT32, StorageClass.INT, 4);
+				column[i] = int32;
 				break;
 			case 5: // 48bit integer
-				column[i] = new SqliteElement(SerialTypes.INT48, StorageClass.INT, 6);
+				column[i] = int48;
 				break;
 			case 6: // 64bit integer
-				column[i] = new SqliteElement(SerialTypes.INT64, StorageClass.INT, 8);
+				column[i] = int64;
 				break;
 			case 7: // Big-endian floating point number
-				column[i] = new SqliteElement(SerialTypes.FLOAT64, StorageClass.FLOAT, 8);
+				column[i] = float64;
 				break;
 			case 8: // Integer constant 0
-				column[i] = new SqliteElement(SerialTypes.INT0, StorageClass.INT, 0);
+				column[i] = const0;
 				break;
 			case 9: // Integer constant 1
-				column[i] = new SqliteElement(SerialTypes.INT1, StorageClass.INT, 0);
+				column[i] = const1;
 				break;
 			case 10: // not used ;
 				columns[i] = 0;
@@ -2147,6 +2439,71 @@ public class Auxiliary extends Base {
 
 		}
 
+		return column;
+	}
+	
+	private static List<SqliteElement> getElements(VIntIter columns) {
+
+
+		LinkedList <SqliteElement> column = new LinkedList<SqliteElement>();
+		
+		while (columns.hasNext()) {
+              
+			int value = columns.next();
+			
+			switch (value) {
+			case 0: // primary key or null value <empty> cell
+				column.add(primkey);
+				break;
+			case 1: // 8bit complement integer
+				column.add(int8);
+				break;
+			case 2: // 16bit integer
+				column.add(int16);
+				break;
+			case 3: // 24bit integer
+				column.add(int24);
+				break;
+			case 4: // 32bit integer
+				column.add(int32);
+				break;
+			case 5: // 48bit integer
+				column.add(int48);
+				break;
+			case 6: // 64bit integer
+				column.add(int64);
+				break;
+			case 7: // Big-endian floating point number
+				column.add(float64);
+				break;
+			case 8: // Integer constant 0
+				column.add(const0);
+				break;
+			case 9: // Integer constant 1
+				column.add(const1);
+				break;
+			case 10: // not used ;
+				
+				break;
+			case 11:
+				
+				break;
+			default:
+				if (value % 2 == 0) // even
+				{
+					// BLOB with the length (N-12)/2
+					column.add(new SqliteElement(SerialTypes.BLOB, StorageClass.BLOB, (value - 12) / 2));
+				} else // odd
+				{
+					// String in database encoding (N-13)/2
+					column.add(new SqliteElement(SerialTypes.STRING, StorageClass.TEXT, (value - 13) / 2));
+				}
+
+			}
+
+		}
+
+		columns.setBack();
 		return column;
 	}
 
@@ -2293,8 +2650,6 @@ public class Auxiliary extends Base {
 		/* assign the new matching pattern with the index descriptor object */
 		id.hpattern = pattern;
 
-		// System.out.println("addHeaderPattern2Idx() :: PATTTERN: " + pattern);
-
 	}
 
 	/**
@@ -2305,17 +2660,8 @@ public class Auxiliary extends Base {
 	 */
 	public static String bytesToHex(byte[] bytes) {
 
-		StringBuilder sb = new StringBuilder();
-		for (byte hashByte : bytes) {
-
-			int intVal = 0xff & hashByte;
-			if (intVal < 0x10) {
-				sb.append('0');
-			}
-			sb.append(Integer.toHexString(intVal));
-		}
-		return sb.toString();
-
+		return bytesToHex(ByteBuffer.wrap(bytes));
+		
 	}
 
 	/**
@@ -2337,7 +2683,12 @@ public class Auxiliary extends Base {
 	 * @return
 	 */
 	public static String bytesToHex(ByteBuffer bb) {
+		
 		int limit = bb.limit();
+		
+		if (limit <= 0)
+			return null;
+		
 		char[] hexChars = new char[limit * 2];
 
 		bb.position(0);
@@ -2375,6 +2726,113 @@ public class Auxiliary extends Base {
 		return new String(hexChars);
 	}
 
+	static int[] resultset = new int[1000];
+	static List<Integer> resultlist = new ArrayList<Integer>();
+	
+	 /**
+     * Read an integer stored in variable-length format using zig-zag decoding from
+     * <a href="http://code.google.com/apis/protocolbuffers/docs/encoding.html"> Google Protocol Buffers</a>.
+     *
+     * @param array to read from
+     * @return a array of all integers read
+     *
+     * If variable-length value does not terminate after 5 bytes have been read the complete result is
+     * discarded.
+     */
+    public synchronized static int[] readVarInt_test(byte[] values) {
+    	 	  
+    	    int number = 0;
+     
+    		/* iterate over the complete value array byte wise*/
+	    	for(int c = 0; c < values.length; c++) {
+		        int value = 0;
+		        int i = 0;
+		        int b;
+		        while (((b = values[c]) & 0x80) != 0) {
+		            value |= (b & 0x7f) << i;
+		            i += 7;
+		            if (i > 28){
+		               return Arrays.copyOfRange(resultset,0,number); // something went wrong while decoding a next varint
+		            }
+		        }
+		        value |= b << i;
+		        resultset[number] = (value >>> 1) ^ -(value & 1);
+		        number++;
+	    	}
+	    	
+	    	// return the sub-array
+	    	return Arrays.copyOfRange(resultset,0,number);
+    	
+    }
+    
+    /**
+     * Decodes a value using the variable-length encoding of SQLite.
+     * @param bb
+     * @return
+     * @throws IllegalArgumentException
+     */
+     public static long readUnsigned(ByteBuffer bb) throws IllegalArgumentException {
+        int a0 = bb.get() & 0xFF;
+        if (a0 <= 240)
+          return a0; 
+        if (a0 <= 248) {
+          int a1 = bb.get() & 0xFF;
+          return (240 + 256 * (a0 - 241) + a1);
+        } 
+        if (a0 == 249) {
+          int a1 = bb.get() & 0xFF;
+          int a2 = bb.get() & 0xFF;
+          return (2288 + 256 * a1 + a2);
+        } 
+        int bytes = a0 - 250 + 3;
+        return readSignificantBits(bb, bytes);
+      }
+    
+     private static long readSignificantBits(ByteBuffer bb, int bytes) {
+        bytes--;
+        long value = (bb.get() & 0xFF) << bytes * 8;
+        while (bytes-- > 0)
+          value |= (bb.get() & 0xFF) << bytes * 8; 
+        return value;
+     }
+    
+    /**
+ 	 * Read a variable length integer from the supplied ByteBuffer
+ 	 * 
+ 	 * @param in buffer to read from
+ 	 * @return the int value
+ 	 */
+ 	public static int[] readVarInt_alt(byte[] values) {
+
+ 		resultlist = new ArrayList<Integer>();
+ 		int number = 0;
+ 		ByteBuffer bb = ByteBuffer.wrap(values);
+ 		do {
+ 			long value = readUnsigned(bb);
+ 			resultlist.add((int)value);
+ 		    number++;
+ 		}
+ 		while(bb.hasRemaining());
+ 	    // return the sub-array
+ 		int [] result = new int[resultlist.size()];
+ 		for(int i = 0; i < resultlist.size(); i++)
+ 		{
+ 			result[i] = resultlist.get(i);
+ 		}
+ 			
+ 		return result;
+	
+ 	}
+   	
+	static ArrayList<Integer> res = new ArrayList<Integer>();
+
+	static int  calls = 0;
+    static int  position = 0;
+    static int  howmuch = 0;
+    static int  limit = 0;
+    static int  value = 0;
+    static byte b = 0;
+
 	/**
 	 * Read a variable length integer from the supplied ByteBuffer
 	 * 
@@ -2383,85 +2841,48 @@ public class Auxiliary extends Base {
 	 */
 	public static int[] readVarInt(byte[] values) {
 
-		ByteBuffer in = ByteBuffer.wrap(values);
-		LinkedList<Integer> res = new LinkedList<Integer>();
-
+		calls++;
+		if ((calls % 100000) == 0)
+			System.out.println(" calls :: " + calls);
+        position = 0;
+        howmuch =  0;
+        //value = 0;
+        limit = values.length;
+        
 		do {
-			if (in.hasRemaining()) {
-				byte b = in.get();
-				int value = b & 0x7F;
+			if (position < limit) {
+				byte b = values[position++];
+				value = b & 0x7F;
+				
+				test:
 				while ((b & 0x80) != 0) {
-					if (in.hasRemaining()) {
-						b = in.get();
+					if (position < limit) {
+						b = values[position++];
 						value <<= 7;
 						value |= (b & 0x7F);
 					} else {
-						break;
+						//break;
+						break test;
 					}
 
 				}
-				res.add(value);
-
+				resultset[howmuch++] = value;
 			}
+			
+		} while (position < limit);
 
-		} while (in.position() < in.limit());
+		int [] back = new int[howmuch];
+		System.arraycopy(resultset, 0, back, 0, howmuch);
 
-		int[] result = new int[res.size()];
-		int n = 0;
-		Iterator<Integer> it = res.iterator();
-		while (it.hasNext()) {
-			result[n] = it.next();
-			n++;
-		}
-		return result;
+		return back;    
 	}
 
+	
 	public static int[] readMasterHeaderVarInts(byte[] values) {
 		return Arrays.copyOfRange(readVarInt(values), 0, 5);
 	}
 
-	/**
-	 * Don't use. Old implementation.
-	 * 
-	 * @param values
-	 * @return
-	 * @deprecated
-	 */
-	public static int[] readVarIntOld(byte[] values) {
-
-		int value = 0;
-		int counter = 0;
-		byte b = 0;
-		int shift = 0;
-
-		LinkedList<Integer> res = new LinkedList<Integer>();
-
-		while (counter < values.length) {
-
-			b = values[counter];
-			value = 0;
-			while (((b = values[counter]) & 0x80) != 0) {
-
-				shift = 7;
-				value |= (b & 0x7F) << shift;
-				counter++;
-				if (counter >= values.length) {
-					return null;
-				}
-			}
-			res.add(value | b);
-			counter++;
-		}
-		int[] result = new int[res.size()];
-		int n = 0;
-		Iterator<Integer> it = res.iterator();
-		while (it.hasNext()) {
-			result[n] = it.next();
-			n++;
-		}
-		return result;
-	}
-
+	
 	public static String getSerial(SqliteElement[] columns) {
 		String serial = "";
 
@@ -2624,74 +3045,7 @@ public class Auxiliary extends Base {
 		return data;
 	}
 
-	public static long String2long(String s) {
-		long longInput = -1L;
-		int var5 = -1;
-		int var6 = 0;
-		int length;
-		if ((length = s.length()) != 0 && !s.equals("-") && !s.equals("+")) {
-			BigDecimal bigdecimal = null;
-			BigInteger biginteger = null;
-			boolean var9 = false;
-			boolean ishex = s.startsWith("0x") || s.startsWith("Ox") || s.startsWith("ox");
-			String var11 = "yzafpnµm kMGTPEZY";
-			String var12 = "KMGTPE";
-
-			s.replaceAll(" ", "");
-			if (1 < s.length() && !ishex) {
-				if (var9 = 105 == s.charAt(s.length() - 1)) {
-					var5 = var12.indexOf(s.charAt(s.length() - 2));
-				} else {
-					int var18 = s.endsWith("c") ? -2
-							: (s.endsWith("d") ? -1
-									: (s.endsWith("da") ? 1 : (s.endsWith("h") ? 2 : (s.endsWith("%") ? -2 : 0))));
-					int var19 = var11.indexOf(s.charAt(s.length() - 1));
-					var6 = var18 != 0 ? var18 : (-1 < var19 ? var19 * 3 - 24 : 0);
-				}
-			}
-
-			if (!var9 || s.length() >= 3 && var5 >= 0) {
-				if (ishex) {
-					if (s.length() < 3) {
-						return -1;
-					}
-
-					try {
-						biginteger = new BigInteger(s.substring(2, length), 16);
-					} catch (Exception var16) {
-						return -1;
-					}
-				} else {
-					while (0 < length) {
-						try {
-							bigdecimal = new BigDecimal(s.substring(0, length));
-							break;
-						} catch (Exception var17) {
-							--length;
-						}
-					}
-
-					if (length == 0 || bigdecimal == null) {
-						return -1;
-					}
-
-					bigdecimal = bigdecimal.scaleByPowerOfTen(var6).multiply(BigDecimal.valueOf(1L << 10 * (var5 + 1)));
-					biginteger = bigdecimal.toBigInteger();
-				}
-
-				long var14 = biginteger.longValue();
-				if (biginteger.signum() < 0) {
-					longInput = -1L;
-				} else if (BigInteger.valueOf(Long.MAX_VALUE).compareTo(biginteger) < 0) {
-					longInput = Long.MAX_VALUE;
-				} else {
-					longInput = var14;
-				}
-
-			}
-		}
-		return longInput;
-	}
+	
 
 	/**
 	 * Reads the specified page as overflow.
@@ -2714,11 +3068,11 @@ public class Auxiliary extends Base {
 
 		overflowpage.position(0);
 		int overflow = overflowpage.getInt();
-		System.out.println(" overflow:: " + overflow);
+
 
 		if (overflow == 0) {
 			// termination condition for the recursive callup's
-			System.out.println("No further overflow pages");
+			; //System.out.println("No further overflow pages");
 			/* startRegion the last overflow page - do not copy the zero bytes. */
 		} else {
 			/* recursively call next overflow page in the chain */
@@ -2730,13 +3084,11 @@ public class Auxiliary extends Base {
 		 * are reserved for the (possible) next overflow page offset
 		 **/
 		byte[] current = new byte[job.ps - 4];
-		// System.out.println("current ::" + current.length);
-		// System.out.println("bytes:: " + (job.ps -4));
-		// System.out.println("overflowpage :: " + overflowpage.limit());
+	
 
 		overflowpage.position(4);
 		overflowpage.get(current, 0, job.ps - 4);
-		// overflowpage.get(current, 0, job.ps-4);
+	
 
 		/* Do we have a predecessor page? */
 		if (null != part) {
@@ -2757,19 +3109,18 @@ public class Auxiliary extends Base {
 		return pagenumber;
 	}
 	
-	
 	public static String hex2ASCII(String hex){
 		
 		// remove .. at the end of the hex - string if present
 		hex = hex.replace("..","");
 		
 		int idx = hex.indexOf("] ");
-		String begin = hex.substring(0,idx);
+		//String begin = hex.substring(0,idx);
 		String tail = hex.substring(idx+2);
 		
 		idx  = hex.indexOf(">");
 		if (idx > 0) {
-			begin = hex.substring(0,idx);
+			//begin = hex.substring(0,idx);
 			tail = hex.substring(idx+1);
 		}
 		
@@ -2786,5 +3137,143 @@ public class Auxiliary extends Base {
 		
 		return output.toString();
 	}
+	
+	public static String hex2ASCII_v2(String hex){
+		
+		
+		StringBuilder output = new StringBuilder();
+		for (int i = 0; i < hex.length(); i+=2) {
+		    String str = hex.substring(i, i+2);    
+		    //output.append((char)Integer.parseInt(str, 16));
+		    char next = (char)Integer.parseInt(str, 16);
+		    if(next > 31 && next < 127)
+		    	output.append(next);
+		    else
+		    	output.append('.');
+		}
+		
+		return output.toString();
+	}
+	
+	public static boolean isWindowsSystem() {
+	    String os = System.getProperty("os.name");
+	    System.out.println("Using System Property: " + os);
+	    return os.contains("Windows");
+	}
 
+	public static boolean isMacOS() {
+	    String os = System.getProperty("os.name");
+	    System.out.println("Using System Property: " + os);
+	    return os.contains("Mac");
+	}
+	
+	public static boolean writeBLOB2Disk(Job job, String path) {
+		try {
+			BLOBElement e = job.bincache.get(path);
+			BufferedOutputStream buffer = new BufferedOutputStream(new FileOutputStream(path));
+			buffer.write(e.binary);
+			buffer.close();
+		}catch(Exception err){
+			return false;
+		}
+		return true;
+	}	
+	
+    /**
+     * Calculates the entropy per character/byte of a byte array.
+     *
+     * @param input array to calculate entropy of
+     *
+     * @return entropy bits per byte
+     */
+    public static double entropy(byte[] input) {
+        if (input.length == 0) {
+            return 0.0;
+        }
+
+        /* Total up the occurrences of each byte */
+        int[] charCounts = new int[256];
+        for (byte b : input) {
+            charCounts[b & 0xFF]++;
+        }
+
+        double entropy = 0.0;
+        for (int i = 0; i < 256; ++i) {
+            if (charCounts[i] == 0.0) {
+                continue;
+            }
+
+            double freq = (double) charCounts[i] / input.length;
+            entropy -= freq * (Math.log(freq) / Math.log(2));
+        }
+
+        return entropy;
+    }
+    
+    
+    public static String composeOutputLine(FQTableView table, Iterator<String> s) {
+    	
+    	int current = 0;
+    	String offset = null;
+  	
+    	
+    	StringBuffer sb = new StringBuffer();
+    	
+    	// BLOB handling
+    	while (s.hasNext()){ 
+    	
+    		/* column for offset found ? */
+    		if(current == 5)
+    		{
+    			offset = s.next();
+    			sb.append(";");
+    			sb.append(offset);
+    			current++;
+    			continue;
+    		}	
+    		
+    		String cellvalue = s.next();
+
+		    /* BLOB-value found ? */     		
+    		if(cellvalue.length()>7) {
+    			
+        		
+    			int from = cellvalue.indexOf("BLOB-");
+        	    int to = cellvalue.indexOf("]");
+        	    
+        	    if(from > 0 && to > 0)
+        	    {
+        	    
+	        	    String number = cellvalue.substring(from+5, to);			
+	        		int start = cellvalue.indexOf("<");
+	        		int end   = cellvalue.indexOf(">");
+	        				
+	        		String type;
+					if (end > 0) {
+						type = cellvalue.substring(start+1,end);
+					}
+					else 
+	        			type = "bin";
+	        				
+	        		if(type.equals("java"))
+	        			type = "bin";
+	        			
+	        		String path = GUI.baseDir + Global.separator + table.dbname + "_" + offset + "-" + number + "." + type;
+	        		String data = table.job.bincache.getHexString(path);
+	        		System.out.println(" Data" + data);				
+	        		cellvalue = data.toUpperCase();
+        	    }
+        	}
+    		
+    		if(current > 0)
+    			sb.append(";");
+    		sb.append(cellvalue);	
+            current++;
+    	}
+    	// put a end of line to the line to export
+    	sb.append("\n");
+    	return sb.toString();
+    
+	}
+   
 }

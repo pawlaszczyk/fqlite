@@ -5,7 +5,7 @@ import java.util.ArrayList;
 import fqlite.base.Job;
 import fqlite.descriptor.IndexDescriptor;
 import fqlite.descriptor.TableDescriptor;
-import fqlite.util.Logger;
+import fqlite.log.AppLog;
 
 /*
 ---------------
@@ -76,7 +76,7 @@ public class SQLiteSchemaParser {
 		
 		int indexrowid = sql.indexOf("WITHOUT ROWID");
 		if (indexrowid != -1) {
-			Logger.out.debug(" attention: component " + tablename + " is defined as WITHOUT ROWID");
+			AppLog.debug(" attention: component " + tablename + " is defined as WITHOUT ROWID");
 			rowid = false;
 		}	
 
@@ -93,9 +93,8 @@ public class SQLiteSchemaParser {
 			TableDescriptor tds = p.parseCREATETABLEStatement(sql);
 		    
 			/* save link to this component object within the virtual component list */
-			if(tds.isVirtual())
-				job.virtualTables.put(tds.tblname,tds);
-			
+			if(tds.isVirtual()) {
+				job.virtualTables.put(tds.tblname,tds);				     				}
 			if (!job.headers.contains(tds))
 			{	
 				job.headers.add(tds);
@@ -111,7 +110,7 @@ public class SQLiteSchemaParser {
 				job.virtualTables.put(tds.tblname,tds);
 				
 			if (null != tds) {
-				Logger.out.debug(tds.getStandardPattern().toString());
+				AppLog.debug(tds.getStandardPattern().toString());
 				tds.tblname = tablename;
 				tds.ROWID = rowid;  // this flag indicates weather there is a ROWID or not 
 				/* avoid double entries */
@@ -120,11 +119,38 @@ public class SQLiteSchemaParser {
 					job.headers.add(tds);
 					tds.root = root;
 				}
+				else{
+					
+					int position = job.headers.indexOf(tds);
+					
+					TableDescriptor tds_old = job.headers.get(position);
+				     
+					/*
+					 *  Issue No. 5 (GitHub):
+					 *  
+					 *  In some cases there exist several versions of the same table.
+					 *  Those different table versions can have different columns. 
+					 *  To solve those issue we always take the table with the highest
+					 *  number of columns. 
+					 */
+				
+					if(tds.getColumntypes().size()> tds_old.getColumntypes().size()) {
+						
+						if(tds.root == -1)
+							tds.root = tds_old.root;
+						
+						job.headers.set(position, tds);
+					}
+					
+				}
 			}
 		}
 		else if (sql.contains("CREATE INDEX"))
 		{
-			IndexDescriptor ids = p.parseCREATEIndexStatement(sql);
+			IndexDescriptor ids = p.parseCREATEIndexStatement(job, sql);
+			
+			
+			
 			
 			if (null == ids.idxname)
 				return;
@@ -138,7 +164,7 @@ public class SQLiteSchemaParser {
 		{
 			sql = sql.replace("CREATE UNIQUE INDEX","CREATE INDEX");
 			
-			IndexDescriptor ids = p.parseCREATEIndexStatement(sql);
+			IndexDescriptor ids = p.parseCREATEIndexStatement(job, sql);
 			
 			if (null == ids.idxname)
 				return;

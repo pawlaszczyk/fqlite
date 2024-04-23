@@ -3,10 +3,10 @@ package fqlite.base;
 import java.nio.ByteBuffer;
 import java.util.BitSet;
 import java.util.LinkedList;
-import fqlite.types.CarverTypes;
-import fqlite.util.Auxiliary;
-import java.util.LinkedList;
-import fqlite.descriptor.TableDescriptor;
+import java.util.List;
+
+import fqlite.descriptor.AbstractDescriptor;
+import fqlite.log.AppLog;
 import fqlite.pattern.MMode;
 import fqlite.pattern.SerialTypeMatcher;
 import fqlite.types.CarverTypes;
@@ -25,7 +25,7 @@ import javafx.collections.ObservableList;
  * @author pawlaszc
  *
  */
-public class Carver extends Base {
+public class Carver{
 
 	ByteBuffer block;
 
@@ -61,8 +61,11 @@ public class Carver extends Base {
 	 *
 	 */
 
-	public int carve(int fromidx, int toidx, SerialTypeMatcher mat, int headertype, TableDescriptor tbd) 
+	public int carve(int fromidx, int toidx, SerialTypeMatcher mat, int headertype, AbstractDescriptor tbd) 
 	{
+		if (tbd.serialtypes.size()<2)
+			return 0;
+		
 		Auxiliary c = new Auxiliary(job);
 	
 		switch (headertype) 
@@ -85,12 +88,10 @@ public class Carver extends Base {
 		
 		/* set search region */
 		mat.region(fromidx, toidx);
-
+		
 		/* set pattern to search for */
 		mat.setPattern(tbd.getHpattern());
 		
-		//System.out.println("header pattern: " + tbd.getHpattern());
-
 		LinkedList<Match> matches = new LinkedList<Match>();
 		
 		/* find every match within the given region */
@@ -98,10 +99,51 @@ public class Carver extends Base {
 			
 			/* get the hex-presentation of the match */
 			String m = mat.group2Hex();
+			char[] cmatch = m.toCharArray();
 			
 			/* skip stupid matches - remember - it is just a heuristic */
-			if ((m.length() < 2) || (m.startsWith("00000000")) || (m.startsWith("030000")))
+			if ((m.length() < 2) || (m.startsWith("00")))	
 				  continue;
+		
+			/* skip match xxxxxx0000 */
+			if ((m.length() >= 6) && m.endsWith("0000"))
+				  continue;
+		
+			/* skip matches in first column missing search mode where the second column is a TEXT or BLOB column */
+			/* to many false-positives */
+			if (m.length()>=6)
+				if (headertype == CarverTypes.FIRSTCOLUMNMISSING && (tbd.serialtypes.get(1).equals("TEXT") || tbd.serialtypes.get(1).equals("BLOB")))
+				{
+					List<String> elements = tbd.serialtypes;
+					int gr = elements.size();
+					for(int i=2; i < gr; i++) {
+						if (elements.get(i).equals("INT"))
+							continue;
+					}
+					
+				}
+			/* if there are three zero bytes or even more inside the match -> skip */
+			if (cmatch.length >= 10){
+				int nullbytes = 0;
+				for (int t = 0; t < cmatch.length; t+=2){
+					if(t > 0)
+					{
+						if(cmatch[t]== '0' && cmatch[t-1] == '0') 
+						{
+							nullbytes++;
+						}
+					}	
+				}
+				if(nullbytes >=3){
+					return 0;
+				}
+				
+				
+			}
+			
+			
+			
+			
 			//System.out.println("Bereich: " + ((pagenumber - 1) * job.ps + fromidx) + " "
 			//		+ ((pagenumber - 1) * job.ps + toidx));
 
@@ -122,7 +164,7 @@ public class Carver extends Base {
 			if ((m.length()/2 + Auxiliary.getPayloadLength(m)) > (toidx - fromidx))
 			{
 				
-				System.out.println(" PayloadLength:: " + Auxiliary.getPayloadLength(m) + " > " + (toidx - fromidx));
+				//System.out.println(" PayloadLength:: " + Auxiliary.getPayloadLength(m) + " > " + (toidx - fromidx));
 				// sometimes a match is too long, i.e. 89|19190704, where the first byte belongs to the
 				// length byte of the free block (first column overridden)
 				if (m.startsWith("8")) {
@@ -140,8 +182,7 @@ public class Carver extends Base {
 			else{
 				int abstand = from - 4;
 				if (abstand > 0 && bs.get(from-4)) {
-					System.out.println("Abstand kleiner vier zum letzten Matchh: " + m);
-					
+				   // no action	
 				}
 
 			}
@@ -159,8 +200,8 @@ public class Carver extends Base {
 			}
 			
 			
-			debug("Match (0..NORMAL, 1..NOLENGTH, 2..FIRSTCOLMISSING) : " + headertype);
-			debug("Match: " + m + " on pos:" + ((pagenumber - 1) * job.ps + from));
+			AppLog.debug("Match (0..NORMAL, 1..NOLENGTH, 2..FIRSTCOLMISSING) : " + headertype);
+			AppLog.debug("Match: " + m + " on pos:" + ((pagenumber - 1) * job.ps + from));
 			
 	       	
 			if (headertype == CarverTypes.NORMAL) {
@@ -186,7 +227,7 @@ public class Carver extends Base {
 					if(tbd.serialtypes.get(0).equals("INT"))
 					{
 						m = "XX" + m;
-						System.out.println("XX - column on first place");
+						//System.out.println("XX - column on first place");
 					}
 					else if(tbd.serialtypes.get(0).equals("REAL"))
 					{
@@ -228,7 +269,8 @@ public class Carver extends Base {
 		}
 		
 	   Match[] mm =  matches.toArray(new Match[0]);
-	
+	 
+	   //System.out.println(" Matches in page "+ mm.length);
 		
 		// take all matches in this region and try to recover those data records
 		for (int i = 0; i < mm.length; i++)
@@ -257,13 +299,13 @@ public class Carver extends Base {
 				if (null != record) {
 					
 					record.add(2,Global.DELETED_RECORD_IN_PAGE);
-					record.addFirst(tbd.tblname);
+					record.addFirst(tbd.getName());
 					updateResultSet(record);
 				}
 				
 				
 			} catch (Exception err) {
-				warning("Could not read record" + err.toString());
+				AppLog.warning("Could not read record" + err.toString());
 			}
 			
 		}
