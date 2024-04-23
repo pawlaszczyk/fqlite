@@ -91,6 +91,32 @@ FQLite ist using the following libraries:
 * bplist.jar
 * bson-3.6.0.jar
 * commons-codec-1.15.jar
+* commons-io-2.14.0.jar
+* commons-lang3-3.13.0.jar
+* commons-logging-1.2.jar
+* controlsfx-11.1.2.jar
+* cssfx-11.5.1.jar
+* fontbox-3.0.0.jar
+* hamcrest-core-1.3.jar
+* ikonli-core-12.3.1.jar
+* ikonli-javafx-12.3.1.jar
+* ikonli-materialdesign-pack-12.3.1.jar
+* indriya-2.1.2.jar
+* jackson-annotations-2.16.0.jar
+* jackson-core-2.16.0.jar
+* jackson-databind-2.15.2.jar
+* javax.inject-1.jar
+* junit-4.13.2.jar
+* msgpack-core-0.9.0.jar
+* pdfbox-3.0.0.jar
+* pdfbox-io-3.0.0.jar
+* pdfviewfx-3.0.0.jar
+* readablethrift-1.0.0-all.jar
+* SerializationDumper-v.1.13.jar
+* slf4-api-2.0.9.jar
+* unit-api-2.2.jar
+* unitfx-1.0.10.jar
+* uom-lib-common-2.1.jar
 
 
 
