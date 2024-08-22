@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://schemas.microsoft.com/packaging/2015/06/nuspec.xsd">
+  <metadata>
+    <id>fqlite</id>
+    <version>2.6.5</version>
+    <packageSourceUrl>https://github.com/bocian67/fqlite/releases/download/2.6.5/fqlite-windows-latest</packageSourceUrl>
+    <title>fqlite (Install)</title>
+    <authors>Dirk Pawlaszczyk</authors>
+    <projectUrl>https://github.com/pawlaszczyk/fqlite</projectUrl>
+    <tags>fqlite</tags>
+    <summary>FQLite - Forensic SQLite Data Recovery Tool</summary>
+    <description>FQLite is a tool to find and restore deleted records in SQLite databases. It therefore examines the database for entries marked as deleted. Those entries can be recovered and displayed. It is written in the Java programming language. The program can operate with a simple graphical user interface (GUI mode). The program is able to search a SQLite database file for regular as well as deleted records.</description>
+  </metadata>
+  <files>
+    <!-- this section controls what actually gets packaged into the Chocolatey package -->
+    <file src="tools\**" target="tools" />
+  </files>
+</package>
