@@ -1,83 +1,278 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <classpath>
-	<classpathentry kind="src" path="src"/>
-	<classpathentry kind="lib" path="/Users/pawlaszc/javafx/lib/javafx.base.jar">
+	<classpathentry kind="output" path="bin/default"/>
+	<classpathentry output="bin/main" kind="src" path="src">
 		<attributes>
-			<attribute name="module" value="true"/>
+			<attribute name="gradle_scope" value="main"/>
+			<attribute name="gradle_used_by_scope" value="main,test"/>
 		</attributes>
 	</classpathentry>
-	<classpathentry kind="lib" path="/Users/pawlaszc/javafx/lib/javafx.controls.jar">
+	<classpathentry output="bin/main" kind="src" path="resources">
 		<attributes>
-			<attribute name="module" value="true"/>
+			<attribute name="gradle_scope" value="main"/>
+			<attribute name="gradle_used_by_scope" value="main,test"/>
 		</attributes>
 	</classpathentry>
-	<classpathentry kind="lib" path="/Users/pawlaszc/javafx/lib/javafx.swing.jar">
+	<classpathentry kind="con" path="org.eclipse.jdt.launching.JRE_CONTAINER/org.eclipse.jdt.internal.debug.ui.launcher.StandardVMType/JavaSE-20/"/>
+	<classpathentry sourcepath="/Users/pawlaszc/.gradle/caches/modules-2/files-2.1/org.antlr/antlr4/4.8/4b41d347e47ec0ff391c5b9df419d1a2d59ece5d/antlr4-4.8-sources.jar" kind="lib" path="/Users/pawlaszc/.gradle/caches/modules-2/files-2.1/org.antlr/antlr4/4.8/c5902f3079595a5e73dd6b008340a8197ee1aeda/antlr4-4.8.jar">
 		<attributes>
-			<attribute name="module" value="true"/>
+			<attribute name="gradle_used_by_scope" value="main,test"/>
 		</attributes>
 	</classpathentry>
-	<classpathentry kind="lib" path="/Users/pawlaszc/javafx/lib/javafx.web.jar">
+	<classpathentry sourcepath="/Users/pawlaszc/.gradle/caches/modules-2/files-2.1/org.apache.avro/avro/1.11.1/3338ea2e2aa85917e1c7670c39515bcceecb19cf/avro-1.11.1-sources.jar" kind="lib" path="/Users/pawlaszc/.gradle/caches/modules-2/files-2.1/org.apache.avro/avro/1.11.1/81af5d4b9bdaaf4ba41bcb0df5241355ec34c630/avro-1.11.1.jar">
 		<attributes>
-			<attribute name="module" value="true"/>
+			<attribute name="gradle_used_by_scope" value="main,test"/>
 		</attributes>
 	</classpathentry>
-	<classpathentry kind="lib" path="/Users/pawlaszc/javafx/lib/javafx-swt.jar">
+	<classpathentry sourcepath="/Users/pawlaszc/.gradle/caches/modules-2/files-2.1/nl.pvanassen/bplist/1.0.0/a28643d4e0ef1c1b6fb2a70cac2b4306afeef645/bplist-1.0.0-sources.jar" kind="lib" path="/Users/pawlaszc/.gradle/caches/modules-2/files-2.1/nl.pvanassen/bplist/1.0.0/4b12d6f3b1c60fcf19508857c5f40b1b2279bf/bplist-1.0.0.jar">
 		<attributes>
-			<attribute name="module" value="true"/>
+			<attribute name="gradle_used_by_scope" value="main,test"/>
 		</attributes>
 	</classpathentry>
-	<classpathentry kind="lib" path="/Users/pawlaszc/javafx/lib/javafx.fxml.jar">
+	<classpathentry sourcepath="/Users/pawlaszc/.gradle/caches/modules-2/files-2.1/org.mongodb/bson/3.6.0/a0b4b33b0e86269ae06b5c7c62eed6ba98bd1c53/bson-3.6.0-sources.jar" kind="lib" path="/Users/pawlaszc/.gradle/caches/modules-2/files-2.1/org.mongodb/bson/3.6.0/3234a5c7dba80fcaf0bf9d77d9604ec3daec8bde/bson-3.6.0.jar">
 		<attributes>
-			<attribute name="module" value="true"/>
+			<attribute name="gradle_used_by_scope" value="main,test"/>
 		</attributes>
 	</classpathentry>
-	<classpathentry kind="lib" path="/Users/pawlaszc/javafx/lib/javafx.graphics.jar">
+	<classpathentry sourcepath="/Users/pawlaszc/.gradle/caches/modules-2/files-2.1/trust.nccgroup/readablethrift/1.0.0/21f15a3e4dbdbfa42045645a1eb73bbd3a3ab61c/readablethrift-1.0.0-sources.jar" kind="lib" path="/Users/pawlaszc/.gradle/caches/modules-2/files-2.1/trust.nccgroup/readablethrift/1.0.0/898f77020c46e8169f567128b71c3bab0b4933d7/readablethrift-1.0.0.jar">
 		<attributes>
-			<attribute name="module" value="true"/>
+			<attribute name="gradle_used_by_scope" value="main,test"/>
 		</attributes>
 	</classpathentry>
-	<classpathentry kind="lib" path="/Users/pawlaszc/javafx/lib/javafx.media.jar">
+	<classpathentry sourcepath="/Users/pawlaszc/.gradle/caches/modules-2/files-2.1/org.apache.thrift/libthrift/0.9.3/b1dba1062e44be848e2d8eb24cca16dc701ca2c9/libthrift-0.9.3-sources.jar" kind="lib" path="/Users/pawlaszc/.gradle/caches/modules-2/files-2.1/org.apache.thrift/libthrift/0.9.3/8625e8f9b6f49b881fa5fd143172c2833df1ce47/libthrift-0.9.3.jar">
 		<attributes>
-			<attribute name="module" value="true"/>
+			<attribute name="gradle_used_by_scope" value="main,test"/>
 		</attributes>
 	</classpathentry>
-	<classpathentry kind="lib" path="lib/antlr-4.8-complete.jar"/>
-	<classpathentry kind="lib" path="lib/avro-1.11.1.jar"/>
-	<classpathentry kind="lib" path="lib/bplist.jar"/>
-	<classpathentry kind="lib" path="lib/bson-3.6.0.jar"/>
-	<classpathentry kind="lib" path="lib/commons-codec-1.15.jar"/>
-	<classpathentry kind="lib" path="lib/commons-io-2.14.0.jar"/>
-	<classpathentry kind="lib" path="lib/commons-lang3-3.13.0.jar"/>
-	<classpathentry kind="lib" path="lib/commons-logging-1.2.jar"/>
-	<classpathentry kind="lib" path="lib/controlsfx-11.1.2.jar"/>
-	<classpathentry kind="lib" path="lib/cssfx-11.5.1.jar"/>
-	<classpathentry kind="lib" path="lib/fontbox-3.0.0.jar"/>
-	<classpathentry kind="lib" path="lib/FxTextEditor.jar"/>
-	<classpathentry kind="lib" path="lib/hamcrest-core-1.3.jar"/>
-	<classpathentry kind="lib" path="lib/ikonli-core-12.3.1.jar"/>
-	<classpathentry kind="lib" path="lib/ikonli-javafx-12.3.1.jar"/>
-	<classpathentry kind="lib" path="lib/ikonli-materialdesign-pack-12.3.1.jar"/>
-	<classpathentry kind="lib" path="lib/indriya-2.1.2.jar"/>
-	<classpathentry kind="lib" path="lib/jackson-annotations-2.16.0.jar"/>
-	<classpathentry kind="lib" path="lib/jackson-core-2.16.0.jar"/>
-	<classpathentry kind="lib" path="lib/jackson-databind-2.15.2.jar"/>
-	<classpathentry kind="lib" path="lib/javax.inject-1.jar"/>
-	<classpathentry kind="lib" path="lib/junit-4.13.2.jar"/>
-	<classpathentry kind="lib" path="lib/msgpack-core-0.9.0.jar"/>
-	<classpathentry kind="lib" path="lib/pdfbox-3.0.0.jar"/>
-	<classpathentry kind="lib" path="lib/pdfbox-io-3.0.0.jar"/>
-	<classpathentry kind="lib" path="lib/pdfviewfx-3.0.0.jar"/>
-	<classpathentry kind="lib" path="lib/readablethrift-1.0.0-all.jar"/>
-	<classpathentry kind="lib" path="lib/SerializationDumper-v1.13.jar"/>
-	<classpathentry kind="lib" path="lib/slf4j-api-2.0.9.jar"/>
-	<classpathentry kind="lib" path="lib/unit-api-2.2.jar"/>
-	<classpathentry kind="lib" path="lib/unitfx-1.0.10.jar"/>
-	<classpathentry kind="lib" path="lib/uom-lib-common-2.1.jar"/>
-	<classpathentry kind="con" path="org.eclipse.jdt.launching.JRE_CONTAINER/org.eclipse.jdt.internal.launching.macosx.MacOSXType/Java SE 20.0.2 [20.0.2]">
+	<classpathentry sourcepath="/Users/pawlaszc/.gradle/caches/modules-2/files-2.1/org.apache.httpcomponents/httpclient/4.4.1/30cb4791019c7280227e027b01814f4964a02482/httpclient-4.4.1-sources.jar" kind="lib" path="/Users/pawlaszc/.gradle/caches/modules-2/files-2.1/org.apache.httpcomponents/httpclient/4.4.1/16d0bc512222f1253ee6b64d389c84e22f697f0/httpclient-4.4.1.jar">
 		<attributes>
-			<attribute name="module" value="true"/>
+			<attribute name="gradle_used_by_scope" value="main,test"/>
 		</attributes>
 	</classpathentry>
-	<classpathentry kind="lib" path="lib/dd-plist.jar"/>
-	<classpathentry kind="output" path="bin"/>
+	<classpathentry sourcepath="/Users/pawlaszc/.gradle/caches/modules-2/files-2.1/commons-codec/commons-codec/1.15/843bc57fd042051e994846da8167bb7ca677a6d/commons-codec-1.15-sources.jar" kind="lib" path="/Users/pawlaszc/.gradle/caches/modules-2/files-2.1/commons-codec/commons-codec/1.15/49d94806b6e3dc933dacbd8acb0fdbab8ebd1e5d/commons-codec-1.15.jar">
+		<attributes>
+			<attribute name="gradle_used_by_scope" value="main,test"/>
+		</attributes>
+	</classpathentry>
+	<classpathentry sourcepath="/Users/pawlaszc/.gradle/caches/modules-2/files-2.1/commons-io/commons-io/2.14.0/7a5c8a697e57ca924db3b437776e11c1aba951b9/commons-io-2.14.0-sources.jar" kind="lib" path="/Users/pawlaszc/.gradle/caches/modules-2/files-2.1/commons-io/commons-io/2.14.0/a4c6e1f6c196339473cd2e1b037f0eb97c62755b/commons-io-2.14.0.jar">
+		<attributes>
+			<attribute name="gradle_used_by_scope" value="main,test"/>
+		</attributes>
+	</classpathentry>
+	<classpathentry sourcepath="/Users/pawlaszc/.gradle/caches/modules-2/files-2.1/com.dlsc.pdfviewfx/pdfviewfx/3.0.0/647a0626ed7632be8abb73d52b5a2590bbbac9e8/pdfviewfx-3.0.0-sources.jar" kind="lib" path="/Users/pawlaszc/.gradle/caches/modules-2/files-2.1/com.dlsc.pdfviewfx/pdfviewfx/3.0.0/8adc7e794ed244d7fd054f5882e61226b819f620/pdfviewfx-3.0.0.jar">
+		<attributes>
+			<attribute name="gradle_used_by_scope" value="main,test"/>
+		</attributes>
+	</classpathentry>
+	<classpathentry sourcepath="/Users/pawlaszc/.gradle/caches/modules-2/files-2.1/org.apache.commons/commons-lang3/3.13.0/c035e3c80a649b8a1b2e533ff69317304accb247/commons-lang3-3.13.0-sources.jar" kind="lib" path="/Users/pawlaszc/.gradle/caches/modules-2/files-2.1/org.apache.commons/commons-lang3/3.13.0/b7263237aa89c1f99b327197c41d0669707a462e/commons-lang3-3.13.0.jar">
+		<attributes>
+			<attribute name="gradle_used_by_scope" value="main,test"/>
+		</attributes>
+	</classpathentry>
+	<classpathentry sourcepath="/Users/pawlaszc/.gradle/caches/modules-2/files-2.1/org.apache.pdfbox/pdfbox/3.0.0/76fd8881da7028154f32275598bf03e39ae013b3/pdfbox-3.0.0-sources.jar" kind="lib" path="/Users/pawlaszc/.gradle/caches/modules-2/files-2.1/org.apache.pdfbox/pdfbox/3.0.0/8903a0ddcdcb138b335ac4cd08d4923eb4163b8f/pdfbox-3.0.0.jar">
+		<attributes>
+			<attribute name="gradle_used_by_scope" value="main,test"/>
+		</attributes>
+	</classpathentry>
+	<classpathentry sourcepath="/Users/pawlaszc/.gradle/caches/modules-2/files-2.1/org.apache.pdfbox/fontbox/3.0.0/1a1bcd4bc0fb74dd151315de85f2028151257532/fontbox-3.0.0-sources.jar" kind="lib" path="/Users/pawlaszc/.gradle/caches/modules-2/files-2.1/org.apache.pdfbox/fontbox/3.0.0/ea02f9341689fb275f7b1969de51669d618a1d6f/fontbox-3.0.0.jar">
+		<attributes>
+			<attribute name="gradle_used_by_scope" value="main,test"/>
+		</attributes>
+	</classpathentry>
+	<classpathentry sourcepath="/Users/pawlaszc/.gradle/caches/modules-2/files-2.1/org.apache.pdfbox/pdfbox-io/3.0.0/f3038e3e33135d09a7526c979176a0d414528007/pdfbox-io-3.0.0-sources.jar" kind="lib" path="/Users/pawlaszc/.gradle/caches/modules-2/files-2.1/org.apache.pdfbox/pdfbox-io/3.0.0/14d85db521aa4f0b56dde0d90204d0973d92537/pdfbox-io-3.0.0.jar">
+		<attributes>
+			<attribute name="gradle_used_by_scope" value="main,test"/>
+		</attributes>
+	</classpathentry>
+	<classpathentry sourcepath="/Users/pawlaszc/.gradle/caches/modules-2/files-2.1/commons-logging/commons-logging/1.2/ecf26c7507d67782a3bbd148d170b31dfad001aa/commons-logging-1.2-sources.jar" kind="lib" path="/Users/pawlaszc/.gradle/caches/modules-2/files-2.1/commons-logging/commons-logging/1.2/4bfc12adfe4842bf07b657f0369c4cb522955686/commons-logging-1.2.jar">
+		<attributes>
+			<attribute name="gradle_used_by_scope" value="main,test"/>
+		</attributes>
+	</classpathentry>
+	<classpathentry sourcepath="/Users/pawlaszc/.gradle/caches/modules-2/files-2.1/org.controlsfx/controlsfx/11.1.2/a5370e3b3a186df4287922c49a0554122ff9908c/controlsfx-11.1.2-sources.jar" kind="lib" path="/Users/pawlaszc/.gradle/caches/modules-2/files-2.1/org.controlsfx/controlsfx/11.1.2/584bc3f468e2c33100fcdbb1daf0a3e095e5e031/controlsfx-11.1.2.jar">
+		<attributes>
+			<attribute name="gradle_used_by_scope" value="main,test"/>
+		</attributes>
+	</classpathentry>
+	<classpathentry sourcepath="/Users/pawlaszc/.gradle/caches/modules-2/files-2.1/fr.brouillard.oss/cssfx/11.5.1/9dc8613a1f8b730e13f75c2ef7f63baee75116f6/cssfx-11.5.1-sources.jar" kind="lib" path="/Users/pawlaszc/.gradle/caches/modules-2/files-2.1/fr.brouillard.oss/cssfx/11.5.1/6436a846013e688b5016bd7a9b1aea616b4a4adb/cssfx-11.5.1.jar">
+		<attributes>
+			<attribute name="gradle_used_by_scope" value="main,test"/>
+		</attributes>
+	</classpathentry>
+	<classpathentry sourcepath="/Users/pawlaszc/.gradle/caches/modules-2/files-2.1/org.kordamp.ikonli/ikonli-javafx/12.3.1/b86ebf097a552c72c4ea729703118e879e440042/ikonli-javafx-12.3.1-sources.jar" kind="lib" path="/Users/pawlaszc/.gradle/caches/modules-2/files-2.1/org.kordamp.ikonli/ikonli-javafx/12.3.1/6df78c8f23f4509f88b8e05c32da64b7dc494356/ikonli-javafx-12.3.1.jar">
+		<attributes>
+			<attribute name="gradle_used_by_scope" value="main,test"/>
+		</attributes>
+	</classpathentry>
+	<classpathentry sourcepath="/Users/pawlaszc/.gradle/caches/modules-2/files-2.1/org.kordamp.ikonli/ikonli-materialdesign-pack/12.3.1/bdba0c09938d459e224b8be354dd1ba3d1a281b7/ikonli-materialdesign-pack-12.3.1-sources.jar" kind="lib" path="/Users/pawlaszc/.gradle/caches/modules-2/files-2.1/org.kordamp.ikonli/ikonli-materialdesign-pack/12.3.1/c43817e06f255d55f4ef336ac3352c4948d727d7/ikonli-materialdesign-pack-12.3.1.jar">
+		<attributes>
+			<attribute name="gradle_used_by_scope" value="main,test"/>
+		</attributes>
+	</classpathentry>
+	<classpathentry sourcepath="/Users/pawlaszc/.gradle/caches/modules-2/files-2.1/org.kordamp.ikonli/ikonli-core/12.3.1/9ffba8c7ebe94447313bc51f2204f4035d1c037/ikonli-core-12.3.1-sources.jar" kind="lib" path="/Users/pawlaszc/.gradle/caches/modules-2/files-2.1/org.kordamp.ikonli/ikonli-core/12.3.1/50c5658c1a5aeeec30320c6be71274d01f5fb869/ikonli-core-12.3.1.jar">
+		<attributes>
+			<attribute name="gradle_used_by_scope" value="main,test"/>
+		</attributes>
+	</classpathentry>
+	<classpathentry sourcepath="/Users/pawlaszc/.gradle/caches/modules-2/files-2.1/com.dlsc.unitfx/unitfx/1.0.10/d820b8d751e28975a717c5251de5de1956384239/unitfx-1.0.10-sources.jar" kind="lib" path="/Users/pawlaszc/.gradle/caches/modules-2/files-2.1/com.dlsc.unitfx/unitfx/1.0.10/c15fdfc8581d931beaf7236c67b708bf6f5e3853/unitfx-1.0.10.jar">
+		<attributes>
+			<attribute name="gradle_used_by_scope" value="main,test"/>
+		</attributes>
+	</classpathentry>
+	<classpathentry sourcepath="/Users/pawlaszc/.gradle/caches/modules-2/files-2.1/tech.units/indriya/2.1.2/cf0e438d2a7e29add6248772eb0929df30a04864/indriya-2.1.2-sources.jar" kind="lib" path="/Users/pawlaszc/.gradle/caches/modules-2/files-2.1/tech.units/indriya/2.1.2/31afb77912c91dc3851e40744a98bd1af06ce939/indriya-2.1.2.jar">
+		<attributes>
+			<attribute name="gradle_used_by_scope" value="main,test"/>
+		</attributes>
+	</classpathentry>
+	<classpathentry sourcepath="/Users/pawlaszc/.gradle/caches/modules-2/files-2.1/com.fasterxml.jackson.core/jackson-databind/2.16.0/760c7eb18b5e49ab091f779c39718f4f83cf8ad0/jackson-databind-2.16.0-sources.jar" kind="lib" path="/Users/pawlaszc/.gradle/caches/modules-2/files-2.1/com.fasterxml.jackson.core/jackson-databind/2.16.0/3a6b7f8ff7b30d518bbd65678e9c30cd881f19a7/jackson-databind-2.16.0.jar">
+		<attributes>
+			<attribute name="gradle_used_by_scope" value="main,test"/>
+		</attributes>
+	</classpathentry>
+	<classpathentry sourcepath="/Users/pawlaszc/.gradle/caches/modules-2/files-2.1/com.fasterxml.jackson.core/jackson-core/2.16.0/a463ccaf648808982a2f28f836f23d0bebb41077/jackson-core-2.16.0-sources.jar" kind="lib" path="/Users/pawlaszc/.gradle/caches/modules-2/files-2.1/com.fasterxml.jackson.core/jackson-core/2.16.0/899e5cf01be55fbf094ad72b2edb0c5df99111ee/jackson-core-2.16.0.jar">
+		<attributes>
+			<attribute name="gradle_used_by_scope" value="main,test"/>
+		</attributes>
+	</classpathentry>
+	<classpathentry sourcepath="/Users/pawlaszc/.gradle/caches/modules-2/files-2.1/com.fasterxml.jackson.core/jackson-annotations/2.16.0/cfc26398e79aceeb6dc35dc586658883969a8606/jackson-annotations-2.16.0-sources.jar" kind="lib" path="/Users/pawlaszc/.gradle/caches/modules-2/files-2.1/com.fasterxml.jackson.core/jackson-annotations/2.16.0/dc30995f7428c0a405eba9b8c619b20d2b3b9905/jackson-annotations-2.16.0.jar">
+		<attributes>
+			<attribute name="gradle_used_by_scope" value="main,test"/>
+		</attributes>
+	</classpathentry>
+	<classpathentry sourcepath="/Users/pawlaszc/.gradle/caches/modules-2/files-2.1/tech.uom.lib/uom-lib-common/2.1/7c6475c0b3e350a3750508130fa2d566c033df20/uom-lib-common-2.1-sources.jar" kind="lib" path="/Users/pawlaszc/.gradle/caches/modules-2/files-2.1/tech.uom.lib/uom-lib-common/2.1/17d8a4458116466b004976f3c7834be185cffb86/uom-lib-common-2.1.jar">
+		<attributes>
+			<attribute name="gradle_used_by_scope" value="main,test"/>
+		</attributes>
+	</classpathentry>
+	<classpathentry sourcepath="/Users/pawlaszc/.gradle/caches/modules-2/files-2.1/javax.inject/javax.inject/1/a00123f261762a7c5e0ec916a2c7c8298d29c400/javax.inject-1-sources.jar" kind="lib" path="/Users/pawlaszc/.gradle/caches/modules-2/files-2.1/javax.inject/javax.inject/1/6975da39a7040257bd51d21a231b76c915872d38/javax.inject-1.jar">
+		<attributes>
+			<attribute name="gradle_used_by_scope" value="main,test"/>
+		</attributes>
+	</classpathentry>
+	<classpathentry sourcepath="/Users/pawlaszc/.gradle/caches/modules-2/files-2.1/org.msgpack/msgpack-core/0.9.0/f4e97a691e61b33baba0b26de4804abb71216735/msgpack-core-0.9.0-sources.jar" kind="lib" path="/Users/pawlaszc/.gradle/caches/modules-2/files-2.1/org.msgpack/msgpack-core/0.9.0/87d9ce0b22de48428fa32bb8ad476e18b6969548/msgpack-core-0.9.0.jar">
+		<attributes>
+			<attribute name="gradle_used_by_scope" value="main,test"/>
+		</attributes>
+	</classpathentry>
+	<classpathentry sourcepath="/Users/pawlaszc/.gradle/caches/modules-2/files-2.1/org.slf4j/slf4j-api/2.0.9/97e46b94d70f47892145e09d685461245584d596/slf4j-api-2.0.9-sources.jar" kind="lib" path="/Users/pawlaszc/.gradle/caches/modules-2/files-2.1/org.slf4j/slf4j-api/2.0.9/7cf2726fdcfbc8610f9a71fb3ed639871f315340/slf4j-api-2.0.9.jar">
+		<attributes>
+			<attribute name="gradle_used_by_scope" value="main,test"/>
+		</attributes>
+	</classpathentry>
+	<classpathentry sourcepath="/Users/pawlaszc/.gradle/caches/modules-2/files-2.1/javax.measure/unit-api/2.2/fd7354bd69048d8d9fbf4f2d039467c038f2b8a/unit-api-2.2-sources.jar" kind="lib" path="/Users/pawlaszc/.gradle/caches/modules-2/files-2.1/javax.measure/unit-api/2.2/2b624f7334b94a82c74cb954ede9fb1179b8d30c/unit-api-2.2.jar">
+		<attributes>
+			<attribute name="gradle_used_by_scope" value="main,test"/>
+		</attributes>
+	</classpathentry>
+	<classpathentry sourcepath="/Users/pawlaszc/.gradle/caches/modules-2/files-2.1/org.openjfx/javafx-fxml/21/d70c016501bff28eca7b0013c8472b97b61355dc/javafx-fxml-21-sources.jar" kind="lib" path="/Users/pawlaszc/.gradle/caches/modules-2/files-2.1/org.openjfx/javafx-fxml/21/92d01c295524cd122aad73468e9b92a0c20ed32f/javafx-fxml-21-mac-aarch64.jar">
+		<attributes>
+			<attribute name="gradle_used_by_scope" value="main,test"/>
+		</attributes>
+	</classpathentry>
+	<classpathentry sourcepath="/Users/pawlaszc/.gradle/caches/modules-2/files-2.1/org.openjfx/javafx-web/21/38b98eaba1f2a354e7c0e5cae233293eb7bae1e3/javafx-web-21-sources.jar" kind="lib" path="/Users/pawlaszc/.gradle/caches/modules-2/files-2.1/org.openjfx/javafx-web/21/df7e15f8a013199b7ce2400341319f6f8d6e5030/javafx-web-21-mac-aarch64.jar">
+		<attributes>
+			<attribute name="gradle_used_by_scope" value="main,test"/>
+		</attributes>
+	</classpathentry>
+	<classpathentry sourcepath="/Users/pawlaszc/.gradle/caches/modules-2/files-2.1/org.openjfx/javafx-controls/21/53ec71c0d97395fb7393ea6f98749a68fc821b66/javafx-controls-21-sources.jar" kind="lib" path="/Users/pawlaszc/.gradle/caches/modules-2/files-2.1/org.openjfx/javafx-controls/21/4ae8af1f581516e6d557462508de19fd3d54549a/javafx-controls-21-mac-aarch64.jar">
+		<attributes>
+			<attribute name="gradle_used_by_scope" value="main,test"/>
+		</attributes>
+	</classpathentry>
+	<classpathentry sourcepath="/Users/pawlaszc/.gradle/caches/modules-2/files-2.1/org.openjfx/javafx-media/21/25a756f6a4b969ba31e9f54b096d16bd3c3ad77b/javafx-media-21-sources.jar" kind="lib" path="/Users/pawlaszc/.gradle/caches/modules-2/files-2.1/org.openjfx/javafx-media/21/98a46f050303e531a9e7c1b9b3cfff6952c87f71/javafx-media-21-mac-aarch64.jar">
+		<attributes>
+			<attribute name="gradle_used_by_scope" value="main,test"/>
+		</attributes>
+	</classpathentry>
+	<classpathentry sourcepath="/Users/pawlaszc/.gradle/caches/modules-2/files-2.1/org.openjfx/javafx-swing/21/8dd200a41cd9735ed718173b8a49a2caa6d4cdee/javafx-swing-21-sources.jar" kind="lib" path="/Users/pawlaszc/.gradle/caches/modules-2/files-2.1/org.openjfx/javafx-swing/21/ce7c0ff68ede60047ab7778d675d7632cd27dba2/javafx-swing-21-mac-aarch64.jar">
+		<attributes>
+			<attribute name="gradle_used_by_scope" value="main,test"/>
+		</attributes>
+	</classpathentry>
+	<classpathentry sourcepath="/Users/pawlaszc/.gradle/caches/modules-2/files-2.1/org.openjfx/javafx-graphics/21/30e3c2c91eea517ce3e21c629d6cfa4cba217c95/javafx-graphics-21-sources.jar" kind="lib" path="/Users/pawlaszc/.gradle/caches/modules-2/files-2.1/org.openjfx/javafx-graphics/21/f4ef235350a3cd3c4903b984d6a1684ad053e917/javafx-graphics-21-mac-aarch64.jar">
+		<attributes>
+			<attribute name="gradle_used_by_scope" value="main,test"/>
+		</attributes>
+	</classpathentry>
+	<classpathentry sourcepath="/Users/pawlaszc/.gradle/caches/modules-2/files-2.1/org.openjfx/javafx-base/21/594c03146fee3f6d6dec492ab71e5858637be5ef/javafx-base-21-sources.jar" kind="lib" path="/Users/pawlaszc/.gradle/caches/modules-2/files-2.1/org.openjfx/javafx-base/21/510ca6433bb1596409eadc56bcd0c08b9c69696b/javafx-base-21-mac-aarch64.jar">
+		<attributes>
+			<attribute name="gradle_used_by_scope" value="main,test"/>
+		</attributes>
+	</classpathentry>
+	<classpathentry sourcepath="/Users/pawlaszc/.gradle/caches/modules-2/files-2.1/org.antlr/antlr4-runtime/4.8/94c809b4b29795252d3fcc286a444c98baf05da4/antlr4-runtime-4.8-sources.jar" kind="lib" path="/Users/pawlaszc/.gradle/caches/modules-2/files-2.1/org.antlr/antlr4-runtime/4.8/7fe453b678b71c87c6677cef26f6b0cd96b26586/antlr4-runtime-4.8.jar">
+		<attributes>
+			<attribute name="gradle_used_by_scope" value="main,test"/>
+		</attributes>
+	</classpathentry>
+	<classpathentry sourcepath="/Users/pawlaszc/.gradle/caches/modules-2/files-2.1/org.antlr/ST4/4.3/f5c1c1b500028db7d102067b8e0f3e15f685cbec/ST4-4.3-sources.jar" kind="lib" path="/Users/pawlaszc/.gradle/caches/modules-2/files-2.1/org.antlr/ST4/4.3/92f2c1ad8d84abcbeead6cf7f2c53a04166293c2/ST4-4.3.jar">
+		<attributes>
+			<attribute name="gradle_used_by_scope" value="main,test"/>
+		</attributes>
+	</classpathentry>
+	<classpathentry sourcepath="/Users/pawlaszc/.gradle/caches/modules-2/files-2.1/org.antlr/antlr-runtime/3.5.2/5214ea45dd20d3a2e4caa6f1ad2248ad107e0daf/antlr-runtime-3.5.2-sources.jar" kind="lib" path="/Users/pawlaszc/.gradle/caches/modules-2/files-2.1/org.antlr/antlr-runtime/3.5.2/cd9cd41361c155f3af0f653009dcecb08d8b4afd/antlr-runtime-3.5.2.jar">
+		<attributes>
+			<attribute name="gradle_used_by_scope" value="main,test"/>
+		</attributes>
+	</classpathentry>
+	<classpathentry sourcepath="/Users/pawlaszc/.gradle/caches/modules-2/files-2.1/org.abego.treelayout/org.abego.treelayout.core/1.0.3/98d31576a54fd48dabf1fcf67a311dd9f0e4f66e/org.abego.treelayout.core-1.0.3-sources.jar" kind="lib" path="/Users/pawlaszc/.gradle/caches/modules-2/files-2.1/org.abego.treelayout/org.abego.treelayout.core/1.0.3/457216e8e6578099ae63667bb1e4439235892028/org.abego.treelayout.core-1.0.3.jar">
+		<attributes>
+			<attribute name="gradle_used_by_scope" value="main,test"/>
+		</attributes>
+	</classpathentry>
+	<classpathentry sourcepath="/Users/pawlaszc/.gradle/caches/modules-2/files-2.1/org.glassfish/javax.json/1.0.4/ef782abad0d3f1d30644c4023a6bbc6fe371e23a/javax.json-1.0.4-sources.jar" kind="lib" path="/Users/pawlaszc/.gradle/caches/modules-2/files-2.1/org.glassfish/javax.json/1.0.4/3178f73569fd7a1e5ffc464e680f7a8cc784b85a/javax.json-1.0.4.jar">
+		<attributes>
+			<attribute name="gradle_used_by_scope" value="main,test"/>
+		</attributes>
+	</classpathentry>
+	<classpathentry sourcepath="/Users/pawlaszc/.gradle/caches/modules-2/files-2.1/com.ibm.icu/icu4j/61.1/df1b5d109cd3734abc5ea028b48c67b5a1a44365/icu4j-61.1-sources.jar" kind="lib" path="/Users/pawlaszc/.gradle/caches/modules-2/files-2.1/com.ibm.icu/icu4j/61.1/28d33b5e44e72edcc66a5da7a34a42147f38d987/icu4j-61.1.jar">
+		<attributes>
+			<attribute name="gradle_used_by_scope" value="main,test"/>
+		</attributes>
+	</classpathentry>
+	<classpathentry sourcepath="/Users/pawlaszc/.gradle/caches/modules-2/files-2.1/org.apache.commons/commons-compress/1.21/b3e0a269baa0d05b02f9b4447be463d25da8c097/commons-compress-1.21-sources.jar" kind="lib" path="/Users/pawlaszc/.gradle/caches/modules-2/files-2.1/org.apache.commons/commons-compress/1.21/4ec95b60d4e86b5c95a0e919cb172a0af98011ef/commons-compress-1.21.jar">
+		<attributes>
+			<attribute name="gradle_used_by_scope" value="main,test"/>
+		</attributes>
+	</classpathentry>
+	<classpathentry sourcepath="/Users/pawlaszc/.gradle/caches/modules-2/files-2.1/junit/junit/4.11/28e0ad201304e4a4abf999ca0570b7cffc352c3c/junit-4.11-sources.jar" kind="lib" path="/Users/pawlaszc/.gradle/caches/modules-2/files-2.1/junit/junit/4.11/4e031bb61df09069aeb2bffb4019e7a5034a4ee0/junit-4.11.jar">
+		<attributes>
+			<attribute name="gradle_used_by_scope" value="main"/>
+		</attributes>
+	</classpathentry>
+	<classpathentry sourcepath="/Users/pawlaszc/.gradle/caches/modules-2/files-2.1/org.json/json/20160810/92f4b89bc0bb4c7c3f7b52724568a901b7e0195b/json-20160810-sources.jar" kind="lib" path="/Users/pawlaszc/.gradle/caches/modules-2/files-2.1/org.json/json/20160810/aca5eb39e2a12fddd6c472b240afe9ebea3a6733/json-20160810.jar">
+		<attributes>
+			<attribute name="gradle_used_by_scope" value="main,test"/>
+		</attributes>
+	</classpathentry>
+	<classpathentry sourcepath="/Users/pawlaszc/.gradle/caches/modules-2/files-2.1/org.hamcrest/hamcrest-core/1.3/1dc37250fbc78e23a65a67fbbaf71d2e9cbc3c0b/hamcrest-core-1.3-sources.jar" kind="lib" path="/Users/pawlaszc/.gradle/caches/modules-2/files-2.1/org.hamcrest/hamcrest-core/1.3/42a25dc3219429f0e5d060061f71acb49bf010a0/hamcrest-core-1.3.jar">
+		<attributes>
+			<attribute name="gradle_used_by_scope" value="main,test"/>
+		</attributes>
+	</classpathentry>
+	<classpathentry sourcepath="/Users/pawlaszc/.gradle/caches/modules-2/files-2.1/org.apache.httpcomponents/httpcore/4.4.1/9700be0d0a331691654a8e901943c9a74e33c5fc/httpcore-4.4.1-sources.jar" kind="lib" path="/Users/pawlaszc/.gradle/caches/modules-2/files-2.1/org.apache.httpcomponents/httpcore/4.4.1/f5aa318bda4c6c8d688c9d00b90681dcd82ce636/httpcore-4.4.1.jar">
+		<attributes>
+			<attribute name="gradle_used_by_scope" value="main,test"/>
+		</attributes>
+	</classpathentry>
+	<classpathentry sourcepath="/Users/pawlaszc/.gradle/caches/modules-2/files-2.1/junit/junit/4.13.2/33987872a811fe4d4001ed494b07854822257f42/junit-4.13.2-sources.jar" kind="lib" path="/Users/pawlaszc/.gradle/caches/modules-2/files-2.1/junit/junit/4.13.2/8ac9e16d933b6fb43bc7f576336b8f4d7eb5ba12/junit-4.13.2.jar">
+		<attributes>
+			<attribute name="gradle_used_by_scope" value="test"/>
+			<attribute name="test" value="true"/>
+		</attributes>
+	</classpathentry>
+	<classpathentry kind="lib" path="/Users/pawlaszc/Downloads/fqlite-master 2/lib/FxTextEditor.jar">
+		<attributes>
+			<attribute name="gradle_used_by_scope" value="main,test"/>
+		</attributes>
+	</classpathentry>
+	<classpathentry kind="lib" path="/Users/pawlaszc/Downloads/fqlite-master 2/lib/SerializationDumper-v1.13.jar">
+		<attributes>
+			<attribute name="gradle_used_by_scope" value="main,test"/>
+		</attributes>
+	</classpathentry>
+	<classpathentry kind="lib" path="/Users/pawlaszc/Downloads/fqlite-master 2/lib/javafx-swt.jar">
+		<attributes>
+			<attribute name="gradle_used_by_scope" value="main,test"/>
+		</attributes>
+	</classpathentry>
 </classpath>
