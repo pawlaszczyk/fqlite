@@ -1,6 +1,6 @@
 name: Build Application
-on:
-  pull_request:
+on: 
+  workflow_dispatch:
     branches:
       - 'master'
     types:
