@@ -147,15 +147,4 @@ jobs:
           make_latest: true
           files: |
             artifacts/*
-      - name: Upload files to FTP Server
-        uses: Dylan700/sftp-upload-action@latest
-        with:
-          server: ${{ secrets.FTP_SERVER }}
-          username: ${{ secrets.FTP_USERNAME }}
-          password: ${{ secrets.FTP_PASSWORD }}
-          port: 22
-          delete: 'true'
-          ignore: |
-            *.nupkg
-          uploads: |
-            artifacts/ => ${{ secrets.FTP_UPLOAD_PATH }}
+     
