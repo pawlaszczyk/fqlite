@@ -155,6 +155,7 @@ dependencies {
     implementation files('lib/FxTextEditor.jar')
     implementation files('lib/SerializationDumper-v1.13.jar')
     implementation files('lib/javafx-swt.jar')
+    implementation files('lib/dd-plist.jar')
 
     testImplementation group: 'junit', name: 'junit', version: '4.13.2'
 }
