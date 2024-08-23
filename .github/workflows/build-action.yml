@@ -3,10 +3,7 @@ on:
   workflow_dispatch:
     branches:
       - 'master'
-    types:
-      - closed
-      - synchronize
-      - opened
+    
 jobs:
   get-version:
     name: Get project version
