@@ -27,6 +27,9 @@ sourceSets {
         resources {
             srcDirs "resources"
         }
+        protoc {
+            srcDirs ["protoc"]
+        }
     }
 }
 
