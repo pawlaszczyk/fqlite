@@ -158,4 +158,19 @@ dependencies {
     implementation files('lib/dd-plist.jar') 
 
     testImplementation group: 'junit', name: 'junit', version: '4.13.2'
+    
+    CopySpec protocAssetsSpec = copySpec {
+    	from 'protoc'    
+	}
+
+	tasks.register('copyAssets', Copy) {
+    	into layout.buildDirectory.dir("protoc")
+    	with protocAssetsSpec
+	}
+
+	tasks.register('copyProtoRun', Copy) {
+    	from layout.buildDirectory.file("proto.run"), layout.projectDirectory.file("protoc.bat")
+    	into layout.buildDirectory.dir("protoc")
+	}
+    
 }
