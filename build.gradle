@@ -19,6 +19,10 @@ repositories {
     mavenCentral()
 }
 
+plugins {
+  id "com.google.protobuf" version "0.9.5-SNAPSHOT"
+}
+
 sourceSets {
     main {
         java {
