@@ -1,6 +1,7 @@
 // https://github.com/beryx/fxgl-sliding-puzzle/blob/master/.github/workflows/gradle.yml
 
 plugins {
+    id 'base'
     id 'java'
     id 'java-library'
     id 'application'
@@ -20,7 +21,6 @@ application {
 repositories {
     mavenCentral()
 }
-
 
 
 sourceSets {
@@ -152,6 +152,7 @@ dependencies {
 	implementation group: 'com.google.protobuf', name: 'protobuf-java', version: '3.19.1'
     implementation group: 'com.google.protobuf', name: 'protobuf-java-util', version: '3.19.1'
 	implementation 'com.google.protobuf:protobuf-gradle-plugin:0.8.18'
+	implementation group: 'com.google.protobuf', name: 'protoc', version: '4.27.3'
 
     //implementation group: 'org.openjfx', name: 'javafx-base', version: '17.0.8'
     //implementation group: 'org.openjfx', name: 'javafx-controls', version: '17.0.8'
@@ -166,6 +167,14 @@ dependencies {
     implementation files('lib/dd-plist.jar') 
 
     testImplementation group: 'junit', name: 'junit', version: '4.13.2'
-
     
+   
 }
+
+
+
+
+
+
+
+
