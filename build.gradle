@@ -7,6 +7,7 @@ plugins {
     id 'org.openjfx.javafxplugin' version '0.1.0'
     id 'org.beryx.runtime' version '1.13.1'
     id 'com.google.protobuf' version '0.9.4'
+    
 }
 
 group 'org.example'
@@ -147,6 +148,10 @@ dependencies {
     implementation group: 'com.dlsc.unitfx', name: 'unitfx', version: '1.0.10'
     implementation group: 'tech.uom.lib', name: 'uom-lib-common', version: '2.1'
 	implementation group: 'org.openjfx', name: 'javafx-controls', version: '11.0.1'
+	
+	implementation group: 'com.google.protobuf', name: 'protobuf-java', version: '3.19.1'
+    implementation group: 'com.google.protobuf', name: 'protobuf-java-util', version: '3.19.1'
+	implementation 'com.google.protobuf:protobuf-gradle-plugin:0.8.18'
 
     //implementation group: 'org.openjfx', name: 'javafx-base', version: '17.0.8'
     //implementation group: 'org.openjfx', name: 'javafx-controls', version: '17.0.8'
@@ -161,8 +166,6 @@ dependencies {
     implementation files('lib/dd-plist.jar') 
 
     testImplementation group: 'junit', name: 'junit', version: '4.13.2'
-
-
 
     
 }
