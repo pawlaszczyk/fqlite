@@ -6,10 +6,11 @@ plugins {
     id 'application'
     id 'org.openjfx.javafxplugin' version '0.1.0'
     id 'org.beryx.runtime' version '1.13.1'
+    id 'com.google.protobuf' version '0.9.4'
 }
 
 group 'org.example'
-version '2.7.1'
+version '3.0'
 
 application {
     mainClassName = "fqlite.base.JARStarter"
@@ -19,8 +20,9 @@ repositories {
     mavenCentral()
 }
 
+
 sourceSets {
-    main {
+    main { 
         java {
             srcDirs = ['src']
         }
@@ -143,6 +145,7 @@ dependencies {
     implementation group: 'javax.measure', name: 'unit-api', version: '2.2'
     implementation group: 'com.dlsc.unitfx', name: 'unitfx', version: '1.0.10'
     implementation group: 'tech.uom.lib', name: 'uom-lib-common', version: '2.1'
+	implementation group: 'org.openjfx', name: 'javafx-controls', version: '11.0.1'
 
     //implementation group: 'org.openjfx', name: 'javafx-base', version: '17.0.8'
     //implementation group: 'org.openjfx', name: 'javafx-controls', version: '17.0.8'
@@ -154,23 +157,11 @@ dependencies {
 
     implementation files('lib/FxTextEditor.jar')
     implementation files('lib/SerializationDumper-v1.13.jar')
-    implementation files('lib/javafx-swt.jar')
     implementation files('lib/dd-plist.jar') 
 
     testImplementation group: 'junit', name: 'junit', version: '4.13.2'
-    
-    CopySpec protocAssetsSpec = copySpec {
-    	from 'protoc'    
-	}
 
-	tasks.register('copyAssets', Copy) {
-    	into layout.buildDirectory.dir("protoc")
-    	with protocAssetsSpec
-	}
 
-	tasks.register('copyProtoRun', Copy) {
-    	from layout.buildDirectory.file("proto.run"), layout.projectDirectory.file("protoc.bat")
-    	into layout.buildDirectory.dir("protoc")
-	}
+
     
 }
