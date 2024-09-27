@@ -10,8 +10,8 @@ public class Global {
 	public static final String FREELIST_ENTRY = "F"; // U267D - freelist
 	public static final String STATUS_CLOMUN = "S"; // U291D U2691
 	public static final String UNALLOCATED_SPACE = "U"; // U2318 - unallocated space
-	public static final String FQLITE_VERSION = "2.71";
-	public static final String FQLITE_RELEASEDATE = "19/08/2024";
+	public static final String FQLITE_VERSION = "3.0";
+	public static final String FQLITE_RELEASEDATE = "27/09/2024";
 	public static final String YEAR = "2024";
 	public static final int CARVING_ERROR = -1;
 	public static Level LOGLEVEL = Level.INFO;

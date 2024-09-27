@@ -1,14 +1,10 @@
 package fqlite.analyzer.protobuf;
 
-import java.net.URL;
+import java.io.File;
 import java.nio.file.FileSystems;
-import java.nio.file.Path;
-
 import fqlite.analyzer.Converter;
-import fqlite.base.GUI;
 import fqlite.base.Global;
 import fqlite.base.Job;
-import fqlite.log.AppLog;
 import fqlite.util.Auxiliary;
 
 public class Protoc extends Converter{
@@ -18,29 +14,27 @@ public class Protoc extends Converter{
 		String result = "";
 		String shellscript = "";
 		try {
-			
-			String cwd = Path.of("").toAbsolutePath().toString();
+			String cwd = new File(getClass().getProtectionDomain().getCodeSource().getLocation().getPath()).getParentFile().getParent();
 			System.out.println("Protoc Path::" + cwd);
 			String os = System.getProperty("os.name");
 			System.out.println("Using System Property: " + os);
 			String separator = FileSystems.getDefault().getSeparator();
 			
 			
-			shellscript = cwd + separator + "./proto.run";
+			shellscript = cwd + separator + "proto.sh";
 			if (Auxiliary.isWindowsSystem())
 			{
 				shellscript = cwd + separator + "protoc.bat";
 				
 			}
 			else if (Auxiliary.isMacOS()){
+				shellscript = cwd + separator + "MacOS/proto.run";
 				// do nothing take shellscript with absolute path
 				//shellscript = shellscript; //"./proto.run";
 				if (null != Global.WORKINGDIRECTORY){
 					shellscript = Global.WORKINGDIRECTORY + Global.separator + "proto.run";
 				}
 			}
-			AppLog.info(shellscript);
-			
 			
 			//System.out.println(" Pfad " + path);
 			ProcessBuilder pb = new ProcessBuilder(shellscript,path);

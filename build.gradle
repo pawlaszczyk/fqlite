@@ -1,18 +1,18 @@
-// https://github.com/beryx/fxgl-sliding-puzzle/blob/master/.github/workflows/gradle.yml
-
 plugins {
-    id 'base'
     id 'java'
     id 'java-library'
     id 'application'
     id 'org.openjfx.javafxplugin' version '0.1.0'
     id 'org.beryx.runtime' version '1.13.1'
-    id 'com.google.protobuf' version '0.9.4'
-    
+    id "de.undercouch.download" version "5.6.0"
 }
 
 group 'org.example'
-version '2.7.1'
+version '3.0'
+
+def protocversion = "27.4"
+
+def currentOs = org.gradle.internal.os.OperatingSystem.current()
 
 application {
     mainClassName = "fqlite.base.JARStarter"
@@ -21,7 +21,6 @@ application {
 repositories {
     mavenCentral()
 }
-
 
 sourceSets {
     main {
@@ -39,7 +38,6 @@ java {
         languageVersion = JavaLanguageVersion.of(20)
     }
 }
-
 
 javafx {
     version = "21"
@@ -62,62 +60,13 @@ jar {
     }
 }
 
-/*
-def platformOverride = "mac";
-if (project.hasProperty("platform")) {
-    platformOverride = project.getProperty("platform")
-    println "Target platform set to $platformOverride"
-}
-*/
-
-runtime {
-    options = ['--strip-debug', '--compress', '2', '--no-header-files', '--no-man-pages']
-
-// Uncomment and adjust the code below if you want to generate images for multiple platforms.
-// (You need to also uncomment the line 'targetPlatformName = ...' in the jpackage block.)
-/*
-    if (platformOverride == "lin") {
-        targetPlatform("lin") {
-            jdkHome = jdkDownload("https://download.java.net/java/GA/jdk20.0.2/6e380f22cbe7469fa75fb448bd903d8e/9/GPL/openjdk-20.0.2_linux-x64_bin.tar.gz")
-        }
-    }
-    else if (platformOverride == "mac") {
-        targetPlatform("mac") {
-            jdkHome = jdkDownload("https://download.java.net/java/GA/jdk20.0.2/6e380f22cbe7469fa75fb448bd903d8e/9/GPL/openjdk-20.0.2_macos-x64_bin.tar.gz") {
-                archiveExtension = "tar.gz"
-                pathToHome = "jdk-20.0.2.jdk/Contents/Home"
-                overwrite = true
-            }
-        }
-    } else if (platformOverride == "win") {
-        targetPlatform("win") {
-            jdkHome = jdkDownload("https://download.java.net/java/GA/jdk20.0.2/6e380f22cbe7469fa75fb448bd903d8e/9/GPL/openjdk-20.0.2_windows-x64_bin.zip")
-        }
-    }
-*/
-    launcher {
-        noConsole = true
-    }
-
-    jpackage {
-        def currentOs = org.gradle.internal.os.OperatingSystem.current()
-        installerOptions += ['--resource-dir', "resources"]
-
-        if (currentOs.windows) {
-            installerOptions += ['--win-per-user-install', '--win-dir-chooser', '--win-menu', '--win-shortcut']
-        } else if (currentOs.linux) {
-            installerOptions += ['--linux-package-name', 'fqlite', '--linux-shortcut']
-        } else if (currentOs.macOsX) {
-            installerOptions += ['--mac-package-name', 'fqlite']
-        }
-    }
-}
 
 compileJava.options.encoding = 'UTF-8'
 compileTestJava.options.encoding = 'UTF-8'
 javadoc.options.encoding = 'UTF-8'
 
 dependencies {
+	implementation group: 'com.googlecode.plist', name: 'dd-plist', version: '1.28'
     implementation group: 'org.antlr', name: 'antlr4', version: '4.8'
     implementation group: 'org.apache.avro', name: 'avro', version: '1.11.1'
     implementation group: 'nl.pvanassen', name: 'bplist', version: '1.0.0'
@@ -147,34 +96,76 @@ dependencies {
     implementation group: 'javax.measure', name: 'unit-api', version: '2.2'
     implementation group: 'com.dlsc.unitfx', name: 'unitfx', version: '1.0.10'
     implementation group: 'tech.uom.lib', name: 'uom-lib-common', version: '2.1'
-	implementation group: 'org.openjfx', name: 'javafx-controls', version: '11.0.1'
-	
-	implementation group: 'com.google.protobuf', name: 'protobuf-java', version: '3.19.1'
-    implementation group: 'com.google.protobuf', name: 'protobuf-java-util', version: '3.19.1'
-	implementation 'com.google.protobuf:protobuf-gradle-plugin:0.8.18'
-	implementation group: 'com.google.protobuf', name: 'protoc', version: '4.27.3'
-
-    //implementation group: 'org.openjfx', name: 'javafx-base', version: '17.0.8'
-    //implementation group: 'org.openjfx', name: 'javafx-controls', version: '17.0.8'
-    //implementation group: 'org.openjfx', name: 'javafx-swing', version: '17.0.8'
-    //implementation group: 'org.openjfx', name: 'javafx-web', version: '17.0.8'
-    //implementation group: 'org.openjfx', name: 'javafx-fxml', version: '17.0.8'
-    //implementation group: 'org.openjfx', name: 'javafx-graphics', version: '17.0.8'
-    //implementation group: 'org.openjfx', name: 'javafx-media', version: '17.0.8'
 
     implementation files('lib/FxTextEditor.jar')
     implementation files('lib/SerializationDumper-v1.13.jar')
-    implementation files('lib/dd-plist.jar') 
+    implementation files('lib/javafx-swt.jar')
 
     testImplementation group: 'junit', name: 'junit', version: '4.13.2'
-    
-   
+}
+
+task downloadProtoc(type: Download) {
+    def protocOsName = ""
+    if (currentOs.windows) {
+        protocOsName = "win64"
+    } else if (currentOs.linux) {
+        protocOsName = "linux-x86_64"
+    } else if (currentOs.macOsX) {
+        protocOsName = "osx-universal_binary"
+    }
+
+    var fileName = "protoc-${protocversion}-${protocOsName}.zip"
+    var protocUrl = "https://github.com/protocolbuffers/protobuf/releases/download/v${protocversion}/" + fileName
+    src protocUrl
+    dest new File(temporaryDir, fileName)
+}
+
+task downloadAndUnzipProtoc(dependsOn: downloadProtoc, type: Copy) {
+    from zipTree(downloadProtoc.dest)
+    into layout.buildDirectory.dir('protoc')
+}
+
+tasks.named('jpackage') {
+    dependsOn downloadAndUnzipProtoc
+}
+
+tasks.jpackage.doFirst {
+    def fqliteJpackageDirectory = "build/jpackage/"
+    if (currentOs.windows) {
+        fqliteJpackageDirectory += "fqlite"
+    } else if (currentOs.linux) {
+        fqliteJpackageDirectory += "fqlite/lib"
+    } else if (currentOs.macOsX) {
+        fqliteJpackageDirectory += "fqlite.app/Contents/MacOS"
+    }
+    copy {
+        from layout.buildDirectory.dir('protoc')
+        into "$fqliteJpackageDirectory/protoc"
+    }
+    copy {
+        from layout.projectDirectory
+        include 'proto.run', 'proto.sh', 'protoc.bat'
+        into "$fqliteJpackageDirectory"
+    }
 }
 
 
+runtime {
+    options = ['--strip-debug', '--compress', '2', '--no-header-files', '--no-man-pages']
 
+    launcher {
+        noConsole = true
+    }
 
+    jpackage {
+        installerOptions += ['--resource-dir', "resources"]
 
-
-
-
+        if (currentOs.windows) {
+            installerOptions += ['--win-per-user-install', '--win-dir-chooser', '--win-menu', '--win-shortcut']
+        } else if (currentOs.linux) {
+            installerOptions += ['--linux-package-name', 'fqlite', '--linux-shortcut']
+        } else if (currentOs.macOsX) {
+            installerOptions += ['--mac-package-name', 'fqlite']
+        }
+    }
+}
