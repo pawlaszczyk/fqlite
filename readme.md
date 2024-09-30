@@ -1,8 +1,65 @@
-FQLite is a tool to find and restore deleted records in SQlite databases. 
-It therefore examines the database for entries marked as deleted. Those entries can be recovered and displayed. 
-It is written with the Java programming language. 
-The program can operates with a simple graphical user interface (GUI mode). 
-The program is able to search a SQLite database file for regular as well as deleted records.
+<p align="center">
+  <img width="298" height="123" src="fqlite_logo_256.png?raw=true" alt="FQLite Logo"/>
+</p>
+
+### FQLite - Forensic SQLite Data Recovery Tool
+
+FQLite is a tool to find and restore deleted records in SQLite databases. It therefore examines the database for entries marked as deleted. Those entries can be recovered and displayed. It is written in the Java programming language. The program can operate with a simple graphical user interface (GUI mode). The program is able to search a SQLite database file for regular as well as deleted records.
+
+
+<p align="center">
+  <img width="95%" height="95%" src="fqlite_screenshot.png?raw=true" alt="FQLite Screenshot"/>
+</p>
+
+
+### Features
+
+FQLite allows you to:
+* browse and recover the content of freelist pages
+* recover records in all database pages including unallocated space
+* support of UTF-8,UTF-16BE,UTF-16LE encoded databases
+* support for multi-byte columns as well as overflow pages
+* recover dropped tables
+* create CSV-format data export
+* support for Rollback-Journals and WAL-Archives
+* integrated Hex-Viewer
+* support a forensically sound investigation of database files
+* support for decoding of bplist, protobuffer and BASE64 encoded cell values
+* automatic detection of different BLOB types like .png, .bmp, .gif, .jpeg, .tiff, .heic, .pdf
+
+Some features:
+
+* written with Java standard class library
+* JavaFX-based graphical user interface
+* open-source
+* free of charge
+* runs out of the box
+
+
+### Official Project Webpage
+
+Check out the latest binary version (for Intel as well as ARM-based systems) from the official project homepage
+
+https://www.staff.hs-mittweida.de/~pawlaszc/fqlite/                          
+
+### Technical Background
+
+An overview article highlighting the technical background of FQLite can be retrieved from 
+
+https://conceptechint.net/index.php/CFATI/article/view/17/6
+
+D. Pawlaszczyk, C. Hummert: (2021). 
+Making the Invisible Visible – Techniques for Recovering Deleted SQLite Data Records. 
+International Journal of Cyber Forensics and Advanced Threat Investigations,
+
+
+### Prerequisites
+
+In the latest version, the FQLite is bundled with a Java Runtime Environment (JRE) and all required libraries.
+
+> **Important note:** With version 2.0 the support for the command line mode was cancelled.
+
+
 
 # Installation
 ## macOS
