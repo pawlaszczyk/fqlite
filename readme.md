@@ -76,6 +76,18 @@ In the latest version, the FQLite is bundled with a Java Runtime Environment (JR
 2. Open the .dmg file and drag the application into the "Applications" folder.
 3. You can now launch FQLite from the Applications folder.
 
+## Important node: 
+If you try to open an app by an unknown developer and you see a warning dialog on your Mac.
+A dialog is displayed saying that the app is damaged. In fact, the app is simply not signed 
+with a developer certificate. For this reason, Gatekeeper refuses to execute. 
+The first method will allow a single program to run, without having to disable Gatekeeper. 
+Open a terminal and run the following command:
+
+```bash
+sudo  xattr -dr com.apple.quarantine /Applications/fqlite.app
+```
+The app should then start without any further complaints. 
+
 ### Installation via Homebrew
 
 1. Open the Terminal.
