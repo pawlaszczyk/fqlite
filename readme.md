@@ -38,9 +38,16 @@ Some features:
 
 ### Official Project Webpage
 
-Check out the latest binary version (for Intel as well as ARM-based systems) from the official project homepage
+Check out the the official project homepage
 
 https://www.staff.hs-mittweida.de/~pawlaszc/fqlite/                          
+
+### Official User guide
+
+You can find the current version of the user manual under the following link: 
+
+https://github.com/pawlaszczyk/fqlite/blob/master/resources/FQLite_UserGuide.pdf
+
 
 ### Technical Background
 
