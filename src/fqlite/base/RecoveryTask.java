@@ -577,14 +577,14 @@ public class RecoveryTask implements Runnable {
 		// entry for table name already exists  
 		if (job.resultlist.containsKey(line.getFirst()))
 		{
-			     ObservableList<LinkedList<String>> tablelist = job.resultlist.get(line.getFirst());
-			     tablelist.add(line);  // add row 
+			     ObservableList<ObservableList<String>> tablelist = job.resultlist.get(line.getFirst());
+			     tablelist.add(FXCollections.observableList(line));  // add row 
 		}
 		
 		// create a new data set since table name occurs for the first time
 		else {
-		          ObservableList<LinkedList<String>> tablelist = FXCollections.observableArrayList();
-				  tablelist.add(line); // add row 
+		          ObservableList<ObservableList<String>> tablelist = FXCollections.observableArrayList();
+				  tablelist.add(FXCollections.observableList(line));  // add row 
 				  job.resultlist.put(line.getFirst(),tablelist);  	
 		}
 	}

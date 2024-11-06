@@ -1,2 +1,4 @@
 # What's Changed
-- Added build actions
+- SQLAnalyzer beta has been added
+- HexViewer -> bug fixes 
+- License info was updated

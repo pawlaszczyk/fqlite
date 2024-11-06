@@ -8,8 +8,6 @@
 
 package fqlite.analyzer.telegram;
 
-
-
 import java.util.ArrayList;
 import java.util.HashMap;
 

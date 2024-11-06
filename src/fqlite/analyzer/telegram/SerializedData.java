@@ -85,7 +85,8 @@ public class SerializedData extends AbstractSerializedData {
         }
     }
 
-    public SerializedData(File file) throws Exception {
+    @SuppressWarnings("resource")
+	public SerializedData(File file) throws Exception {
         FileInputStream is = new FileInputStream(file);
         byte[] data = new byte[(int) file.length()];
         new DataInputStream(is).readFully(data);

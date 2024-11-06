@@ -1,4 +1,4 @@
-package fqlite.base;
+package fqlite.ui.hexviewer;
 
 import goryachev.common.util.Parsers;
 import goryachev.fx.CPane;
@@ -6,9 +6,8 @@ import goryachev.fx.FxComboBox;
 import goryachev.fx.FxMenuBar;
 import goryachev.fx.FxToolBar;
 import goryachev.fx.FxWindow;
-import goryachev.fx.internal.LocalSettings;
+import goryachev.fx.settings.LocalSettings;
 import goryachev.fxtexteditor.Actions;
-import goryachev.fxtexteditor.FileCachePlainTextEditorModel;
 import goryachev.fxtexteditor.FxTextEditor;
 import goryachev.fxtexteditor.FxTextEditorModel;
 import goryachev.fxtexteditor.internal.Markers;
@@ -16,16 +15,11 @@ import java.io.File;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.Hashtable;
-
 import demo.fxtexteditor.AnItem;
 import demo.fxtexteditor.MainPane;
-import demo.fxtexteditor.StatusBar;
-import demo.fxtexteditor.ValuePanel;
 import javafx.scene.Node;
-import javafx.scene.control.ComboBox;
 import javafx.scene.control.Label;
 import javafx.scene.layout.VBox;
-import javafx.stage.Window;
 
 public class HexFXWindow extends FxWindow {
   
@@ -39,7 +33,7 @@ public class HexFXWindow extends FxWindow {
   
   protected final FxComboBox<Object> fontSelector = new FxComboBox<Object>();
   
-  public Hashtable<Object, FileCachePlainTextEditorModel> files = new Hashtable<>();
+  public Hashtable<Object,FileCachePlainTextEditorModel> files = new Hashtable<>();
   
   Markers myselection;
   
@@ -71,7 +65,6 @@ public class HexFXWindow extends FxWindow {
   }
 	  
   
-  @SuppressWarnings("rawtypes")
 public HexFXWindow() {
     super("HexViewer");
     this.myselection = new Markers(100);
@@ -94,10 +87,14 @@ public HexFXWindow() {
     setBottom(vb);
     this.fontSelector.setEditable(false);
     this.fontSelector.select("18");
-    editor().setShowLineNumbers(true);
+    this.editor().setLineNumberFormatter(new OffsetFormatter());
+    this.editor().setShowLineNumbers(true);
     this.statusBar.attach(editor());
-    LocalSettings.get((Window)this).add("SHOW_LINE_NUMBERS", editor().showLineNumbersProperty()).add("MODEL", (ComboBox)this.modelSelector).add("FONT_SIZE", (ComboBox)this.fontSelector);
-    setSize(720.0D, 800.0D);
+    
+    LocalSettings.get(this).
+	add("LINE_WRAP", editor().wrapLinesProperty());
+    
+    setSize(780.0D, 800.0D);
  
   }
   
@@ -148,26 +145,34 @@ public HexFXWindow() {
     this.mainPane.editor.setFontSize(sz);
   }
   
-  public void select() {
-    editor().select(this.myselection.newMarker(2, 3), this.myselection.newMarker(3, 14));
-    editor().select(this.myselection.newMarker(20, 5), this.myselection.newMarker(20, 15));
-  }
   
+  
+  /**
+   * Go to a certain line with a given offset.
+   * 
+   * @param offset
+   */
   public void goTo(long offset) {
-	
-	System.out.println(" offset " + offset);  
 	int line = (int)(offset/16);
-	if (line > 10)
-	{
-		editor().goToLine(line - 10);
-		editor().scrollCaretToView();
-		editor().goToLine(line);
-	}
-	else
-	{
-		editor().goToLine(line);
-	}
+	goToLine(line);	
+	editor().scrollCaretToView();
+	editor().reloadVisibleArea();
   }
+
+
+	/** navigates to the line if row is between [0...lineCount-1], otherwise does nothing */
+	public void goToLine(int row)
+	{
+		System.out.println("WrapLines :: " + editor().isWrapLines());
+		editor().wrapLinesProperty().set(true);
+		
+		// TODO smarter algorithm near the end of file
+		if((row >= 0) && (row < editor().getLineCount()))
+		{
+			editor().setOrigin(Math.max(0, row-3));
+			editor().setCaret(row, 0);
+		}
+	}
   
   public void clearAll() {
     this.modelSelector.getSelectionModel().clearSelection();

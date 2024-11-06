@@ -10,7 +10,7 @@ package fqlite.analyzer.telegram;
 
 import java.util.*;
 
-
+@SuppressWarnings("rawtypes")
 public class TLClassStore {
     private Hashtable<Integer,Class> classStore;
 
@@ -49,7 +49,8 @@ public class TLClassStore {
         return store;
     }
 
-    public TLObject TLdeserialize(NativeByteBuffer stream, int constructor, boolean exception) {
+    @SuppressWarnings("deprecation")
+	public TLObject TLdeserialize(NativeByteBuffer stream, int constructor, boolean exception) {
         Class objClass = classStore.get(constructor);
         if (objClass != null) {
             TLObject response;

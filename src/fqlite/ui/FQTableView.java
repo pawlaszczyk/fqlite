@@ -12,15 +12,16 @@ public class FQTableView<T> extends TableView<T>
     public Job job;
     public String tablename;
 	public List<String> columns;
+	public List<String> columntypes;
 	
 	
-    public FQTableView(String tablename, String dbname, Job job, List<String> columns){
+    public FQTableView(String tablename, String dbname, Job job, List<String> columns, List<String> columntypes){
 	   super();
 	   this.dbname = dbname;
 	   this.job = job;
 	   this.tablename = tablename;
 	   this.columns = columns;
-	   
+	   this.columntypes = columntypes;
 	}
 	
 	

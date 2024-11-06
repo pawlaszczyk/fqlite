@@ -49,7 +49,7 @@ public class RollbackJournalReader{
 	public AsynchronousFileChannel file;
 
 	/* this is a multi-threaded program -> all data are saved to the list first*/
-	ConcurrentHashMap<String,ObservableList<LinkedList<String>>> resultlist = new ConcurrentHashMap<>();
+	ConcurrentHashMap<String,ObservableList<ObservableList<String>>> resultlist = new ConcurrentHashMap<>();
 	
 	/* This buffer holds RollbackJournal-file in RAM */
 	ByteBuffer rollbackjournal;
@@ -281,14 +281,14 @@ public class RollbackJournalReader{
 		// entry for table name already exists  
 		if (resultlist.containsKey(line.getFirst()))
 		{
-			     ObservableList<LinkedList<String>> tablelist = resultlist.get(line.getFirst());
-			     tablelist.add(line);  // add row 
+			     ObservableList<ObservableList<String>> tablelist = resultlist.get(line.getFirst());
+			     tablelist.add(FXCollections.observableList(line)); // add row 
 		}
 		
 		// create a new data set since table name occurs for the first time
 		else {
-		          ObservableList<LinkedList<String>> tablelist = FXCollections.observableArrayList();
-				  tablelist.add(line); // add row 
+		          ObservableList<ObservableList<String>> tablelist = FXCollections.observableArrayList();
+				  tablelist.add(FXCollections.observableList(line)); // add row 
 				  resultlist.put(line.getFirst(),tablelist);  	
 		}
 	}
@@ -683,7 +683,7 @@ public class RollbackJournalReader{
 			Iterator<LinkedList<String>> lines = output.iterator();
 
 			// holds all data sets for all tables, whereas the tablename represents the key
-			Hashtable<String,ObservableList<LinkedList<String>>> dataSets = new Hashtable<>();
+			Hashtable<String,ObservableList<ObservableList<String>>> dataSets = new Hashtable<>();
 			
 			while(lines.hasNext())
 			{
@@ -702,14 +702,14 @@ public class RollbackJournalReader{
 				if (dataSets.containsKey(line.get(0)))
 				{
 					 
-					     ObservableList<LinkedList<String>> tablelist = dataSets.get(line.getFirst());
-					     tablelist.add(line);  // add row 
+					     ObservableList<ObservableList<String>> tablelist = dataSets.get(line.getFirst());
+					     tablelist.add(FXCollections.observableList(line));  // add row 
 				}
 				
 				// create a new data set before inserting the first row
 				else {
-					  	  ObservableList<LinkedList<String>> tablelist = FXCollections.observableArrayList();
-					  	  tablelist.add(line); // add row 
+					  	  ObservableList<ObservableList<String>> tablelist = FXCollections.observableArrayList();
+						  tablelist.add(FXCollections.observableList(line));  // add row 
 					  	  dataSets.put(line.getFirst(),tablelist); 
 				}	
 			

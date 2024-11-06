@@ -4,7 +4,6 @@ import fqlite.base.GUI;
 import fqlite.base.Job;
 import fqlite.base.RollbackJournalReader;
 import fqlite.base.WALReader;
-import fqlite.util.BLOB2Disk;
 import javafx.application.Platform;
 import javafx.concurrent.Task;
 import javafx.scene.control.TreeItem;

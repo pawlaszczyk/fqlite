@@ -147,7 +147,6 @@ $ ./run.sh
 
 Author: Dirk Pawlaszczyk <pawlaszc@hs-mittweida.de>
 
-FQLite for SQLite is bi-licensed under the Mozilla Public License Version 2, 
-as well as the GNU General Public License Version 3 or later.
+FQLite for SQLite is licensed under the Apache-License 2.0. 
 
 You can modify or redistribute it under the conditions of these licenses. 

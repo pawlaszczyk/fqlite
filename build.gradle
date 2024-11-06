@@ -7,6 +7,8 @@ plugins {
     id "de.undercouch.download" version "5.6.0"
 }
 
+apply plugin: 'eclipse'
+
 group 'org.example'
 version '3.0'
 
@@ -40,7 +42,7 @@ java {
 }
 
 javafx {
-    version = "21"
+    version = "22"
     modules = [
             'javafx.base',
             'javafx.controls',
@@ -66,6 +68,8 @@ compileTestJava.options.encoding = 'UTF-8'
 javadoc.options.encoding = 'UTF-8'
 
 dependencies {
+	
+	
 	implementation group: 'com.googlecode.plist', name: 'dd-plist', version: '1.28'
     implementation group: 'org.antlr', name: 'antlr4', version: '4.8'
     implementation group: 'org.apache.avro', name: 'avro', version: '1.11.1'
@@ -93,13 +97,16 @@ dependencies {
     implementation group: 'com.dlsc.pdfviewfx', name: 'pdfviewfx', version: '3.0.0'
     implementation group: 'trust.nccgroup', name: 'readablethrift', version: '1.0.0'
     implementation group: 'org.slf4j', name: 'slf4j-api', version: '2.0.9'
+    implementation group: 'org.slf4j', name: 'slf4j-nop', version: '2.1.0-alpha1'
     implementation group: 'javax.measure', name: 'unit-api', version: '2.2'
     implementation group: 'com.dlsc.unitfx', name: 'unitfx', version: '1.0.10'
     implementation group: 'tech.uom.lib', name: 'uom-lib-common', version: '2.1'
-
+	implementation group: 'com.github.jsqlparser', name: 'jsqlparser', version: '5.0'
     implementation files('lib/FxTextEditor.jar')
     implementation files('lib/SerializationDumper-v1.13.jar')
-    implementation files('lib/javafx-swt.jar')
+    //implementation files('lib/javafx-swt.jar')
+    implementation group: 'org.fxmisc.richtext', name: 'richtextfx', version: '0.11.3'
+    implementation group: 'org.apache.calcite', name: 'calcite-core', version: '1.38.0'
 
     testImplementation group: 'junit', name: 'junit', version: '4.13.2'
 }

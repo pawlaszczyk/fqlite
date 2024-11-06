@@ -33,7 +33,6 @@ import fqlite.base.GUI;
 import fqlite.base.Global;
 import fqlite.base.Job;
 import fqlite.base.SqliteElement;
-import fqlite.base.WALFrame;
 import fqlite.descriptor.AbstractDescriptor;
 import fqlite.descriptor.IndexDescriptor;
 import fqlite.descriptor.TableDescriptor;
@@ -47,9 +46,7 @@ import fqlite.types.SerialTypes;
 import fqlite.types.StorageClass;
 import fqlite.types.TimeStamp;
 import fqlite.ui.FQTableView;
-import javafx.collections.ObservableList;
 import javafx.embed.swing.SwingFXUtils;
-import javafx.scene.control.TablePosition;
 import javafx.scene.image.Image;
 
 /**
@@ -2051,6 +2048,7 @@ public class Auxiliary{
 			ByteBuffer db = job.wal.wal;
 	
 			// overflow pages until here 
+			@SuppressWarnings("unused")
 			HashMap<Integer,ByteBuffer> overflow = job.wal.overflow;
 			
 			// save current file pointer position
@@ -2805,12 +2803,12 @@ public class Auxiliary{
  	public static int[] readVarInt_alt(byte[] values) {
 
  		resultlist = new ArrayList<Integer>();
- 		int number = 0;
+ 		//int number = 0;
  		ByteBuffer bb = ByteBuffer.wrap(values);
  		do {
  			long value = readUnsigned(bb);
  			resultlist.add((int)value);
- 		    number++;
+ 		    //number++;
  		}
  		while(bb.hasRemaining());
  	    // return the sub-array
@@ -3210,7 +3208,7 @@ public class Auxiliary{
         return entropy;
     }
     
-    
+	@SuppressWarnings("rawtypes")
     public static String composeOutputLine(FQTableView table, Iterator<String> s) {
     	
     	int current = 0;

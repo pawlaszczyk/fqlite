@@ -20,12 +20,11 @@ import javafx.util.StringConverter;
 /**
  * Custom tooltip implementation.
  */
+@SuppressWarnings("rawtypes")
 class CustomTooltip extends Tooltip {
  
 	private String coltype;
-	@SuppressWarnings("rawtypes")
 	private TableCell tc;
-	@SuppressWarnings("rawtypes")
 	private Cell cell;
 	private String text;
 	private Job job;
@@ -40,7 +39,7 @@ class CustomTooltip extends Tooltip {
         super(txt);
     }
     
-    public CustomTooltip(String tablename, long off, Job job, String tttype, String txt, TableCell tc, final Cell cell, @SuppressWarnings("rawtypes") final StringConverter converter) {
+    public CustomTooltip(String tablename, long off, Job job, String tttype, String txt, TableCell tc, final Cell cell, final StringConverter converter) {
         super(txt);
         this.text = txt;
         this.tc = tc;
@@ -51,7 +50,7 @@ class CustomTooltip extends Tooltip {
         this.off = off;
     }
     
-    public void addCellText(String tablename,long off, Job job, String tttype, String txt, TableCell tc, Cell cell,StringConverter converter){
+	public void addCellText(String tablename,long off, Job job, String tttype, String txt, TableCell tc, Cell cell,StringConverter converter){
     	 this.text = txt;
     	 this.tc = tc;
          this.cell = cell;

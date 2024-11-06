@@ -3,6 +3,9 @@ package fqlite.base;
 import java.nio.file.FileSystems;
 import java.util.logging.Level;
 
+/**
+ *  This class defines global variables and program constants.
+ */
 public class Global {
 
 	public static final String REGULAR_RECORD = " "; // U2713 - regular
@@ -10,8 +13,8 @@ public class Global {
 	public static final String FREELIST_ENTRY = "F"; // U267D - freelist
 	public static final String STATUS_CLOMUN = "S"; // U291D U2691
 	public static final String UNALLOCATED_SPACE = "U"; // U2318 - unallocated space
-	public static final String FQLITE_VERSION = "3.0";
-	public static final String FQLITE_RELEASEDATE = "27/09/2024";
+	public static final String FQLITE_VERSION = "3.1";
+	public static final String FQLITE_RELEASEDATE = "06/11/2024";
 	public static final String YEAR = "2024";
 	public static final int CARVING_ERROR = -1;
 	public static Level LOGLEVEL = Level.INFO;
@@ -48,4 +51,6 @@ public class Global {
 	public static String font_name = "System";
 	public static String font_style = "Regular";
 	public static String font_size = "12";
+	
+	public static boolean SQLWARNING_SEEN = false;
 }

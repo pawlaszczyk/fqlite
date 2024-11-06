@@ -37,6 +37,7 @@ import javafx.scene.layout.VBox;
 import javafx.stage.Stage;
 import javafx.util.Callback;
 
+@SuppressWarnings("rawtypes")
 public class DBPropertyPanel extends StackPane{
 
 	
@@ -77,7 +78,7 @@ public class DBPropertyPanel extends StackPane{
 	
 	
 	
-	@SuppressWarnings({ "rawtypes", "unchecked" })
+	@SuppressWarnings("unchecked")
 	public void initHeaderTable(String[][] data)
 	{
 		
@@ -303,8 +304,7 @@ public class DBPropertyPanel extends StackPane{
         secondStage.show();
 	}
 	
-
-	@SuppressWarnings({ "rawtypes", "unchecked" })
+	@SuppressWarnings("unchecked")
 	public void initPagesTable(String[][] data)
 	{
 		
@@ -379,7 +379,7 @@ public class DBPropertyPanel extends StackPane{
 	}
 	
 	
-	@SuppressWarnings({ "rawtypes", "unchecked" })
+	@SuppressWarnings("unchecked")
 	public void initSchemaTable(String[][] data)
 	{
 		
@@ -445,8 +445,7 @@ public class DBPropertyPanel extends StackPane{
 
 	}
 	
-
-	@SuppressWarnings({ "rawtypes", "unchecked" })
+	@SuppressWarnings("unchecked")
 	private void fillTable(TableView table, String[][] data, boolean rowno)
 	{
 		// define array list for all table rows 
@@ -568,13 +567,13 @@ private ContextMenu createContextMenu(TableView<String> table){
 	 * Action handler method.   
 	 * @param table
 	 */
-	@SuppressWarnings({ "rawtypes", "unchecked" })
+	@SuppressWarnings("unchecked")
 	private void copyLineAction(TableView table){
 		
 		StringBuffer sb = new StringBuffer();			
 	 	final javafx.scene.input.Clipboard clipboard = javafx.scene.input.Clipboard.getSystemClipboard();
 	    final ClipboardContent content = new ClipboardContent();
-	    ObservableList<TablePosition> selection = table.getSelectionModel().getSelectedCells();	        
+		ObservableList<TablePosition> selection = table.getSelectionModel().getSelectedCells();	        
 	    Iterator<TablePosition> iter = selection.iterator();
 	    
 	    while(iter.hasNext()) {
@@ -593,7 +592,7 @@ private ContextMenu createContextMenu(TableView<String> table){
 	 * Action handler method.   
 	 * @param table
 	 */
-	@SuppressWarnings({ "rawtypes", "unchecked" })
+	@SuppressWarnings("unchecked")
 	private void copyCellAction(TableView table){
 
  	final javafx.scene.input.Clipboard clipboard = javafx.scene.input.Clipboard.getSystemClipboard();
@@ -627,7 +626,7 @@ private ContextMenu createContextMenu(TableView<String> table){
 		
 		table.setOnMouseClicked(new EventHandler<javafx.scene.input.MouseEvent>() {
 		
-			@SuppressWarnings("rawtypes")
+			@SuppressWarnings("unchecked")
 			@Override
 			   public void handle(javafx.scene.input.MouseEvent event) {
 				

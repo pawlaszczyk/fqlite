@@ -1,8 +1,12 @@
-package fqlite.base;
+package fqlite.ui.hexviewer;
 
-import fqlite.ui.hexviewer.HexViewerApp;
 import javafx.stage.Stage;
 
+/**
+ *  This class manages the different hex viewer objects.
+ *  
+ *  @author pawel
+ */
 public class HexViewManager {
 
 	HexViewerApp app = null;
@@ -61,7 +65,7 @@ public class HexViewManager {
 		  
 		 
 		  app.switchModel(model);
-//	  app.loadLines(model, position);
+		  app.loadLines(model, position);
 		  app.goTo(position);
 		 
 		  HexViewerApp.setVisible();

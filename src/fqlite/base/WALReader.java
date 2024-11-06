@@ -62,7 +62,7 @@ public class WALReader{
 	
 	
 	/* this is a multi-threaded program -> all data are saved to the list first*/
-	public ConcurrentHashMap<String,ObservableList<LinkedList<String>>> resultlist = new ConcurrentHashMap<>();
+	public ConcurrentHashMap<String,ObservableList<ObservableList<String>>> resultlist = new ConcurrentHashMap<>();
 
 	
 	/* An asynchronous channel for reading, writing, and manipulating a file. */
@@ -753,14 +753,14 @@ public class WALReader{
 		// entry for table name already exists  
 		if (resultlist.containsKey(line.getFirst()))
 		{
-			     ObservableList<LinkedList<String>> tablelist = resultlist.get(line.getFirst());
-			     tablelist.add(line);  // add row 
+			     ObservableList<ObservableList<String>> tablelist = resultlist.get(line.getFirst());
+			     tablelist.add(FXCollections.observableList(line));  // add row 
 		}
 		
 		// create a new data set since table name occurs for the first time
 		else {
-		          ObservableList<LinkedList<String>> tablelist = FXCollections.observableArrayList();
-				  tablelist.add(line); // add row 
+		          ObservableList<ObservableList<String>> tablelist = FXCollections.observableArrayList();
+				  tablelist.add(FXCollections.observableList(line)); // add row 
 				  resultlist.put(line.getFirst(),tablelist);  	
 		}
 	}
@@ -982,7 +982,7 @@ public class WALReader{
 			Iterator<LinkedList<String>> lines = output.iterator();
 			
 			// holds all data sets for all tables, whereas the tablename represents the key
-			Hashtable<String,ObservableList<LinkedList<String>>> dataSets = new Hashtable<>();
+			Hashtable<String,ObservableList<ObservableList<String>>> dataSets = new Hashtable<>();
 			
 			/* scan line by line */
 			while(lines.hasNext()) {
@@ -1005,15 +1005,16 @@ public class WALReader{
 			   	if (dataSets.containsKey(line.get(0)))
 				{
 					 
-					     ObservableList<LinkedList<String>> tablelist = dataSets.get(line.getFirst());
-					     tablelist.add(line);  // add row 
+					     ObservableList<ObservableList<String>> tablelist = dataSets.get(line.getFirst());
+					     tablelist.add(FXCollections.observableList(line));  // add row 
 				}
 				
 				// create a new data set before inserting the first row
 				else {
-				  ObservableList<LinkedList<String>> tablelist = FXCollections.observableArrayList();
-			   	  tablelist.add(line); // add row 
-				  dataSets.put(line.getFirst(),tablelist); 
+				  ObservableList<ObservableList<String>> tablelist = FXCollections.observableArrayList();
+				  tablelist.add(FXCollections.observableList(line));  // add row 
+				  System.out.println("");
+			   	  dataSets.put(line.getFirst(),tablelist); 
 				}	
 			
 				
@@ -1034,7 +1035,7 @@ public class WALReader{
 					String walpath = job.guiwaltab.get(tablename);
 					if (walpath == null)
 						continue;
-					//System.out.println("WALReader:: called update_table for " + tablename + " path  :: " + walpath);			
+					System.out.println("WALReader:: called update_table for " + tablename + " path  :: " + walpath);			
 					job.gui.update_table(walpath,dataSets.get(tablename),true);
 					
 			}	

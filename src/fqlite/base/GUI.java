@@ -40,9 +40,9 @@ import fqlite.analyzer.Names;
 import fqlite.analyzer.avro.Avro;
 import fqlite.analyzer.javaserial.Deserializer;
 import fqlite.analyzer.pblist.BPListParser;
-import fqlite.descriptor.IndexDescriptor;
 import fqlite.descriptor.TableDescriptor;
 import fqlite.log.AppLog;
+import fqlite.sql.SQLWindow;
 import fqlite.types.BLOBElement;
 import fqlite.types.CtxTypes;
 import fqlite.types.ExportType;
@@ -59,6 +59,7 @@ import fqlite.ui.RollbackPropertyPanel;
 import fqlite.ui.TooltippedTableCell;
 import fqlite.ui.UserGuideWindow;
 import fqlite.ui.WALPropertyPanel;
+import fqlite.ui.hexviewer.HexViewManager;
 import fqlite.util.Auxiliary;
 import javafx.animation.Animation;
 import javafx.animation.FadeTransition;
@@ -101,6 +102,7 @@ import javafx.scene.control.ToolBar;
 import javafx.scene.control.Tooltip;
 import javafx.scene.control.TreeItem;
 import javafx.scene.control.TreeView;
+import javafx.scene.control.cell.TextFieldTableCell;
 import javafx.scene.image.Image;
 import javafx.scene.image.ImageView;
 import javafx.scene.input.ClipboardContent;
@@ -123,48 +125,36 @@ import javafx.scene.layout.VBox;
 import javafx.scene.paint.Color;
 import javafx.scene.text.FontPosture;
 import javafx.stage.FileChooser;
+import javafx.stage.Modality;
 import javafx.stage.Screen;
 import javafx.stage.Stage;
 import javafx.util.Callback;
 import javafx.util.Duration;
+import javafx.util.converter.DefaultStringConverter;
 
 /*
     ---------------
     GUI.java
     ---------------
-    (C) Copyright 2023.
+    (C) Copyright 2024.
 
     Original Author:  Dirk Pawlaszczyk
     Contributor(s):   -;
 
    
-    Project Info:  http://www.hs-mittweida.de
+    Project Info:  https://github.com/pawlaszczyk/fqlite
 
-    This program is free software: you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation, either version 3 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program.  If not, see <http://www.gnu.org/licenses/>.
-
-    Dieses Programm ist Freie Software: Sie können es unter den Bedingungen
-    der GNU General Public License, wie von der Free Software Foundation,
-    Version 3 der Lizenz oder (nach Ihrer Wahl) jeder neueren
-    veröffentlichten Version, weiterverbreiten und/oder modifizieren.
-
-    Dieses Programm wird in der Hoffnung, dass es nützlich sein wird, aber
-    OHNE JEDE GEWÄHRLEISTUNG, bereitgestellt; sogar ohne die implizite
-    Gewährleistung der MARKTFÄHIGKEIT oder EIGNUNG FÜR EINEN BESTIMMTEN ZWECK.
-    Siehe die GNU General Public License für weitere Details.
-
-    Sie sollten eine Kopie der GNU General Public License zusammen mit diesem
-    Programm erhalten haben. Wenn nicht, siehe <http://www.gnu.org/licenses/>.
+	Licensed under the Apache License, Version 2.0 (the "License");
+	you may not use this file except in compliance with the License.
+	You may obtain a copy of the License at
+	
+	    http://www.apache.org/licenses/LICENSE-2.0
+	
+	Unless required by applicable law or agreed to in writing, software
+	distributed under the License is distributed on an "AS IS" BASIS,
+	WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+	See the License for the specific language governing permissions and
+	limitations under the License.
  
 */
 
@@ -203,9 +193,13 @@ public class GUI extends Application {
 	public ConcurrentHashMap<String, javafx.scene.Node> tables = new ConcurrentHashMap<String, javafx.scene.Node>();
 	private Hashtable<Object, String> rowcolors = new Hashtable<Object, String>();
 
+	public Hashtable<String,ObservableList<ObservableList<String>>> datasets = new Hashtable<>(); 
+	
 	protected ContextMenu cm = null;
 	protected TextArea logwindow;
 	protected MenuBar menuBar;
+	
+	public List<String> dbnames = new ArrayList<String>();
 	
 	public static ScrollPane CellDetailsScrollPane;
 	VBox table_panel_with_filter;
@@ -248,6 +242,8 @@ public class GUI extends Application {
 	Stage stage;
 	Scene scene;
 	public static VBox  topContainer;
+	
+	SQLWindow sqlAnalyzer = null;
 	
 	Font appFont = null;
 	
@@ -408,6 +404,12 @@ public class GUI extends Application {
 			showPropertyWindow();
 		});
 		
+		MenuItem mntmSQL = new MenuItem("SQL Analyzer...");
+		mntmSQL.setOnAction( e -> {
+			showSqlWindow();
+		});
+		
+		
 		MenuItem mntmHelp = new MenuItem("Help");
 		mntmHelp.setOnAction(e -> {
 				showHelp();
@@ -419,15 +421,17 @@ public class GUI extends Application {
 		SeparatorMenuItem sep2 = new SeparatorMenuItem();
 
 		Menu mnFiles = new Menu("File");
+		Menu mnAnalyze = new Menu("Analyze");
 		Menu mnInfo = new Menu("Info");
 
 		mnFiles.getItems().addAll(mntopen,mntmExport,sep,mntclose,sep2,mntmProp,mntmExit);
+        mnAnalyze.getItems().addAll(mntmSQL);
 		mnInfo.getItems().addAll(mntmHelp,mntmLog,mntFont,mntAbout);
 		
 		
 		/* MenuBar */
 		menuBar = new MenuBar();
-		menuBar.getMenus().addAll(mnFiles,mnInfo);
+		menuBar.getMenus().addAll(mnFiles,mnAnalyze,mnInfo);
 	    	
 		splitPane = new SplitPane();
 
@@ -484,6 +488,15 @@ public class GUI extends Application {
 		{
 			showHelp();
 		});
+		
+		s = GUI.class.getResource("/sql.png").toExternalForm();
+		Button btnSQL = new Button();
+		iv = new ImageView(s);
+		btnSQL.setGraphic(iv);
+		btnSQL.setTooltip(new Tooltip("open SQL Analyzer"));
+		toolBar.getItems().add(btnSQL);
+		btnSQL.setOnAction(e->showSqlWindow());
+
 		
 		s = GUI.class.getResource("/properties.png").toExternalForm();
 		Button btnProp = new Button();
@@ -624,7 +637,38 @@ public class GUI extends Application {
 		pd.start(new Stage());
 	}
 
+	private void showSqlWindow(){
+		
+		if(dbnames.size() == 0){
+		
+			Alert alert = new Alert(AlertType.INFORMATION);
+			alert.setTitle("Information");
+			alert.setContentText("You must open at least one database before you can use the analyzer.");
+			alert.showAndWait();	
+			
+			return;
+		}
+		
+		if (!Global.SQLWARNING_SEEN) {
+			showWarning(stage,"Important note: Please note that the SQL Analyzer is a beta version. Use the results with care. ");
+			Global.SQLWARNING_SEEN = true;
+		}
+		
+			SQLWindow sql = new SQLWindow(this);
+			Stage sqlstage = new Stage();
+			sqlstage.initModality(Modality.APPLICATION_MODAL);
+			sql.start(sqlstage);
+			sqlAnalyzer = sql;
+			
+	}
 	
+	private static void showWarning(Stage stage, String details) {
+		Alert alert = new Alert(AlertType.INFORMATION);
+		alert.setTitle("user infomation");
+		alert.setContentText(details);
+		alert.initOwner(stage);
+		alert.showAndWait();
+	}
 	
 	private void openHexViewer(){
 		TreeItem<NodeObject> node = (TreeItem<NodeObject>) tree.getSelectionModel().getSelectedItem();
@@ -920,6 +964,7 @@ public class GUI extends Application {
 
 		this.tables.clear(); 
 	    this.treeitems.clear(); 
+	    this.dbnames.clear();
 	    HEXVIEW.close();
 	
 	    //long free = Runtime.getRuntime().freeMemory();
@@ -956,6 +1001,12 @@ public class GUI extends Application {
 		export_table(no);
 	}
 	 
+	private static final String CSS = """
+	           .invalid {
+	               -fx-text-fill: red;
+	           }
+	           """;
+	
 	/**
 	 * Add a new table header to the database tree.
 	 * 
@@ -973,7 +1024,7 @@ public class GUI extends Application {
 		
 		Path p = Paths.get(job.path);
 		
-		FQTableView<Object> table = new FQTableView<Object>(tablename,p.getFileName().toString(),job, columns);
+		FQTableView<Object> table = new FQTableView<Object>(tablename,p.getFileName().toString(),job, columns,columntypes);
 		
  		
 		table.getSelectionModel().setSelectionMode(
@@ -1013,8 +1064,28 @@ public class GUI extends Application {
             }                    
 		});
      	
-		pllcolumn.setStyle( "-fx-alignment: CENTER-RIGHT;");
+		pllcolumn.setStyle( "-fx-font-style: italic; -fx-alignment: CENTER-RIGHT;");
 
+		pllcolumn.setCellFactory(param -> new TextFieldTableCell<>(new DefaultStringConverter()) {
+			   @Override
+			   public void updateItem(String item, boolean empty) {
+			      super.updateItem(item, empty);
+
+			       if (item != null && !empty) {
+			          if (!getStyleClass().contains(CSS)) {
+			             getStyleClass().add(CSS);
+			          }
+			       } else {
+			          getStyleClass().remove(CSS);
+			       }
+			       
+			       this.setStyle("-fx-font-style: italic;");
+			   }
+
+			 
+		});
+		
+     
      	
     	//Label HLLabel = new Label("HL");
 		//HLLabel.setTooltip(new Tooltip("shows the header length in bytes")); 
@@ -1091,8 +1162,10 @@ public class GUI extends Application {
 	                return new SimpleStringProperty(param.getValue().get(2).toString());                        
 	            }                    
 			});
-			pllcolumn.setStyle( "-fx-alignment: CENTER-RIGHT;");
-
+			//pllcolumn.setStyle( "-fx-alignment: CENTER-RIGHT;");
+			pllcolumn.setStyle( "-fx-font-style: italic; -fx-alignment: CENTER-RIGHT; ");
+			
+		
 	     	
 	    	//Label HLLabel = new Label("HL");
 			//HLLabel.setTooltip(new Tooltip("shows the header length in bytes")); 
@@ -1513,7 +1586,7 @@ public class GUI extends Application {
 		return tp;
 	}
 	
-	@SuppressWarnings("rawtypes")
+	@SuppressWarnings({ "rawtypes", "unchecked" })
 	private ContextMenu createContextMenu(CtxTypes type,String tablename, FQTableView table,Job job){
 		
 		final ContextMenu contextMenu = new ContextMenu();
@@ -1579,7 +1652,6 @@ public class GUI extends Application {
         MenuItem location = new MenuItem("Show Location (in browser)");
         location.setOnAction(e -> { 
         	
-    		String coltype = null;
     		
             ObservableList<TablePosition> selection = mytable.getSelectionModel().getSelectedCells();
             // nothing selected -> leave copy action
@@ -1991,9 +2063,8 @@ public class GUI extends Application {
 	    	        	}
 	    	        }
 	    	    	
-	    	    	else if(bson)
-	    	    	{
-	    	        	String path = GUI.baseDir + Global.separator + job.filename + "_" + off + "-" + number + ".bin";
+	    	    	else if(bson) {
+	    	    		String path = GUI.baseDir + Global.separator + job.filename + "_" + off + "-" + number + ".bin";
 	    	        	
 	    	        	if (Auxiliary.writeBLOB2Disk(job, path)) {        
 		    	        	/* inspection is enabled */
@@ -2535,6 +2606,7 @@ public class GUI extends Application {
 			
 		Job job = new Job();
 		tables.put(tp, panel);
+		dbnames.add(file.getName());
 			
 			
 		/* Does a companion RollbackJournal exist ? */
@@ -2542,7 +2614,8 @@ public class GUI extends Application {
 				NodeObject ro = new NodeObject(file.getName() + "-journal", null, -1,
 						FileTypes.RollbackJournalLog, 100);
 				rjNode = new TreeItem<NodeObject>(ro);
-				
+				dbnames.add(file.getName()+ "-journal");
+
 				rjNode.setGraphic(createFadeTransition("loading..."));
 				
 				root.getChildren().add(rjNode);
@@ -2567,7 +2640,8 @@ public class GUI extends Application {
 			NodeObject wo = new NodeObject(file.getName() + "-wal", null, -1, FileTypes.WriteAheadLog, 101);
 			walNode = new TreeItem<NodeObject>(wo);
 			walNode.setGraphic(createFadeTransition("loading..."));
-			
+			dbnames.add(file.getName()+ "-wal");
+
 			root.getChildren().add(walNode);
 
 			/* insert Panel with general header information for this database */
@@ -2755,6 +2829,7 @@ public class GUI extends Application {
 	 * @param isWALTable whether or not the table to built is a WAL-Table 
 	 * @return
 	 */
+	@SuppressWarnings("unused")
 	private ObservableList<String> prepareRow(int linenumber, LinkedList<String> row,boolean isWALTable)
 	{
 				
@@ -2772,14 +2847,25 @@ public class GUI extends Application {
 	 * @param isWALTable whether or not this table to fill is a WAL-Table
 	 */
 	@SuppressWarnings({ "unchecked", "rawtypes" })
-	public void update_table(String treepath, ObservableList<LinkedList<String>> rows, boolean isWALTable) {
+	public void update_table(String treepath, ObservableList<ObservableList<String>> rows, boolean isWALTable) {
 		
-		//System.out.println("Treepath ::: " + treepath);
+		System.out.println("Treepath ::: " + treepath);
+		datasets.put(treepath, rows);
+		
+		int linenumber = 0;
+		Iterator<ObservableList<String>> rt = rows.iterator();
+		while(rt.hasNext()) {
+			rt.next().add(0,String.valueOf(++linenumber));	
+		}
+
 		
 		// define array list for all table rows 
 		ObservableList<ObservableList> obdata = FXCollections.observableArrayList();
-		
-	    // first get the right table
+		//ObservableList<ObservableList> obdata = FXCollections.observableList(rows);
+		for (int i = 0; i < rows.size(); i++){
+			obdata.add(rows.get(i));				
+		}
+		// first get the right table
 	    FQTableView tb = null;
 		TextField filterField = null;
 		ComboBox columnselector;
@@ -2842,13 +2928,13 @@ public class GUI extends Application {
 		
 		
 	    // iterate over row array to create table rows  
-		for(int i = 0; i < rows.size(); i++)
-		{
-			LinkedList<String> data = rows.get(i);
+		//for(int i = 0; i < rows.size(); i++)
+		//{
+		//	LinkedList<String> data = rows.get(i);
 			// rearrange the row cell values for table view
-			obdata.add(FXCollections.observableList(prepareRow(i,data,isWALTable)));
+		//	obdata.add(FXCollections.observableList(prepareRow(i,data,isWALTable)));
 			
-		}
+		//}
 		
 		Iterator it = tb.getColumns().iterator();
 		ArrayList<String> cnames = new ArrayList<String>();

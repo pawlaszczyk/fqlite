@@ -1,17 +1,18 @@
 package fqlite.ui.hexviewer;
 
 import java.io.File;
-import demo.fxtexteditor.Styles;
 import fqlite.base.GUI;
-import fqlite.base.HexFXWindow;
 import goryachev.common.util.FileSettingsProvider;
 import goryachev.common.util.GlobalSettings;
-import goryachev.fx.CssLoader;
 import goryachev.log.config.JsonLogConfig;
 import javafx.application.Application;
 import javafx.stage.Modality;
 import javafx.stage.Stage;
 
+/**
+ * The hex viewer is realized within an separate 
+ * application window. 
+ */
 public class HexViewerApp extends Application
 {
 
@@ -63,7 +64,6 @@ public void clearAll(){
 }
 
 
-
 public static void setVisible(){
 	mw.setIconified(false);
 	mw.toFront();
@@ -85,7 +85,6 @@ public void start(Stage stage) throws Exception
 
 		mw.open();
 		mw.setOnCloseRequest(e ->{ 
-			System.out.println("HexView was closed");
 			closed = true;		    
 		});
 		
@@ -95,8 +94,7 @@ public void start(Stage stage) throws Exception
 		
 	}
 	
-	// init styles
-	CssLoader.setStyles(() -> new Styles());		
+	
 }
 
 

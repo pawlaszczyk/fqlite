@@ -79,7 +79,7 @@ public class SqliteElement {
 		else if (type == SerialTypes.INT64)
 			return String.valueOf(decodeInt64(value));
 		else if (type == SerialTypes.FLOAT64)
-			return String.valueOf(decodeFloat64(value));
+			return String.valueOf(decodeFloat64(value)).replace(",",".");
 		else if (type == SerialTypes.BLOB)
 			 {  
 			  

@@ -53,46 +53,7 @@ import javafx.scene.control.Alert.AlertType;
 import javafx.scene.control.TreeItem;
 import javafx.scene.image.Image;
 
-
-/*
----------------
-Job.java
----------------
-(C) Copyright 2020.
-
-Original Author:  Dirk Pawlaszczyk
-Contributor(s):   -;
-
-
-Project Info:  http://www.hs-mittweida.de
-
-This program is free software: you can redistribute it and/or modify
-it under the terms of the GNU General Public License as published by
-the Free Software Foundation, either version 3 of the License, or
-(at your option) any later version.
-
-This program is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-GNU General Public License for more details.
-
-You should have received a copy of the GNU General Public License
-along with this program.  If not, see <http://www.gnu.org/licenses/>.
-
-Dieses Programm ist Freie Software: Sie können es unter den Bedingungen
-der GNU General Public License, wie von der Free Software Foundation,
-Version 3 der Lizenz oder (nach Ihrer Wahl) jeder neueren
-veröffentlichten Version, weiterverbreiten und/oder modifizieren.
-
-Dieses Programm wird in der Hoffnung, dass es nützlich sein wird, aber
-OHNE JEDE GEWÄHRLEISTUNG, bereitgestellt; sogar ohne die implizite
-Gewährleistung der MARKTFÄHIGKEIT oder EIGNUNG FÜR EINEN BESTIMMTEN ZWECK.
-Siehe die GNU General Public License für weitere Details.
-
-Sie sollten eine Kopie der GNU General Public License zusammen mit diesem
-Programm erhalten haben. Wenn nicht, siehe <http://www.gnu.org/licenses/>.
-
-*/
+			
 /**
  * Core application class. It is used to recover lost SQLite records from a
  * sqlite database file. As a carving utility, it is binary based and can
@@ -143,7 +104,7 @@ public class Job {
 	public Hashtable<String, String> guiroltab = new Hashtable<String, String>();
 	
 	/* this is a multi-threaded program -> all data are saved to the list first*/
-	ConcurrentHashMap<String,ObservableList<LinkedList<String>>> resultlist = new ConcurrentHashMap<>();
+	ConcurrentHashMap<String,ObservableList<ObservableList<String>>> resultlist = new ConcurrentHashMap<>();
 	
     /* some constants */
 	final static String MAGIC_HEADER_STRING = "53514c69746520666f726d6174203300";
@@ -482,14 +443,14 @@ public class Job {
 		// entry for table name already exists  
 		if (resultlist.containsKey(line.getFirst()))
 		{
-			     ObservableList<LinkedList<String>> tablelist = resultlist.get(line.getFirst());
-			     tablelist.add(line);  // add row 
+			     ObservableList<ObservableList<String>> tablelist = resultlist.get(line.getFirst());
+			     tablelist.add(FXCollections.observableList(line));  // add row 
 		}
 		
 		// create a new data set since table name occurs for the first time
 		else {
-		          ObservableList<LinkedList<String>> tablelist = FXCollections.observableArrayList();
-				  tablelist.add(line); // add row 
+		          ObservableList<ObservableList<String>> tablelist = FXCollections.observableArrayList();
+				  tablelist.add(FXCollections.observableList(line)); // add row 
 				  resultlist.put(line.getFirst(),tablelist);  	
 		}
 	}
@@ -1373,24 +1334,25 @@ public class Job {
 				if (null != gui) {
                      
 					//Platform.runLater(() -> {
-							
+						
 						
 						/* since table nodes will also be needed in journals and wal-files we have to add those nodes too */
 						
 						String path = gui.add_table(this, td.tblname, td.columnnames, td.getColumntypes(), td.primarykeycolumns, td.boolcolumns, false, false,0);
 						guitab.put(td.tblname, path);
 							//lastpath = path;
-							
+												
 						if (readWAL) {
+													
 							
-							List<String> cnames = td.columnnames;
+							List<String> cnames = 	new ArrayList<>(td.columnnames);							
 							cnames.add(0,"commit");
 							cnames.add(1,"dbpage");
 							cnames.add(2,"walframe");
 							cnames.add(3,"salt1");
 							cnames.add(4,"salt2");
 							
-							List<String> ctypes = td.serialtypes;
+							List<String> ctypes = new ArrayList<>(td.serialtypes);
 							
 							/* add missing SQL types for the first 5 columns */
 							for(int cc =0; cc < 5; cc++)
@@ -1438,6 +1400,11 @@ public class Job {
 				/* update treeview in HexViewFactory - skip this step in console modus */
 				if (null != gui) {
 					
+					if(id.columnnames.size() > id.columntypes.size())
+					{
+						id.columntypes.add("String");
+					}
+					
 					String path = gui.add_table(this, id.idxname, id.columnnames, id.columntypes, id.boolcolumns, null, false, false,1);
 					
 					//System.out.println("id.idxname " + id.idxname);
@@ -1446,19 +1413,19 @@ public class Job {
 					if (readWAL) {
 						
 						
-						List<String> cnames = id.columnnames;
+						List<String> cnames = new ArrayList<>(id.columnnames);	
 						cnames.add(0,"commit");
 						cnames.add(1,"dbpage");
 						cnames.add(2,"walframe");
 						cnames.add(3,"salt1");
 						cnames.add(4,"salt2");
 						
-						List<String> ctypes = id.columntypes;
-						ctypes.add(0,"INT");
-						ctypes.add(1,"INT");
-						ctypes.add(2,"INT");
-						ctypes.add(3,"INT");
-						ctypes.add(4,"INT");
+						List<String> ctypes = new ArrayList<>(id.columntypes);
+						//ctypes.add(0,"INT");
+						//ctypes.add(1,"INT");
+						//ctypes.add(2,"INT");
+						//ctypes.add(3,"INT");
+						//ctypes.add(4,"INT");
 						
 						String walpath = gui.add_table(this, id.idxname, cnames, ctypes, id.boolcolumns, null, true, false,1);
 						guiwaltab.put(id.idxname, walpath);
@@ -1981,7 +1948,7 @@ public class Job {
 			{
 				dbname = objectname;
 
-				ConcurrentHashMap<String,ObservableList<LinkedList<String>>> exportlist = null;
+				ConcurrentHashMap<String,ObservableList<ObservableList<String>>> exportlist = null;
 						
 				switch(exp) {
 				
@@ -2006,13 +1973,13 @@ public class Job {
 					
 					/* get next table */
 					String tblname = keyset.nextElement();
-					ObservableList<LinkedList<String>> table = exportlist.get(tblname);
+					ObservableList<ObservableList<String>> table = exportlist.get(tblname);
 
 					if(Global.EXPORTTABLEHEADER)
 	  				 	writer.write(prepareHeader(tblname) + "\n");
 		  			
 					/* get table lines */
-					Iterator<LinkedList<String>> iter = table.iterator();
+					Iterator<ObservableList<String>> iter = table.iterator();
 
 					/* as long as there are lines inside go on */
 					while(iter.hasNext()){
@@ -2029,7 +1996,7 @@ public class Job {
 			 *********************************************************************************/
 			else{
 				
-				ObservableList<LinkedList<String>> table = null;
+				ObservableList<ObservableList<String>> table = null;
   				
 				/* get table rows from result list */
 				switch(parenttype){
@@ -2051,7 +2018,7 @@ public class Job {
   					 return false;
   				 }
 			
-  				 Iterator<LinkedList<String>> iter = table.iterator();
+  				 Iterator<ObservableList<String>> iter = table.iterator();
 				
   				 if(Global.EXPORTTABLEHEADER)
   				 	writer.write(prepareHeader(objectname) + "\n");
@@ -2119,7 +2086,7 @@ public class Job {
 		return null;
 	}
 	
-	private String prepareOutput(LinkedList<String> list, String dbname, String exportfolder) throws IOException{
+	private String prepareOutput(ObservableList<String> list, String dbname, String exportfolder) throws IOException{
 		
 		
 			String token = Global.CSV_SEPARATOR;
