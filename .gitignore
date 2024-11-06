@@ -1,6 +1,9 @@
 /target/
 /bin/
 
+# Ignore .DS_store files
+.DS_Store
+
 # Ignore Gradle project-specific cache directory
 .gradle
 
