@@ -1,0 +1,15 @@
+{
+  version: '1.0',
+  defaultSchema: 'Persons',
+  schemas: [
+    {
+      name: 'Persons',
+      type: "custom",
+      factory: "org.apache.calcite.adapter.java.ReflectiveSchema$Factory",
+      operand: {
+        class: "fqlite.sql.Person",
+        staticMethod: "getInstance"
+      }
+    }
+  ]
+}
