@@ -16,16 +16,19 @@ FQLite is a tool to find and restore deleted records in SQLite databases. It the
 
 FQLite allows you to:
 * browse and recover the content of freelist pages
-* recover records in all database pages including unallocated space
+* recover records in all database pages including unallocated space and free blocks!
 * support of UTF-8,UTF-16BE,UTF-16LE encoded databases
 * support for multi-byte columns as well as overflow pages
 * recover dropped tables
-* create CSV-format data export
+* create CSV/TSV-format data export
 * support for Rollback-Journals and WAL-Archives
 * integrated Hex-Viewer
 * support a forensically sound investigation of database files
 * support for decoding of bplist, protobuffer and BASE64 encoded cell values
 * automatic detection of different BLOB types like .png, .bmp, .gif, .jpeg, .tiff, .heic, .pdf
+* analyzing BLOB formats like google protobuffer, AVRO, Apple plist, Thrift,... 
+* integrated SQL-Analyzer 
+* Displaying database PRAGMA values
 
 Some features:
 
@@ -34,6 +37,10 @@ Some features:
 * open-source
 * free of charge
 * runs out of the box
+
+<p align="center">
+  <img width="95%" height="95%" src="img/fqlite_sqlanalyzer.png?raw=true" alt="SQL Analyzer"/>
+</p>
 
 
 ### Official Project Webpage
