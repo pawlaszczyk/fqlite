@@ -333,12 +333,12 @@ public class SQLParser {
 
 			// Attention: WAL-Archive table
 			List<String> cextended = new ArrayList<String>();
-			cextended.add("<ROWID>");
-			cextended.add("<TBLNAME>");
-			cextended.add("<PLL>");
-			cextended.add("<HL>");
-			cextended.add("<ST>");
-			cextended.add("<OFFSET>");
+			cextended.add("_NO");
+			cextended.add("_TBLNAME");
+			cextended.add("_PLL|HL");
+			cextended.add("_ROWID");
+			cextended.add("_STATUS");
+			cextended.add("_OFFSET");
 			cextended.addAll(tbl.columns);
 
 			List<String> textended = new ArrayList<String>();
@@ -362,12 +362,12 @@ public class SQLParser {
 			// Normal database table -> add the standard fields to columns & types
 
 			List<String> cextended = new ArrayList<String>();
-			cextended.add("<ROWID>");
-			cextended.add("<TBLNAME>");	
-			cextended.add("<PLL>");
-			cextended.add("<HL>");
-			cextended.add("<ST>");
-			cextended.add("<OFFSET>");
+			cextended.add("_NO");
+			cextended.add("_TBLNAME");	
+			cextended.add("_PLL|HL");
+			cextended.add("_ROWID");
+			cextended.add("_ST");
+			cextended.add("_OFFSET");
 			cextended.addAll(tbl.columns);
 
 			List<String> textended = new ArrayList<String>();

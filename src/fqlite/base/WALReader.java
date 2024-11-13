@@ -227,13 +227,13 @@ public class WALReader{
 
 		byte header[] = new byte[4];
 		buffer.get(header);
-		if (Auxiliary.bytesToHex(header).equals(MAGIC_HEADER_STRING1))
+		if (Auxiliary.bytesToHex3(header).equals(MAGIC_HEADER_STRING1))
 		{		
 				headerstring = MAGIC_HEADER_STRING1;
 				AppLog.info("header is okay. seems to be an write ahead log file.");
 		}
 		else
-		if (Auxiliary.bytesToHex(header).equals(MAGIC_HEADER_STRING2))
+		if (Auxiliary.bytesToHex3(header).equals(MAGIC_HEADER_STRING2))
 		{
 			headerstring = MAGIC_HEADER_STRING2;
 			AppLog.info("header is okay. seems to be an write ahead log file.");
@@ -457,7 +457,7 @@ public class WALReader{
 		withoutROWID = false;
 
 		/* convert byte array into a string representation */
-		String content = Auxiliary.bytesToHex(buffer);
+		String content = Auxiliary.bytesToHex2(buffer);
 
 		// offset 0
 		buffer.position(0);

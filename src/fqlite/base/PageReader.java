@@ -189,7 +189,7 @@ public class PageReader{
 					continue;
 				}
 
-				byte[] value = new byte[en.length];
+				byte[] value = new byte[en.getlength()];
 
 				bf.get(value);
 
@@ -209,8 +209,8 @@ public class PageReader{
 					continue;
 				}
 
-				byte[] value = new byte[en.length];
-				if ((buffer.position() + en.length) > buffer.limit()) {
+				byte[] value = new byte[en.getlength()];
+				if ((buffer.position() + en.getlength()) > buffer.limit()) {
 					error = true;
 					return null;
 				}
@@ -381,7 +381,7 @@ public class PageReader{
 			System.out.println("ERROR " + err.toString());
 		}
 		
-		AppLog.debug("Header: " + Auxiliary.bytesToHex(header));
+		AppLog.debug("Header: " + Auxiliary.bytesToHex3(header));
 		
 		return get(header);
 	}

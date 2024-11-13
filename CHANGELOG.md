@@ -1,4 +1,5 @@
 # What's Changed
-- SQLAnalyzer beta has been added
-- HexViewer -> bug fixes 
-- License info was updated
+- smaller bug fixes in detection algorithm
+- added a new ROWID column
+- pll and hl columns are merged now into one column
+- UI layout improvements

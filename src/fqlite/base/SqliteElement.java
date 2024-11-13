@@ -16,14 +16,26 @@ import fqlite.util.Auxiliary;
  *
  */
 public class SqliteElement {
-	public SerialTypes type;
-	public StorageClass serial;
-	public int length;
 	
-	public SqliteElement(SerialTypes type, StorageClass serial, int length) {
-		this.length = length;
+	public final SerialTypes type;
+	public final StorageClass serial;
+	private int length;
+	
+
+	public SqliteElement(SerialTypes type, StorageClass serial, int l) {
+
+		this.length = l;
 		this.type = type;
 		this.serial = serial;
+	}
+	
+	public SqliteElement clone(SqliteElement original, int newlength){
+		
+		return new SqliteElement(original.type,original.serial,newlength);
+	}
+
+	public int getlength(){
+		return length;
 	}
 	
 	public final String getBLOB(byte[] value, boolean truncBLOB){
@@ -84,9 +96,9 @@ public class SqliteElement {
 			 {  
 			  
 			  if (truncBLOB && value.length > 32)
-				  return String.valueOf(Auxiliary.bytesToHex(Arrays.copyOfRange(value, 0, 32)));
+				  return String.valueOf(Auxiliary.bytesToHex3(Arrays.copyOfRange(value, 0, 32)));
 			  
-			  return String.valueOf(Auxiliary.bytesToHex(Arrays.copyOfRange(value, 0, value.length)));   	
+			  return String.valueOf(Auxiliary.bytesToHex3(Arrays.copyOfRange(value, 0, value.length)));   	
 			  	  
 	    }
 		}catch(Exception err){

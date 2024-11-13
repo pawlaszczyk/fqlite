@@ -63,7 +63,7 @@ public class Carver{
 
 	public int carve(int fromidx, int toidx, SerialTypeMatcher mat, int headertype, AbstractDescriptor tbd) 
 	{
-		if (tbd.serialtypes.size()<2)
+		if (tbd.serialtypes.size()<4)
 			return 0;
 		
 		Auxiliary c = new Auxiliary(job);
@@ -81,7 +81,6 @@ public class Carver{
 				break;
 		}
 		
-
 		/* gap is to small for a regular record? */
 		if((toidx - fromidx) <= 5)
 			return -1;
@@ -89,6 +88,7 @@ public class Carver{
 		/* set search region */
 		mat.region(fromidx, toidx);
 		
+
 		/* set pattern to search for */
 		mat.setPattern(tbd.getHpattern());
 		
@@ -103,8 +103,9 @@ public class Carver{
 			
 			/* skip stupid matches - remember - it is just a heuristic */
 			if ((m.length() < 2) || (m.startsWith("00")))	
-				  continue;
-		
+			{	
+				continue;
+			}
 			/* skip match xxxxxx0000 */
 			if ((m.length() >= 6) && m.endsWith("0000"))
 				  continue;
@@ -136,16 +137,9 @@ public class Carver{
 				}
 				if(nullbytes >=3){
 					return 0;
-				}
-				
-				
+				}								
 			}
 			
-			
-			
-			
-			//System.out.println("Bereich: " + ((pagenumber - 1) * job.ps + fromidx) + " "
-			//		+ ((pagenumber - 1) * job.ps + toidx));
 
 			/* get the start indices of the match */
 			int from = mat.start();
@@ -155,11 +149,6 @@ public class Carver{
 				continue;
 			}
 			
-			/* don't regard the first column byte value since it is probably not the first column length */
-			//if (headertype == CarverTypes.FIRSTCOLUMNMISSING) {
-			//	m = m.substring(2);
-			//}
-
 			/* match longer than gap ?-) */
 			if ((m.length()/2 + Auxiliary.getPayloadLength(m)) > (toidx - fromidx))
 			{
@@ -176,8 +165,6 @@ public class Carver{
 				{
 					// do nothing - maybe an overflow record?
 				}
-				//else   
-				//	continue;
 			}
 			else{
 				int abstand = from - 4;
@@ -227,7 +214,6 @@ public class Carver{
 					if(tbd.serialtypes.get(0).equals("INT"))
 					{
 						m = "XX" + m;
-						//System.out.println("XX - column on first place");
 					}
 					else if(tbd.serialtypes.get(0).equals("REAL"))
 					{
@@ -255,7 +241,6 @@ public class Carver{
 	        if (!Match.onlyZeros(m))
 	        {  
 				/* add match to list */
-				//matches.addFirst(new Match(m,from,end));
 				matches.add(new Match(m,from,end));
 				
 	        }
@@ -269,9 +254,7 @@ public class Carver{
 		}
 		
 	   Match[] mm =  matches.toArray(new Match[0]);
-	 
-	   //System.out.println(" Matches in page "+ mm.length);
-		
+	 		
 		// take all matches in this region and try to recover those data records
 		for (int i = 0; i < mm.length; i++)
 		{
@@ -290,11 +273,6 @@ public class Carver{
 					continue;
 				
 				LinkedList<String> record = res.record;
-	
-				// add new line to output
-				//if (null != rc) { 
-				//	job.ll.add(tbd.tblname + ";" + Global.DELETED_RECORD_IN_PAGE + ";" + rc.toString());
-				//}
 				
 				if (null != record) {
 					

@@ -1050,12 +1050,33 @@ public class GUI extends Application {
 			}                    
 		});  
 		
-		numbercolumn.setStyle( "-fx-alignment: CENTER-RIGHT;");
-
+		numbercolumn.setStyle( "-fx-text-fill: gray;-fx-alignment: TOP-RIGHT;");
+//		numbercolumn.setCellFactory(param -> new TextFieldTableCell<>(new DefaultStringConverter()) {
+//			   @Override
+//			   public void updateItem(String item, boolean empty) {
+//			      super.updateItem(item, empty);
+//
+//			       if (item != null && !empty) {
+//			          if (!getStyleClass().contains(CSS)) {
+//			             getStyleClass().add(CSS);
+//			          }
+//			       } else {
+//			          getStyleClass().remove(CSS);
+//			       }
+//			       
+//			       if (super.getIndex() % 2 == 0)
+//			    	   this.setStyle("-fx-font-style: italic; -fx-alignment: TOP-RIGHT; -fx-background-color: honeydew;");
+//			       else
+//			    	   this.setStyle("-fx-font-style: italic; -fx-alignment: TOP-RIGHT; -fx-background-color: lavender;");
+//
+//			   }
+//
+//			 
+//		});
 
 		//Label PLLLabel = new Label("PLL");
 		//PLLLabel.setTooltip(new Tooltip("shows payload length in bytes")); 
-		TableColumn pllcolumn = new TableColumn<>("PLL");
+		TableColumn pllcolumn = new TableColumn<>("PLL|HL");
 		//pllcolumn.setGraphic(PLLLabel);
 		pllcolumn.setCellFactory(TooltippedTableCell.forTableColumn(tablename,job,this.stage));
      	pllcolumn.setCellValueFactory(new Callback<CellDataFeatures<ObservableList,String>,ObservableValue<String>>(){                    
@@ -1064,32 +1085,36 @@ public class GUI extends Application {
             }                    
 		});
      	
-		pllcolumn.setStyle( "-fx-font-style: italic; -fx-alignment: CENTER-RIGHT;");
+		pllcolumn.setStyle( "-fx-text-fill: gray;-fx-alignment: TOP-RIGHT;");
 
-		pllcolumn.setCellFactory(param -> new TextFieldTableCell<>(new DefaultStringConverter()) {
-			   @Override
-			   public void updateItem(String item, boolean empty) {
-			      super.updateItem(item, empty);
-
-			       if (item != null && !empty) {
-			          if (!getStyleClass().contains(CSS)) {
-			             getStyleClass().add(CSS);
-			          }
-			       } else {
-			          getStyleClass().remove(CSS);
-			       }
-			       
-			       this.setStyle("-fx-font-style: italic;");
-			   }
-
-			 
-		});
-		
+//		pllcolumn.setCellFactory(param -> new TextFieldTableCell<>(new DefaultStringConverter()) {
+//			   @Override
+//			   public void updateItem(String item, boolean empty) {
+//			      super.updateItem(item, empty);
+//
+//			       if (item != null && !empty) {
+//			          if (!getStyleClass().contains(CSS)) {
+//			             getStyleClass().add(CSS);
+//			          }
+//			       } else {
+//			          getStyleClass().remove(CSS);
+//			       }
+//			       
+//			       if (super.getIndex() % 2 == 0)
+//			    	   this.setStyle("-fx-font-style: italic; -fx-alignment: TOP-RIGHT; -fx-background-color: honeydew;");
+//			       else
+//			    	   this.setStyle("-fx-font-style: italic; -fx-alignment: TOP-RIGHT; -fx-background-color: lavender;");
+//
+//			   }
+//
+//			 
+//		});
+//		
      
      	
     	//Label HLLabel = new Label("HL");
 		//HLLabel.setTooltip(new Tooltip("shows the header length in bytes")); 
-		TableColumn hlcolumn = new TableColumn<>("HL");
+		TableColumn hlcolumn = new TableColumn<>("ROWID");
 		//hlcolumn.setGraphic(HLLabel);
 		hlcolumn.setCellFactory(TooltippedTableCell.forTableColumn(tablename,job,this.stage));
      	hlcolumn.setCellValueFactory(new Callback<CellDataFeatures<ObservableList,String>,ObservableValue<String>>(){                    
@@ -1098,8 +1123,29 @@ public class GUI extends Application {
             }                    
 		});
      	
-		hlcolumn.setStyle( "-fx-alignment: CENTER-RIGHT;");
-
+		hlcolumn.setStyle( "-fx-text-fill: gray;-fx-alignment: TOP-RIGHT;");
+//		hlcolumn.setCellFactory(param -> new TextFieldTableCell<>(new DefaultStringConverter()) {
+//			   @Override
+//			   public void updateItem(String item, boolean empty) {
+//			      super.updateItem(item, empty);
+//
+//			       if (item != null && !empty) {
+//			          if (!getStyleClass().contains(CSS)) {
+//			             getStyleClass().add(CSS);
+//			          }
+//			       } else {
+//			          getStyleClass().remove(CSS);
+//			       }
+//			       
+//			       if (super.getIndex() % 2 == 0)
+//			    	   this.setStyle("-fx-font-style: italic; -fx-alignment: TOP-RIGHT; -fx-background-color: honeydew;");
+//			       else
+//			    	   this.setStyle("-fx-font-style: italic; -fx-alignment: TOP-RIGHT; -fx-background-color: lavender;");
+//
+//			   }
+//
+//			 
+//		});
      	 
      	
      	Label statusLabel = new Label(Global.STATUS_CLOMUN);
@@ -1114,8 +1160,29 @@ public class GUI extends Application {
             } 
      	});
      	statuscolumn.setGraphic(view);
-		statuscolumn.setStyle( "-fx-alignment: CENTER-RIGHT;");
-
+		statuscolumn.setStyle( "-fx-text-fill: gray;-fx-alignment: TOP-RIGHT;");
+//		statuscolumn.setCellFactory(param -> new TextFieldTableCell<>(new DefaultStringConverter()) {
+//			   @Override
+//			   public void updateItem(String item, boolean empty) {
+//			      super.updateItem(item, empty);
+//
+//			       if (item != null && !empty) {
+//			          if (!getStyleClass().contains(CSS)) {
+//			             getStyleClass().add(CSS);
+//			          }
+//			       } else {
+//			          getStyleClass().remove(CSS);
+//			       }
+//			       
+//			       if (super.getIndex() % 2 == 0)
+//			    	   this.setStyle("-fx-font-style: italic; -fx-alignment: TOP-RIGHT; -fx-background-color: honeydew;");
+//			       else
+//			    	   this.setStyle("-fx-font-style: italic; -fx-alignment: TOP-RIGHT; -fx-background-color: lavender;");
+//
+//			   }
+//
+//			 
+//		});
 	  	
      	TableColumn offsetcolumn = new TableColumn<>("Offset");
 		offsetcolumn.setCellFactory(TooltippedTableCell.forTableColumn(tablename,job,this.stage));
@@ -1125,8 +1192,29 @@ public class GUI extends Application {
             }                    
 		});
      		
-		offsetcolumn.setStyle( "-fx-alignment: CENTER-RIGHT;");
-
+		offsetcolumn.setStyle( "-fx-text-fill: gray;-fx-alignment: TOP-RIGHT;");
+//		offsetcolumn.setCellFactory(param -> new TextFieldTableCell<>(new DefaultStringConverter()) {
+//			   @Override
+//			   public void updateItem(String item, boolean empty) {
+//			      super.updateItem(item, empty);
+//
+//			       if (item != null && !empty) {
+//			          if (!getStyleClass().contains(CSS)) {
+//			             getStyleClass().add(CSS);
+//			          }
+//			       } else {
+//			          getStyleClass().remove(CSS);
+//			       }
+//			       
+//			       if (super.getIndex() % 2 == 0)
+//			    	   this.setStyle("-fx-font-style: italic; -fx-alignment: TOP-RIGHT; -fx-background-color: honeydew;");
+//			       else
+//			    	   this.setStyle("-fx-font-style: italic; -fx-alignment: TOP-RIGHT; -fx-background-color: lavender;");
+//
+//			   }
+//
+//			 
+//		});
      		
      	//[no,pll,hl,tabname,status,...]
 		table.getColumns().addAll(numbercolumn,statuscolumn,offsetcolumn,pllcolumn,hlcolumn);
@@ -1148,12 +1236,12 @@ public class GUI extends Application {
 						return new SimpleStringProperty(param.getValue().get(0).toString());               //line number index   
 				}                    
 			});  
-			numbercolumn.setStyle( "-fx-alignment: CENTER-RIGHT;");
+			numbercolumn.setStyle( "-fx-text-fill: gray;-fx-alignment: TOP-RIGHT;");
 
 
 			//Label PLLLabel = new Label("PLL");
 			//PLLLabel.setTooltip(new Tooltip("shows payload length in bytes")); 
-			TableColumn pllcolumn = new TableColumn<>("PLL");
+			TableColumn pllcolumn = new TableColumn<>("PLL|HL");
 			pllcolumn.setCellFactory(TooltippedTableCell.forTableColumn(tablename,job,this.stage));
 			//pllcolumn.setGraphic(PLLLabel);
 			pllcolumn.setComparator(new CustomComparator());
@@ -1163,13 +1251,13 @@ public class GUI extends Application {
 	            }                    
 			});
 			//pllcolumn.setStyle( "-fx-alignment: CENTER-RIGHT;");
-			pllcolumn.setStyle( "-fx-font-style: italic; -fx-alignment: CENTER-RIGHT; ");
+			pllcolumn.setStyle( "-fx-text-fill: gray;-fx-alignment: TOP-RIGHT;");
 			
 		
 	     	
 	    	//Label HLLabel = new Label("HL");
 			//HLLabel.setTooltip(new Tooltip("shows the header length in bytes")); 
-			TableColumn hlcolumn = new TableColumn<>("HL");
+			TableColumn hlcolumn = new TableColumn<>("ROWID");
 			hlcolumn.setCellFactory(TooltippedTableCell.forTableColumn(tablename,job,this.stage));
 			//hlcolumn.setGraphic(HLLabel);
 			hlcolumn.setComparator(new CustomComparator());
@@ -1178,7 +1266,7 @@ public class GUI extends Application {
 	                return new SimpleStringProperty(param.getValue().get(3).toString());                        
 	            }                    
 			});
-			hlcolumn.setStyle( "-fx-alignment: CENTER-RIGHT;");
+			hlcolumn.setStyle( "-fx-text-fill: gray;-fx-alignment: TOP-RIGHT;");
 
 	     	
 	     	Label statusLabel = new Label(Global.STATUS_CLOMUN);
@@ -1203,7 +1291,7 @@ public class GUI extends Application {
 	                return new SimpleStringProperty(param.getValue().get(5).toString());                        
 	            }                    
 			});
-			offsetcolumn.setStyle( "-fx-alignment: CENTER-RIGHT;");
+			offsetcolumn.setStyle( "-fx-text-fill: gray;-fx-alignment: TOP-RIGHT;");
 
 	     		
 	     	//[no,pll,hl,tabname,status,...]
@@ -1240,18 +1328,22 @@ public class GUI extends Application {
             	else
             		return new SimpleStringProperty("");                        
                 
+            	
             }      
 			});
+			
+			
+			
 			
 			
 			//if (columntypes.size()>i && !columntypes.get(i).equals("BLOB") && !columntypes.get(i).equals("TEXT")) {				
 		
 			if (columntypes.size()>i && !columntypes.get(i).equals("BLOB") && !columntypes.get(i).equals("TEXT")) {				
-								col.setStyle( "-fx-alignment: CENTER-RIGHT;");	
+								col.setStyle( "-fx-alignment: TOP-RIGHT;");	
 			}
 			else {
 			    if (columntypes.size()>i)
-			    				col.setStyle( "-fx-alignment: CENTER-LEFT;");	    	
+			    				col.setStyle( "-fx-alignment: TOP-LEFT;");	    	
 			}
 			
 			/* add icon to PRIMARYKEY columns */
@@ -1292,8 +1384,8 @@ public class GUI extends Application {
 	    columnselection.getItems().add("No.");
 	    columnselection.getItems().add("Status");
 	    columnselection.getItems().add("Offset");
-	    columnselection.getItems().add("PLL");
-	    columnselection.getItems().add("HL");
+	    columnselection.getItems().add("PLL|HL");
+	    columnselection.getItems().add("ROWID");
 		    
 	    
 	    Iterator<String> cli = columns.iterator();
@@ -1875,8 +1967,15 @@ public class GUI extends Application {
 		
 	    	if(coltype.equals("REAL") || coltype.equals("DOUBLE") || coltype.equals("FLOAT")) {
 
-	        	int point = cellvalue.indexOf(",");
-	            String firstpart;
+	        	int point = -1;
+	        	
+	        	point = cellvalue.indexOf(",");
+	        	
+	        	if (point < 0)
+	        		point = cellvalue.indexOf(".");
+
+	        	
+	        	String firstpart;
 	        	if (point > 0)
 	            	firstpart = cellvalue.substring(0, point);
 	            else
@@ -2535,7 +2634,7 @@ public class GUI extends Application {
 			raf = new RandomAccessFile(file,"r");
 			byte h[] = new byte[16];
 			raf.read(h);
-			if (!Auxiliary.bytesToHex(h).equals(Job.MAGIC_HEADER_STRING)) 
+			if (!Auxiliary.bytesToHex3(h).equals(Job.MAGIC_HEADER_STRING)) 
 			{
 				abort = true;
 				Alert alert = new Alert(AlertType.ERROR);
@@ -3026,10 +3125,10 @@ public class GUI extends Application {
 				
 					switch(cname) {
 						
-						case "pll"  : cnumber = 2;
+						case "pll|hl"  : cnumber = 2;
 						break;
 						
-						case "hl"   : cnumber = 3;
+						case "rowid"   : cnumber = 3;
 						break;
 					
 						case ""     : cnumber = 4;

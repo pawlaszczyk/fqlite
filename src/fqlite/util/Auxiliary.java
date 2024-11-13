@@ -223,7 +223,7 @@ public class Auxiliary{
 
 			byte[] value = null;
 
-			value = new byte[en.length];
+			value = new byte[en.getlength()];
 
 			try {
 				// System.out.println("current pos" + buffer.position());
@@ -351,6 +351,8 @@ public class Auxiliary{
 	public CarvingResult readDeletedRecordNew(Job job, ByteBuffer buffer, BitSet bs, Match m, Match next,
 			int pagenumber, String fallback) throws IOException {
 
+		//System.out.println("readDeletedRecordNew() - Entry");
+		
 		LinkedList<String> record = new LinkedList<String>();
 		List<SqliteElement> columns;
 		int rowid = -1;
@@ -469,7 +471,7 @@ public class Auxiliary{
 			AppLog.debug(" no valid header-string: " + header);
 			return null;
 		}
-
+	
 		/*
 		 * use the header information to reconstruct the payload length, since this
 		 * information is normally lost during delete
@@ -549,7 +551,7 @@ public class Auxiliary{
 					continue;
 				}
 
-				byte[] value = new byte[en.length];
+				byte[] value = new byte[en.getlength()];
 
 				bf.get(value);
 				if (en.serial == StorageClass.BLOB) {
@@ -591,13 +593,13 @@ public class Auxiliary{
 						continue;
 					}
 
-					byte[] value = new byte[en.length];
-					if ((buffer.position() + en.length) > buffer.limit()) {
+					byte[] value = new byte[en.getlength()];
+					if ((buffer.position() + en.getlength()) > buffer.limit()) {
 						error = true;
 						return null;
 					}
 
-					if (rowid >= 0 && en.length == 0 && m.rowidcolum >= 0) {
+					if (rowid >= 0 && en.getlength() == 0 && m.rowidcolum >= 0) {
 						if (m.rowidcolum == number) {
 							record.add(rowid + "");
 							//co++;
@@ -657,18 +659,17 @@ public class Auxiliary{
 						continue;
 					}
 
-					if (rowid >= 0 && en.length == 0 && m.rowidcolum >= 0) {
+					if (rowid >= 0 && en.getlength() == 0 && m.rowidcolum >= 0) {
 						if (m.rowidcolum == cc) {
 							record.add(rowid + "");
 							//co++;
-							
 							
 							continue;
 						}
 					}
 
-					byte[] value = new byte[en.length];
-					if ((buffer.position() + en.length) > buffer.limit()) {
+					byte[] value = new byte[en.getlength()];
+					if ((buffer.position() + en.getlength()) > buffer.limit()) {
 						error = true;
 						return null;
 					}
@@ -677,14 +678,22 @@ public class Auxiliary{
 						nextrecord = job.ps;
 
 					/* partial data record? -> check length */
-					if (((buffer.position() + en.length) > nextrecord)) {
+					if (((buffer.position() + en.getlength()) > nextrecord)) {
 						/* we can only recover some bytes but not all of the given column */
-						en.length = en.length - (buffer.position() + en.length - nextrecord);
+						
+						int oldlength = en.getlength();
+						int newlength = en.getlength() - (buffer.position() + en.getlength() - nextrecord);
+						
+						if (newlength < oldlength) {
+							en = en.clone(en, newlength);
+							  
+						}
+						
 						// System.out.println("Rest-Bytes:: " + en.length + "");
-						if (en.length > 0) {
+						if (en.getlength() > 0) {
 							/* a partial restore is only possible for columns like STRING and BLOB */
 							if (en.type == SerialTypes.BLOB || en.type == SerialTypes.STRING) {
-								value = new byte[en.length];
+								value = new byte[en.getlength()];
 								buffer.get(value);
 								// record.add(en.toString(value,false));
 
@@ -756,9 +765,20 @@ public class Auxiliary{
 		long cursor = ((pagenumber - 1L) * job.ps) + buffer.position();
 		AppLog.debug("visited :: " + (((pagenumber - 1L) * job.ps) + m.end) + " bis " + cursor);
 
-		record.add(0, "" + pll);
-		record.add(1, "" + header.length() / 2);
+		record.add(0, "[" + pll + "|" + header.length() / 2 + "]");
 
+		//record.add(0, "" + pll);
+		
+		//record.add(1, "" + header.length() / 2);
+		record.add(1, "" + rowid);
+
+		//int hl = (header.length() / 2) - 1;
+		
+		//if (columns.size() > (hl -1)) {
+		//	System.out.println("columns " + columns.size() + " header -> " + (header.length() / 2));
+			//return null;
+		//}
+		
 		return new CarvingResult(buffer.position(), cursor, new StringBuffer(), record);
 	}
 
@@ -862,7 +882,6 @@ public class Auxiliary{
 			} 
 			else {
 				record.add(Global.DELETED_RECORD_IN_PAGE);
-				//record.add("__FREELIST");
 			}
 
 			record.add(Global.REGULAR_RECORD);
@@ -905,7 +924,7 @@ public class Auxiliary{
 		}
 
 		AppLog.debug("cellstart for pll: " + (((pagenumber_db - 1L) * job.ps) + cellstart));
-			
+		
 		// length of payload as varint
 		try {
 			buffer.position(cellstart);
@@ -935,8 +954,7 @@ public class Auxiliary{
 					// read rowid as varint
 					rowid = readUnsignedVarInt(buffer);
 					AppLog.debug("rowid: " + Integer.toHexString(rowid));
-					// We do not use this key in the moment.
-					// However, we have to read the value.
+					
 				}
 
 			}
@@ -984,8 +1002,6 @@ public class Auxiliary{
 			return null;
 		}
 
-		//AppLog.debug("Number of columns: " + columns.size());
-
 		int co = 0;
 		try {
 		
@@ -997,7 +1013,6 @@ public class Auxiliary{
 				/* this is only necessary, when component name is unknown */
 				if (null == td) {
 					record.add(Global.DELETED_RECORD_IN_PAGE);
-					//record.add("__FREELIST");
 				} else {
 					record.add(td.tblname);
 					job.pages[pagenumber_db] = td;
@@ -1021,7 +1036,6 @@ public class Auxiliary{
 		if (so < pll) {
 			int last = buffer.position();
 			AppLog.debug("regular spilled payload ::" + so);
-			//System.out.println("regular spilled payload ::" + so);
 			if ((buffer.position() + so - phl - 1) > (buffer.limit() - 4)) {
 				return null;
 			}
@@ -1046,10 +1060,8 @@ public class Auxiliary{
 			byte[] extended;
 			if (filetype == Global.WAL_ARCHIVE_FILE) {
 				// write ahead log  overflow
-				//System.out.println("Read overflow for page" + pagenumber_db);
 				System.out.println("pll: " + pll);
 				extended = readOverflowIterativ(overflow , true);
-				//System.out.println("Groesse des Overflows insgesamt:: " + extended.length);
 			}
 			else {
 				/*
@@ -1111,7 +1123,7 @@ public class Auxiliary{
 				}
 				
 				
-				byte[] value = new byte[en.length];
+				byte[] value = new byte[en.getlength()];
 
 				if ((bf.limit() - bf.position()) < value.length) {
 					System.out.println(
@@ -1251,13 +1263,13 @@ public class Auxiliary{
 				}
 
 				byte[] value = null;
-				if (maxlength >= en.length) {
-				    if (en.length < 0)
+				if (maxlength >= en.getlength()) {
+				    if (en.getlength() < 0)
 				    	value = new byte[0];
 				    else
-				    	value = new byte[en.length];
+				    	value = new byte[en.getlength()];
 				}
-				maxlength -= en.length;
+				maxlength -= en.getlength();
 
 				if (null == value)
 					break;
@@ -1362,28 +1374,25 @@ public class Auxiliary{
 		}
 
 		/* append header match string at the end */
-		record.add(1, "" + pll);
-		record.add(2, "" + hh.length() / 2);
-
+		record.add(1, "[" + pll + "|" + hh.length() / 2 + "]");
+		//record.add(2, "" + hh.length() / 2);	
+		record.add(2, "" + rowid);
 		
 		/* mark as visited */
 		if (so < pll) {
-			AppLog.debug("visted " + cellstart + " bis " + (cellstart + so + 7));
 			bs.set(cellstart, cellstart + so + 4);
 		} else {
-			AppLog.debug("visted " + cellstart + " bis " + buffer.position());
 			bs.set(cellstart, buffer.position());
 		}
 		if (error) {
 			AppLog.error("spilles overflow page error ...");
-			// return "";
 			return null;
 			
 		}
 	
 
 		/* the offset is derived from the name of the table plus primary key / rowid */
-		String archivekey = getPrimaryKey(td,record);
+//		String archivekey = getPrimaryKey(td,record);
  	    //System.out.println("Archiv Key::" + archivekey);
 		
 		
@@ -1394,146 +1403,70 @@ public class Auxiliary{
     	}		
 		
         /*  Is a Rollback journal file present ? */
-		if (filetype == Global.ROLLBACK_JOURNAL_FILE && null != ad && !unkown && !withoutROWID) {
-		
-			/* first occurrence of this records or already existing ? */
-			if(job.LineHashes.containsKey(archivekey)){
-		    	
-		    	Integer originalhash = job.LineHashes.get(archivekey);
-		    	Integer journalhash = computeHash(record);
-		    	
-		    	/* hash of line in database differs from hash in journal file */
-		    	if(!originalhash.equals(journalhash))
-		    	{
-		    		//System.out.println(originalhash + " <> " + journalhash);	
-		    		record.set(3,"");
-		    	}
-		    }
-		    else {
-		     	System.out.println("removed record at offset " + archivekey);
-		     	record.set(3,"");
-		    }
-		
-		}
-		
+//		if (filetype == Global.ROLLBACK_JOURNAL_FILE && null != ad && !unkown && !withoutROWID) {
+//		
+//			/* first occurrence of this records or already existing ? */
+//			if(job.LineHashes.containsKey(archivekey)){
+//		    	
+//		    	Integer originalhash = job.LineHashes.get(archivekey);
+//		    	Integer journalhash = computeHash(record);
+//		    	
+//		    	/* hash of line in database differs from hash in journal file */
+//		    	if(!originalhash.equals(journalhash))
+//		    	{
+//		    		record.set(3,"");
+//		    	}
+//		    }
+//		    else {
+//		     	System.out.println("removed record at offset " + archivekey);
+//		     	record.set(3,"");
+//		    }
+//		
+//		}
+//		
 		
 		
 		/* Is a WAL archive file present ? */
-		if (filetype == Global.WAL_ARCHIVE_FILE && !unkown && !withoutROWID && null != ad) { 
-			
-		    //if (null == archivekey) 
-		    //	return record;
-		   
-			//System.out.println(" Abzweig zu definierten Tabellen A");
-
-		    
-		    if(job.TimeLineHashes.containsKey(archivekey)){
-		    	    	
-			    	LinkedList<Version> versions = job.TimeLineHashes.get(archivekey);
-			      
-			    	Integer originalhash = computeHash(record);
-			    	Integer journalhash = versions.getFirst().hash;
-			    	//int lvs = 0;
-			    	
-			    	//String status = versions.getFirst().record.get(3);
-			    	//String lastversion = status.substring(0,status.indexOf("."));
-			    	
-			    	//if (null != lastversion){
-			    	//	lvs = Integer.parseInt(lastversion);
-				    //	lvs++;
-			    	//}
-			    	
-		    	if(!originalhash.equals(journalhash))
-		    	{
-		    	
-		    	    //record.set(3,String.format("%03d", lvs) + ". version" + " update");
-		    	    record.set(3,"");
-
-		    		//System.out.println("new update record for primary key " + archivekey);
-			     	//System.out.println(record);			   
-		    	}
-		    	else
-		    	{
-		    	    record.set(3,"");
-		    	    //record.set(3,String.format("%03d", lvs)  + ". version" + " (no change)");
-		    	  	//System.out.println("new change record for primary key " + archivekey);
-			     	//System.out.println(record);
-			   
-		    	}
-		    	
-		    	versions.addFirst(new Version(record));
-		    }
-		    else {
-		     	//System.out.println("new first record for primary key  " + archivekey);
-		     	//System.out.println(record);
-		     	//record.set(3,"001. version");
-	    	    record.set(3,"");
-		     	LinkedList<Version> recordlist = new LinkedList<Version>();
-		     	recordlist.add(new Version(record));
-		     	job.TimeLineHashes.put(archivekey,recordlist);
-		    }
-			
-			
-			
-		}
-//		else if (filetype == Global.WAL_ARCHIVE_FILE  && !unkown && null != ad && !withoutROWID) {
+//		if (filetype == Global.WAL_ARCHIVE_FILE && !unkown && !withoutROWID && null != ad) { 
 //			
-//				System.out.println(" Abzweig zu definierten Tabellen B");
-//		
-//				/* only for real tables - index tables are not included */
-//				if (ad instanceof TableDescriptor) {
-//				
-//					String key = null;
-//					
-//					td = (TableDescriptor) ad;
-//				
-//					List<Integer> pk  = td.primarykeycolumnnumbers;
-//					
-//					/* there exists on or even more explicitly defined primary key column */
-//					if(null != pk && pk.size() > 0)
-//					{
-//						Iterator<Integer> pcol = pk.iterator();
-//						StringBuffer sb = new StringBuffer();
-//						while (pcol.hasNext()) {
-//						    // create composite primary key
-//							sb.append( record.get(5+pcol.next()));
-//						}					
-//					
-//					    key = sb.toString();
-//					}
-//					
-//					
-//					/* we do not have a primary key column -> in this case use the rowid */
-//					else
-//					{
-//						key = ad.getName() + "_" + rowid;
-//					}
-//		
-//					if (filetype == Global.ROLLBACK_JOURNAL_FILE) {
-//					
-//						// we need this information to detect differences between current line in database and
-//						// value in Journal file
-//					
-//					    // case 1: Journal File
-//					
-//						// Note: a missing hash means that a line as added/removed recently, an exsiting offset with
-//						// a different hash value compared to the hash of the WAL,Journal means that this line has been 
-//						// updated.
-//						job.LineHashes.put(ad.getName() + "_" + rowid,computeHash(record));
-//						
-//					}
-//					else if (filetype == Global.WAL_ARCHIVE_FILE) {
-//						
-//						// case 2: WAL File	
-//						LinkedList<Version> lll = new LinkedList<Version>();
-//						lll.add(new Version(record));
-//						// append hash as last value
-//						job.TimeLineHashes.put(key, lll);
-//					}
-//				}
+//			    
+//		    if(job.TimeLineHashes.containsKey(archivekey)){
+//		    	    	
+//			    	LinkedList<Version> versions = job.TimeLineHashes.get(archivekey);
+//			      
+//			    	Integer originalhash = computeHash(record);
+//			    	Integer journalhash = versions.getFirst().hash;
+//				    	
+//		    	if(!originalhash.equals(journalhash))
+//		    	{
+//		    	
+//		    	    record.set(3,"");
+//
+//		    	}
+//		    	else
+//		    	{
+//		    	    record.set(3,"");
+//		    	    //record.set(3,String.format("%03d", lvs)  + ". version" + " (no change)");
+//		    	  	//System.out.println("new change record for primary key " + archivekey);
+//			     	//System.out.println(record);
+//			   
+//		    	}
+//		    	
+//		    	versions.addFirst(new Version(record));
+//		    }
+//		    else {
+//	    	    record.set(3,"");
+//		     	LinkedList<Version> recordlist = new LinkedList<Version>();
+//		     	recordlist.add(new Version(record));
+//		     	job.TimeLineHashes.put(archivekey,recordlist);
+//		    }
+//			
+//			
+//			
 //		}
-	
-		
+//
+//		System.out.println("$$$$ " + record);
+//		
 		return record;
 	}
 	
@@ -1619,34 +1552,34 @@ public class Auxiliary{
 	}
 
 	
-	private String getPrimaryKey(TableDescriptor td, LinkedList<String> record){
-		
-		String key = null;
-		
-		if(null == td)
-			return null;
-		
-		List<Integer> pk  = td.primarykeycolumnnumbers;
-				
-		/* there exists one or even more explicitly defined primary key column */
-		if(null != pk && pk.size() > 0)
-		{
-			Iterator<Integer> pcol = pk.iterator();
-			StringBuffer sb = new StringBuffer();
-			while (pcol.hasNext()) {
-			    // create composite primary key tablename + 5 walframe columns 
-				int nxt = pcol.next();
-				if(6+nxt < record.size())
-					sb.append( record.get(6 + nxt));
-			}					
-		
-		    key = sb.toString();
-		       
-		}
-		
-		return key;
-	}
-	
+//	private String getPrimaryKey(TableDescriptor td, LinkedList<String> record){
+//		
+//		String key = null;
+//		
+//		if(null == td)
+//			return null;
+//		
+//		List<Integer> pk  = td.primarykeycolumnnumbers;
+//				
+//		/* there exists one or even more explicitly defined primary key column */
+//		if(null != pk && pk.size() > 0)
+//		{
+//			Iterator<Integer> pcol = pk.iterator();
+//			StringBuffer sb = new StringBuffer();
+//			while (pcol.hasNext()) {
+//			    // create composite primary key tablename + 5 walframe columns 
+//				int nxt = pcol.next();
+//				if(6+nxt < record.size())
+//					sb.append( record.get(6 + nxt));
+//			}					
+//		
+//		    key = sb.toString();
+//		       
+//		}
+//		
+//		return key;
+//	}
+//	
 	
 	public static int computeHash(LinkedList<String> record){
 		
@@ -2181,9 +2114,9 @@ public class Auxiliary{
 
 		for (SqliteElement e : columns) {
 			if (e.type == SerialTypes.BLOB || e.type == SerialTypes.STRING)
-				pll += e.length * 2; // since Java uses 2 Bytes to save one char (UTF16 with fixed length)
+				pll += e.getlength() * 2; // since Java uses 2 Bytes to save one char (UTF16 with fixed length)
 			else
-				pll += e.length;
+				pll += e.getlength();
 		}
 
 		return pll;
@@ -2288,7 +2221,7 @@ public class Auxiliary{
 		List<SqliteElement> cols = toColumns(header);
 		for (SqliteElement e : cols) {
 			if (e != null)
-				sum += e.length;
+				sum += e.getlength();
 		}
 		return sum;
 	}
@@ -2308,7 +2241,7 @@ public class Auxiliary{
 			return "";
 		}
 
-		String sheader = bytesToHex(header);
+		String sheader = bytesToHex3(header);
 				
 		return sheader;
 	}
@@ -2368,16 +2301,16 @@ public class Auxiliary{
 	}
 
 	
-	static SqliteElement primkey = new SqliteElement(SerialTypes.PRIMARY_KEY, StorageClass.INT, 0);
-	static SqliteElement int8 = new SqliteElement(SerialTypes.INT8, StorageClass.INT, 1);
-	static SqliteElement int16 = new SqliteElement(SerialTypes.INT16, StorageClass.INT, 2);
-	static SqliteElement int24 = new SqliteElement(SerialTypes.INT24, StorageClass.INT, 3);
-	static SqliteElement int32 = new SqliteElement(SerialTypes.INT32, StorageClass.INT, 4);
-    static SqliteElement int48 = new SqliteElement(SerialTypes.INT48, StorageClass.INT, 6);
-    static SqliteElement int64 = new SqliteElement(SerialTypes.INT64, StorageClass.INT, 8);
-    static SqliteElement float64 =  new SqliteElement(SerialTypes.FLOAT64, StorageClass.FLOAT, 8);
-    static SqliteElement const0  =  new SqliteElement(SerialTypes.INT0, StorageClass.INT, 0);
-    static SqliteElement const1  = new SqliteElement(SerialTypes.INT1, StorageClass.INT, 0);
+	static final SqliteElement primkey = new SqliteElement(SerialTypes.PRIMARY_KEY, StorageClass.INT, 0);
+	static final SqliteElement int8 = new SqliteElement(SerialTypes.INT8, StorageClass.INT, 1);
+	static final SqliteElement int16 = new SqliteElement(SerialTypes.INT16, StorageClass.INT, 2);
+	static final SqliteElement int24 = new SqliteElement(SerialTypes.INT24, StorageClass.INT, 3);
+	static final SqliteElement int32 = new SqliteElement(SerialTypes.INT32, StorageClass.INT, 4);
+    static final SqliteElement int48 = new SqliteElement(SerialTypes.INT48, StorageClass.INT, 6);
+    static final SqliteElement int64 = new SqliteElement(SerialTypes.INT64, StorageClass.INT, 8);
+    static final SqliteElement float64 =  new SqliteElement(SerialTypes.FLOAT64, StorageClass.FLOAT, 8);
+    static final SqliteElement const0  =  new SqliteElement(SerialTypes.INT0, StorageClass.INT, 0);
+    static final SqliteElement const1  = new SqliteElement(SerialTypes.INT1, StorageClass.INT, 0);
 	
 	private static SqliteElement[] getElements(int[] columns) {
 
@@ -2656,9 +2589,9 @@ public class Auxiliary{
 	 * @param bytes
 	 * @return
 	 */
-	public static String bytesToHex(byte[] bytes) {
+	public static String bytesToHex3(byte[] bytes) {
 
-		return bytesToHex(ByteBuffer.wrap(bytes));
+		return bytesToHex2(ByteBuffer.wrap(bytes));
 		
 	}
 
@@ -2671,7 +2604,7 @@ public class Auxiliary{
 	public static String byteToHex(byte b) {
 		byte[] ch = new byte[1];
 		ch[0] = b;
-		return bytesToHex(ch);
+		return bytesToHex3(ch);
 	}
 
 	/**
@@ -2680,7 +2613,7 @@ public class Auxiliary{
 	 * @param bb
 	 * @return
 	 */
-	public static String bytesToHex(ByteBuffer bb) {
+	public static String bytesToHex2(ByteBuffer bb) {
 		
 		int limit = bb.limit();
 		
@@ -2692,12 +2625,14 @@ public class Auxiliary{
 		bb.position(0);
 		int counter = 0;
 
+        
 		while (bb.position() < limit) {
 
 			int v = bb.get() & 0xFF;
 			hexChars[counter * 2] = hexArray[v >>> 4];
 			hexChars[counter * 2 + 1] = hexArray[v & 0x0F];
 			counter++;
+			
 		}
 
 		return new String(hexChars);
@@ -2713,7 +2648,7 @@ public class Auxiliary{
 	 * @param toidx
 	 * @return
 	 */
-	public static String bytesToHex(byte[] bytes, int fromidx, int toidx) {
+	public static String bytesToHex1(byte[] bytes, int fromidx, int toidx) {
 		char[] hexChars = new char[(toidx - fromidx + 2) * 2];
 
 		for (int j = 0; j < toidx; j++) {
@@ -3024,7 +2959,7 @@ public class Auxiliary{
 	 * 
 	 */
 	public static String Int2Hex(int i) {
-		return Auxiliary.bytesToHex(new byte[] { (byte) (i >>> 24), (byte) (i >>> 16), (byte) (i >>> 8), (byte) i });
+		return Auxiliary.bytesToHex3(new byte[] { (byte) (i >>> 24), (byte) (i >>> 16), (byte) (i >>> 8), (byte) i });
 	}
 
 	public static int varintHexString2Integer(String s) {

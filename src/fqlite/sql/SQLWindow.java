@@ -48,7 +48,9 @@ import javafx.scene.input.KeyCodeCombination;
 import javafx.scene.input.KeyCombination;
 import javafx.scene.input.KeyEvent;
 import javafx.scene.input.MouseButton;
+import javafx.scene.layout.Priority;
 import javafx.scene.layout.VBox;
+import javafx.stage.Screen;
 import javafx.stage.Stage;
 
 /**
@@ -217,9 +219,7 @@ public class SQLWindow extends Application {
             }
         });
         		
-		
-		
-        
+	
         toolBar.getItems().addAll(btnGo, btnCopy,btnExit);
 
         dbBox.getItems().addAll(dbnames);
@@ -263,8 +263,6 @@ public class SQLWindow extends Application {
             new VisibleParagraphStyler<>( codeArea, this::computeHighlighting)
         );
         String txt =  "-- Place your SELECT statement below this text.\n-- Then click on the Play [>] button to execute. "
-        //		+ "\nSELECT * FROM TABLE1 AS t1 INNER JOIN TABLE2 AS t2 ON t1.mname = t2.sname;\n";
-        //		+ ""
         		+ "\nSELECT * FROM TABLENAME;";
         codeArea.replaceText(0, 0,txt);
         int pos = txt.indexOf("TABLENAME");
@@ -275,8 +273,8 @@ public class SQLWindow extends Application {
         
         statusline = new Label();
 	    statusline.setText("<no rows selected>" + " | rows: " + 0);
-        
-               
+        statusline.setStyle("-fx-text-fill: gray; -fx-max-width:200;");
+                       
         // auto-indent: insert previous line's indents on enter
         final Pattern whiteSpace = Pattern.compile( "^\\s+" );
         codeArea.addEventHandler( KeyEvent.KEY_PRESSED, KE ->
@@ -301,13 +299,15 @@ public class SQLWindow extends Application {
 		createContextMenu(resultview);
 
 		statusline.setMaxHeight(30);
+		statusline.setMinHeight(30);
 		
+		VBox.setVgrow(root,Priority.ALWAYS);
+		resultview.setPrefHeight(4000);
+		codeArea.setMinHeight(100);
 		root.getChildren().addAll(dbbar,codeArea,toolBar,resultview,statusline);
 		
-		
-		Scene scene = new Scene(root); //,Screen.getPrimary().getVisualBounds().getWidth()*0.8,Screen.getPrimary().getVisualBounds().getHeight()*0.5);
+		Scene scene = new Scene(root,Screen.getPrimary().getVisualBounds().getWidth()*0.8,Screen.getPrimary().getVisualBounds().getHeight()*0.8);
         
-		
         primaryStage.setScene(scene);
         scene.getStylesheets().add(GUI.class.getResource("/sql-keywords.css").toExternalForm());
         primaryStage.sizeToScene();

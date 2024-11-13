@@ -17,7 +17,7 @@ public class BinaryLoader {
 			BufferedInputStream buffer = new BufferedInputStream(new FileInputStream(path));
 		    ByteBuffer bf = ByteBuffer.wrap(buffer.readAllBytes());
 		    bf.position(0);
-		    result = Auxiliary.bytesToHex(bf);
+		    result = Auxiliary.bytesToHex2(bf);
 		    buffer.close();
 		
 		}catch(Exception err){
@@ -36,7 +36,7 @@ public class BinaryLoader {
 			BufferedInputStream buffer = new BufferedInputStream(new FileInputStream(path));
 		    ByteBuffer bf = ByteBuffer.wrap(buffer.readAllBytes());
 		    bf.position(0);
-		    result = Auxiliary.bytesToHex(bf); //Auxiliary.hex2ASCII_v2(Auxiliary.bytesToHex(bf));
+		    result = Auxiliary.bytesToHex2(bf); //Auxiliary.hex2ASCII_v2(Auxiliary.bytesToHex(bf));
 		    buffer.close();
 		
 		}catch(Exception err){
@@ -57,7 +57,7 @@ public class BinaryLoader {
 			BufferedInputStream buffer = new BufferedInputStream(new FileInputStream(path));
 		    ByteBuffer bf = ByteBuffer.wrap(buffer.readAllBytes());
 		    bf.position(0);
-		    result = Auxiliary.hex2ASCII_v2(Auxiliary.bytesToHex(bf));
+		    result = Auxiliary.hex2ASCII_v2(Auxiliary.bytesToHex2(bf));
 		    buffer.close();
 		
 		}catch(Exception err){

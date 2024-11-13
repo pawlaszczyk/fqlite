@@ -13,11 +13,11 @@ public class Global {
 	public static final String FREELIST_ENTRY = "F"; // U267D - freelist
 	public static final String STATUS_CLOMUN = "S"; // U291D U2691
 	public static final String UNALLOCATED_SPACE = "U"; // U2318 - unallocated space
-	public static final String FQLITE_VERSION = "3.1";
+	public static final String FQLITE_VERSION = "3.2";
 	public static final String FQLITE_RELEASEDATE = "06/11/2024";
 	public static final String YEAR = "2024";
 	public static final int CARVING_ERROR = -1;
-	public static Level LOGLEVEL = Level.INFO;
+	public static Level LOGLEVEL = Level.SEVERE;
 	public static int numberofThreads = 1;
 	public static final String separator = FileSystems.getDefault().getSeparator();
 	public static String WORKINGDIRECTORY;

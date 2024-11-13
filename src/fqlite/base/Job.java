@@ -743,7 +743,7 @@ public class Job {
           
 			byte header[] = new byte[16];
 			buffer.get(header);
-			headerstring = Auxiliary.bytesToHex(header);
+			headerstring = Auxiliary.bytesToHex3(header);
 			char charArray[] = new char[16];
 			
 			int cn = 0;
@@ -756,7 +756,7 @@ public class Job {
 			
 			headerstring = txt + " (" + "0x" + headerstring + ")";
 			
-			if (Auxiliary.bytesToHex(header).equals(MAGIC_HEADER_STRING)) // we currently
+			if (Auxiliary.bytesToHex3(header).equals(MAGIC_HEADER_STRING)) // we currently
 			{
 				// support
 				// sqlite 3 data
@@ -1017,7 +1017,7 @@ public class Job {
 					byte mheader[] = new byte[40];
 					bb.position(index - goback);
 					bb.get(mheader);
-					String headerStr = Auxiliary.bytesToHex(mheader);
+					String headerStr = Auxiliary.bytesToHex3(mheader);
 	
 					
 					/**
@@ -1087,7 +1087,7 @@ public class Job {
 						index2 = -1;
 						continue;
 					}
-					String headerStr = Auxiliary.bytesToHex(mheader);
+					String headerStr = Auxiliary.bytesToHex3(mheader);
 		
 					/**
 					 * case 3: seems to be a dropped index data set
@@ -1298,8 +1298,6 @@ public class Job {
 					
 				
 			}
-			
-			
 			
 			HashSet<String> doubles = new HashSet<String>();
  			
@@ -1576,7 +1574,7 @@ public class Job {
 			byte freepageno[] = new byte[4];
 			buffer.position(36);
 			buffer.get(freepageno);
-			info("Total number of free list (trunk) pages " + Auxiliary.bytesToHex(freepageno));
+			info("Total number of free list (trunk) pages " + Auxiliary.bytesToHex3(freepageno));
 			ByteBuffer no = ByteBuffer.wrap(freepageno);
 			fpnumber = no.getInt();
 			System.out.println(" no " + fpnumber);
@@ -1586,7 +1584,7 @@ public class Job {
 			byte freelistpage[] = new byte[4];
 			buffer.position(32);
 			buffer.get(freelistpage);
-			info("FreeListPage starts at offset " + Auxiliary.bytesToHex(freelistpage));
+			info("FreeListPage starts at offset " + Auxiliary.bytesToHex3(freelistpage));
 			ByteBuffer freelistoffset = ByteBuffer.wrap(freelistpage);
 			long head = freelistoffset.getInt();
 			info("head:: " + head);
@@ -1645,7 +1643,7 @@ public class Job {
 					 * is there a further page - <code>nextlistoffset</code> has a value > 0 in this
 					 * case
 					 */
-					if (!Auxiliary.bytesToHex(nextlistoffset).equals(NO_MORE_ENTRIES)) {
+					if (!Auxiliary.bytesToHex3(nextlistoffset).equals(NO_MORE_ENTRIES)) {
 						
 						ByteBuffer of = ByteBuffer.wrap(nextlistoffset);
 						int nfp = of.getInt();

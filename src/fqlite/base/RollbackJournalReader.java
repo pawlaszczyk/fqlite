@@ -198,7 +198,7 @@ public class RollbackJournalReader{
 		header.get(head);
 		
 
-		if (Auxiliary.bytesToHex(head).equals(MAGIC_HEADER_STRING))
+		if (Auxiliary.bytesToHex3(head).equals(MAGIC_HEADER_STRING))
 		{
 			AppLog.info("header is okay. seems to be an rollback journal file.");
 		}
@@ -303,7 +303,7 @@ public class RollbackJournalReader{
 		withoutROWID = false;
 		
 		/* convert byte array into a string representation */
-		String content = Auxiliary.bytesToHex(buffer);
+		String content = Auxiliary.bytesToHex2(buffer);
 
 		// offset 0
 		buffer.position(0);

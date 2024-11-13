@@ -65,7 +65,7 @@ public class RecoveryTask implements Runnable {
 		/* read the db page into buffer */
 		buffer = job.readDBPageWithOffset(offset, pagesize);
 		/* convert byte array into a string representation */
-		String content = Auxiliary.bytesToHex(buffer);
+		String content = Auxiliary.bytesToHex2(buffer);
 		
 		this.carve(content, null);
 	}
@@ -89,7 +89,7 @@ public class RecoveryTask implements Runnable {
 			/* convert byte array into a string representation */
 			if (null == buffer)
 				return -1;
-			String content = Auxiliary.bytesToHex(buffer);
+			String content = Auxiliary.bytesToHex2(buffer);
 
 			// offset 0
 			buffer.position(0);
@@ -188,11 +188,6 @@ public class RecoveryTask implements Runnable {
 			
 			}	
 				
-			//int ccrstart = job.ps;
-			
-			//if(offset == 100)
-			//	ccrstart = job.ps-100;
-
 			// found Data-Page - determine number of cell pointers at offset 3-4 of this page
 			byte cpn[] = new byte[2];
 			buffer.position(3);
@@ -202,13 +197,6 @@ public class RecoveryTask implements Runnable {
 			byte ccr[] = new byte[2];
 			buffer.position(5);
 			buffer.get(ccr);
-			
-			//ByteBuffer contentregionstart = ByteBuffer.wrap(ccr);
-			//ccrstart = Auxiliary.TwoByteBuffertoInt(contentregionstart);
-			
-			//if(offset == 100){
-			//	ccrstart -= 100;
-			//}
 			
 			/* mark as visited */
 			visit.set(2, 8);
@@ -251,8 +239,6 @@ public class RecoveryTask implements Runnable {
 					//int length = Auxiliary.TwoByteBuffertoInt(blocklength);
 					//System.out.println(" Length of next free block:" + length);
 					
-					//String rc;
-					//LinkedList<String> record;
 					
 					byte[] header = new byte[6];
 					try {
@@ -406,7 +392,6 @@ public class RecoveryTask implements Runnable {
                             /* create a new line for every data row */ 
                             while(entries>0)
                             {
-                        		//StringBuffer vrow = new StringBuffer();
                             	LinkedList<String> rtreerecord = new LinkedList<String>();
                     			
                             	rtreerecord.add(tbln + "");  // start a new row for the virtual component 
@@ -669,8 +654,8 @@ public class RecoveryTask implements Runnable {
 	public void carve(String content, Carver crv) {
 
 		/* if file is bigger than 5 MB skip intense scan */
-		if(job.size > 5242880)  //1024*1024)// 5242880)
-			return;
+		//if(job.size > 5242880)  //1024*1024)// 5242880)
+		//	return;
 		
 		Carver c = crv;
 		
@@ -704,8 +689,6 @@ public class RecoveryTask implements Runnable {
 		}
 		
 			
-	
-		
 		List<Gap> gaps = findGaps();
 
 		if (gaps.size() == 0)
@@ -714,15 +697,37 @@ public class RecoveryTask implements Runnable {
 			return;
 		}	
 		
+		/**
+		 * When a record deletion occurs, the first 2 bytes of the cell are set to the
+		 * offset value of next free block and latter 2 bytes covers the length of the
+		 * current free block. Because of this, the first 4 bytes of a deleted cell
+		 * differ startRegion the normal data. Accordingly, we need a different approach to
+		 * recover the data records.
+		 * 
+		 * In most cases, at least the header length information is overwritten. Boyond
+		 * this, sometimes, also the first column type field is overwritten too.
+		 * 
+		 * We have to cases:
+		 * 
+		 * (1) only the first column of the header is missing, but the rest of the
+		 * header is intact.
+		 * 
+		 * (2) both header length field plus first column are overwritten.
+		 * 
+		 * [cell size | rowid | header size | header bytes | payload ]
+		 * 
+		 * for a deleted cell is looks maybe like this
+		 * 
+		 * [offset of next free block | length of the current free block | ]
+		 */
+
+			
 		/* try out all component schema(s) */
 		for(int hh = 0; hh<3; hh++) {
-	 
-			//int oldhash = 0;
-			
+	 			
 			for (int n = 0; n < tab.size(); n++) {
 				tdesc = tab.get(n);
-				
-				
+								
 				if(tdesc != null && tdesc.serialtypes != null && tdesc.serialtypes.size()>0 && tdesc.serialtypes.get(0).equals("BLOB"))
 					continue;
 				
@@ -737,8 +742,12 @@ public class RecoveryTask implements Runnable {
 				
 				AppLog.debug("pagenumber :: " + pagenumber + " component size :: " + tab.size());
 				AppLog.debug("n " + n);
-				//TableDescriptor tdb = tab.get(n);
-			
+				
+				
+				if( pagenumber == 18 && tab.size() == 78 && n == 52){
+					System.out.println("Stop here.");
+				}
+							
 				/* access pattern for a particular component */
 				String tablename = tab.get(n).getName();
 				if (tablename.startsWith("__FREELIST"))
@@ -748,14 +757,11 @@ public class RecoveryTask implements Runnable {
 	
 				if (hh==0) {
 					gaps = findGaps();
-					
-					//oldhash = gaps.hashCode();
-					
-					
+										
 					for (int a = 0; a < gaps.size(); a++) {
 					
 						Gap next = gaps.get(a);
-		
+
 						
 						if (next.to - next.from > 5)
 							/* do we have at least one match ? */
@@ -768,12 +774,10 @@ public class RecoveryTask implements Runnable {
 				
 				if (hh==1) {
 					gaps = findGaps();
-					
-					//oldhash = gaps.hashCode();
-					
-					
+										
 					for (int a = 0; a < gaps.size(); a++) {
-						
+					
+					
 						Gap next = gaps.get(a);
 						
 		 				if (c.carve(next.from,next.to, stm, CarverTypes.COLUMNSONLY, tab.get(n)) != Global.CARVING_ERROR) {
@@ -783,73 +787,26 @@ public class RecoveryTask implements Runnable {
 					}
 				}
 				
-				if(hh==2) {
+				if (hh==2) {
 					
 					gaps = findGaps();
-					
-					//oldhash = gaps.hashCode();
-					
+										
 					
 					for (int a = 0; a < gaps.size(); a++) {
 					
 						Gap next = gaps.get(a);
 					
-					if (c.carve(next.from,next.to, stm, CarverTypes.FIRSTCOLUMNMISSING, tab.get(n))!= Global.CARVING_ERROR) {
-							AppLog.debug("RecoveryTask *****************************  STEP FIRSTCOLUMNMISSING finished with matches");
-							
+						
+						if (c.carve(next.from,next.to, stm, CarverTypes.FIRSTCOLUMNMISSING, tab.get(n))!= Global.CARVING_ERROR) {
+								AppLog.debug("RecoveryTask *****************************  STEP FIRSTCOLUMNMISSING finished with matches");
+								
 						}
 					
+
 					}
+                  
 
 				}
-				
-			
-				/**
-				 * When a record deletion occurs, the first 2 bytes of the cell are set to the
-				 * offset value of next free block and latter 2 bytes covers the length of the
-				 * current free block. Because of this, the first 4 bytes of a deleted cell
-				 * differ startRegion the normal data. Accordingly, we need a different approach to
-				 * recover the data records.
-				 * 
-				 * In most cases, at least the header length information is overwritten. Boyond
-				 * this, sometimes, also the first column type field is overwritten too.
-				 * 
-				 * We have to cases:
-				 * 
-				 * (1) only the first column of the header is missing, but the rest of the
-				 * header is intact.
-				 * 
-				 * (2) both header length field plus first column are overwritten.
-				 * 
-				 * [cell size | rowid | header size | header bytes | payload ]
-				 * 
-				 * for a deleted cell is looks maybe like this
-				 * 
-				 * [offset of next free block | length of the current free block | ]
-				 */
-	
-	
-//				if(hh==2) {
-//					
-//				/* There are still gaps? */
-//			
-//				gaps = findGaps();
-//				
-//				int newhash = gaps.hashCode();
-//				
-//					for (int a = 0; a < gaps.size(); a++) {
-//						
-//						
-//						Gap next = gaps.get(a);
-//					
-//						
-//						//if (oldhash != newhash){
-//					        
-//							/* one last try with 4+1 instead of 4 Bytes */
-//							c.carve(next.from+4,next.to, stm, CarverTypes.FIRSTCOLUMNMISSING, tab.get(n)); 
-//						//}	
-//					}
-//				}
 				
 	
 			} // end of tables ( component fingerprint )

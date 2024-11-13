@@ -174,8 +174,13 @@ public class SerialTypeMatcher {
 		if (end <= start)
 			return false;
 		
+		
+		//System.out.println("true" + end + " > " + start);
+		
 		return true; // byte number of the match
 	}
+	
+	static int howmuch = 0;
 
 	/**
 	 * Returns the input subsequence matched by the previous match. For a matcher m
@@ -198,12 +203,13 @@ public class SerialTypeMatcher {
 	 * @return
 	 */
 	public String substring(int start, int end) {
+	
 		if (start > end)
 			return "";
 		byte[] match = new byte[(end) - start];
 		buffer.position(start);
 		buffer.get(match, 0, (end - start));
-		return Auxiliary.bytesToHex(match);
+		return Auxiliary.bytesToHex3(match);
 	}
 
 	/**
@@ -268,7 +274,7 @@ public class SerialTypeMatcher {
 	    
 	    stm.setPattern(pattern);
 	    
-		//System.out.println("header pattern: " + pattern);
+		System.out.println("header pattern: " + pattern);
 
 		/* find every match within the given region */
 		while (stm.find()){
@@ -276,9 +282,9 @@ public class SerialTypeMatcher {
 			/* get the hex-presentation of the match */
 			String m = stm.group2Hex();
 			
-			System.out.println("Got it! :: " + m);
+			//System.out.println("Got it! :: " + m);
 		}
-	    
+	    System.out.println("end..");
 	}
 	
 

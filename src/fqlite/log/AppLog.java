@@ -58,6 +58,7 @@ public class AppLog extends Application {
 
     public static void debug(String log){
     	LOGGER.finest(log);
+    	//System.out.println(log);
     }
     
     public static void info(String log){

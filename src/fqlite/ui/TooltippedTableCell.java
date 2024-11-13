@@ -66,7 +66,17 @@ public class TooltippedTableCell<S, T> extends TableCell<S, T> {
   
     @SuppressWarnings("unchecked")
 	private void updateItem(final Cell<T> cell, final StringConverter<T> converter) {
-    	    	
+
+    	
+//    	if (super.getIndex() % 2 == 0)
+//	    	   this.setStyle("-fx-font-style: italic; -fx-alignment: TOP-RIGHT; -fx-background-color: honeydew;");
+//	       else
+//	    	   this.setStyle("-fx-font-style: italic; -fx-alignment: TOP-RIGHT; -fx-background-color: lavender;");
+//  
+
+ 	   this.setStyle(this.getStyle() + "-fx-font-style: italic;");
+
+    	
     	if(null != s && !s.isFocused())
     		return;
     		
@@ -136,6 +146,8 @@ public class TooltippedTableCell<S, T> extends TableCell<S, T> {
         		hash = Long.parseLong(hl.get(5));
 	
         	}
+        	
+        	
         	
         	if(true) {
         		synchronized(this) {

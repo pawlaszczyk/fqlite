@@ -75,7 +75,7 @@ public class BLOBCache {
 		String result;
 		ByteBuffer bf = ByteBuffer.wrap(get(path).binary);
 		bf.position(0);
-		result = Auxiliary.bytesToHex(bf); 
+		result = Auxiliary.bytesToHex2(bf); 
 		return result;
 	}
 	

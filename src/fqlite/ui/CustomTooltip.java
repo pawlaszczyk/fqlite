@@ -113,7 +113,11 @@ class CustomTooltip extends Tooltip {
     	if(coltype.equals("REAL") || coltype.equals("DOUBLE") || coltype.equals("FLOAT") || coltype.equals("TIMESTAMP") ) {
 
         	int point = s.indexOf(",");
-            String firstpart;
+        	if (point < 0){
+        		point = s.indexOf(".");
+        	}
+        	
+        	String firstpart;
         	if (point > 0)
             	firstpart = s.substring(0, point);
             else
