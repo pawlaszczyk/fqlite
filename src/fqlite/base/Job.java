@@ -1264,36 +1264,36 @@ public class Job {
 					if (cont) {
 					switch(type) {
 					
-					case 1:    /* 
-								0x01 0x00 0x00 0x00 0x00
-								This record relates to a B-tree root page,
-								hence the page number being indicated as zero. 
-								*/
-					
-					case 2:	   /*
-					 			0x02 0x00 0x00 0x00 0x00
-								This record relates to a free page, which also does not have a parent page. 
-								*/
-						      
-						 
-							 break;
-					
-					case 3:  	/*
-					 			0x03 0xVV 0xVV 0xVV 0xVV (where VV indicates a variable)
-								This record relates to the first page in an overflow chain. 
-								The parent page number is the number of the B-Tree page containing the B-Tree 
-								cell to which the overflow chain belongs.
-								*/
+						case 1:    /* 
+									0x01 0x00 0x00 0x00 0x00
+									This record relates to a B-tree root page,
+									hence the page number being indicated as zero. 
+									*/
 						
+						case 2:	   /*
+						 			0x02 0x00 0x00 0x00 0x00
+									This record relates to a free page, which also does not have a parent page. 
+									*/
+							      
 							 
-							 break;
-					
-					case 4:  break;
-					
-					case 5:  break;
-					
-					
-					}
+								 	break;
+						
+						case 3:  	/*
+						 			0x03 0xVV 0xVV 0xVV 0xVV (where VV indicates a variable)
+									This record relates to the first page in an overflow chain. 
+									The parent page number is the number of the B-Tree page containing the B-Tree 
+									cell to which the overflow chain belongs.
+									*/
+							
+								 
+									break;
+						
+						case 4:  	break;
+						
+						case 5:  	break;
+						
+						
+						}
 					}
 					
 				

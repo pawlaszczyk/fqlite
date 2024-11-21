@@ -143,7 +143,7 @@ public class DBPropertyPanel extends StackPane{
 	
         StackPane fields = new StackPane();
         fields.getChildren().add(table);
-		Tab headerfieldstab = new Tab("Header Fields",fields);
+		Tab headerfieldstab = new Tab("Header [PRAGMAS]",fields);
         tabpane.getTabs().add(headerfieldstab);
 
 	}

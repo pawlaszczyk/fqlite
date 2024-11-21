@@ -102,7 +102,7 @@ public class SQLParser {
 
 		// build table path (the same as in the tree)
 		String tablekey = "Databases/" + dbname + "/" + kk; // table;
-		System.out.println("SQLParser -> tablekey " + tablekey);
+		//System.out.println("SQLParser -> tablekey " + tablekey);
 
 		// get table rows from the already existing dataset
 		//Enumeration<String> keys = gui.datasets.keys();
@@ -159,13 +159,13 @@ public class SQLParser {
 
 					// now we are ready to create the missing table
 					if (schema.getTable(tbname) == null) {
-						System.out.println(" create new table::" + tbname);
-						System.out.println(" number of columns:: " + tbl.columns.size());
-						System.out.println(" number of types:: " + tbl.columntypes.size());
+						//System.out.println(" create new table::" + tbname);
+						//System.out.println(" number of columns:: " + tbl.columns.size());
+						//System.out.println(" number of types:: " + tbl.columntypes.size());
 
 						prepareTable(tbl, schema, tbname);
 
-						System.out.println(" Fill table :: " + tbname);
+						//System.out.println(" Fill table :: " + tbname);
 						// fill the table of our calcite schema with the references of our memory table
 						try {
 							schema.fill(tbname, tb);
@@ -249,11 +249,17 @@ public class SQLParser {
 					command = command.replaceAll(";", "");
 					// important: tbname will be expanded to schemaid.tbname
 
-					command = command.replaceAll(tbname, schemaid + "." + tbname);
+					System.out.println("§§§ tablename " + tbname);
+					System.out.println("§§§ jtablename " + jtbname);
+					
+					System.out.println("For replace " + command);
+					command = command.replaceFirst(" " + tbname, " " + schemaid + "." + tbname);
 
 					if (jtbname != null)
-						command = command.replaceAll(jtbname, schemaid + "." + jtbname);
+						command = command.replaceFirst(" " + jtbname, " " + schemaid + "." + jtbname);
 
+					
+					
 					System.out.println(" parse() -> ExcecuteQuery :: " + command);
 
 					// let us fire the query
@@ -286,8 +292,8 @@ public class SQLParser {
 						//rlist.add(lrow);
 						//lrow.remove(1);
 						obdata.add(FXCollections.observableList(lrow));
-						if (counter % 10000 == 0)
-							System.out.println("processed" + counter + " of " + rs.getFetchSize());
+						//if (counter % 10000 == 0)
+						//	System.out.println("processed" + counter + " of " + rs.getFetchSize());
 						counter++;
 					}
 
@@ -454,6 +460,15 @@ public class SQLParser {
 							param.getValue().get(j) != null ? param.getValue().get(j).toString() : "");
 				}
 			});
+			
+			if( colname.equals("_TBLNAME") 	||  colname.equals("_OFFSET") 	|| colname.equals("_NO") || 
+				colname.equals("_ROWID") || colname.equals("_PLL|HL") || colname.equals("salt2") || 
+				colname.equals("salt1") || colname.equals("walframe") 	|| colname.equals("dbpage") || 
+				colname.equals("commit"))
+			{			
+				col.setStyle( "-fx-text-fill: gray;-fx-alignment: TOP-RIGHT;");
+				
+			}
 
 			table.getColumns().add(col);
 			i++;

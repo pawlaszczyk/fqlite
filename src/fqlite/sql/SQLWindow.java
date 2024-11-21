@@ -121,17 +121,13 @@ public class SQLWindow extends Application {
     	tabledata = app.datasets;
     	this.dbnames = app.dbnames;
    
-    	Enumeration<String> keys = tabledata.keys();
-        while(keys.hasMoreElements()) {
-        	String key = keys.nextElement();
-        	System.out.println("datasets key :: " + key);
-        
-        	ObservableList<ObservableList<String>> obl =  tabledata.get(key);
-        	System.out.println(" first line >> " + obl.get(0));
-        }
+       // xEnumeration<String> keys = tabledata.keys();
+       // while(keys.hasMoreElements()) {
+       // 	String key = keys.nextElement();        
+       // 	ObservableList<ObservableList<String>> obl =  tabledata.get(key);
+       // }
         
         
-
         templates.put("SIMPLE SELECT","-- Place your SELECT statement below this text.\n-- Then click on the Play [>] button to execute. \nSELECT * FROM TABLENAME WHERE <condition>;");
         templates.put("INNER JOIN", "-- Returns records that have matching values in both tables \nSELECT * FROM <TABLE1> AS t1 INNER JOIN <TABLE2> AS t2 ON t1.colX = t2.colY;");
         templates.put("LEFT (OUTER) JOIN", "-- Returns all records from the left table, and the matched records from the right table \n SELECT t1.colX, t2.colY FROM <TABLE1> AS t1 LEFT JOIN <TABLE2> AS t2 ON t1.colX = t2.colY\n"
@@ -323,7 +319,6 @@ public class SQLWindow extends Application {
         int lastKwEnd = 0;
         StyleSpansBuilder<Collection<String>> spansBuilder
                 = new StyleSpansBuilder<>();
-        System.out.println("inside computeHighlithting() " + text);
         while(matcher.find()) {
         	String styleClass =
                     matcher.group("KEYWORD") != null ? "keyword" :
@@ -445,7 +440,6 @@ public class SQLWindow extends Application {
         	ObservableList<String> hl = (ObservableList<String>)table.getItems().get(pos.getRow());
         	  sb.append(hl.toString() + "\n");
         }
-        System.out.println("Write value to clipboard " + sb.toString());
         content.putString(sb.toString());
         clipboard.setContent(content);
 

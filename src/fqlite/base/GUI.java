@@ -41,6 +41,7 @@ import fqlite.analyzer.avro.Avro;
 import fqlite.analyzer.javaserial.Deserializer;
 import fqlite.analyzer.pblist.BPListParser;
 import fqlite.descriptor.TableDescriptor;
+import fqlite.export.DBExportWindow;
 import fqlite.log.AppLog;
 import fqlite.sql.SQLWindow;
 import fqlite.types.BLOBElement;
@@ -368,10 +369,15 @@ public class GUI extends Application {
 		mntopen.setAccelerator(KeyCombination.keyCombination("Ctrl+O"));
 		mntopen.setOnAction(e -> open_db(null));
 
-		MenuItem mntmExport = new MenuItem("Export Node...");
+		MenuItem mntmExport = new MenuItem("Export Node to CSV...");
 		mntmExport.setAccelerator(KeyCombination.keyCombination("Ctrl+X"));
 		mntmExport.setOnAction(e -> doExport());
-
+		
+		MenuItem mntmExportDB = new MenuItem("Export db to SQLite...");
+		mntmExportDB.setOnAction( e -> {
+			showDBExportWindow();
+		});
+		
 		MenuItem mntclose = new MenuItem("Close All");
 		mntclose.setAccelerator(KeyCombination.keyCombination("Ctrl+D"));
 		mntclose.setOnAction(e -> closeAll());
@@ -408,6 +414,9 @@ public class GUI extends Application {
 		mntmSQL.setOnAction( e -> {
 			showSqlWindow();
 		});
+		
+	
+		
 		
 		
 		MenuItem mntmHelp = new MenuItem("Help");
@@ -637,6 +646,30 @@ public class GUI extends Application {
 		pd.start(new Stage());
 	}
 
+	private void showDBExportWindow(){	
+		
+		if(dbnames.size() == 0){
+		
+			Alert alert = new Alert(AlertType.INFORMATION);
+			alert.setTitle("Information");
+			alert.setContentText("You must open at least one database before you can use the export function.");
+			alert.showAndWait();	
+			
+			return;
+		}
+	
+		DBExportWindow exp = new DBExportWindow(this);
+		Stage expstage = new Stage();
+		expstage.initModality(Modality.APPLICATION_MODAL);
+		try {
+			exp.start(expstage);
+		} catch (Exception e) {
+			e.printStackTrace();
+		}
+		
+}
+		
+	
 	private void showSqlWindow(){
 		
 		if(dbnames.size() == 0){
@@ -1316,6 +1349,8 @@ public class GUI extends Application {
 			TableColumn col = new TableColumn(colname);		
 			col.setCellFactory(TooltippedTableCell.forTableColumn(tablename,job,this.stage));
 			col.setComparator(new CustomComparator());
+			
+		
 			col.setCellValueFactory(new Callback<CellDataFeatures<ObservableList,String>,ObservableValue<String>>(){                    
 	  
 			public ObservableValue<String> call(CellDataFeatures<ObservableList, String> param) {                                                                                              
@@ -1332,11 +1367,6 @@ public class GUI extends Application {
             }      
 			});
 			
-			
-			
-			
-			
-			//if (columntypes.size()>i && !columntypes.get(i).equals("BLOB") && !columntypes.get(i).equals("TEXT")) {				
 		
 			if (columntypes.size()>i && !columntypes.get(i).equals("BLOB") && !columntypes.get(i).equals("TEXT")) {				
 								col.setStyle( "-fx-alignment: TOP-RIGHT;");	
@@ -1356,6 +1386,15 @@ public class GUI extends Application {
 				    col.setGraphic(view);
 				}	
 			}
+			
+			if(colname.equals("salt2") || colname.equals("salt1") ||
+					colname.equals("walframe") 	|| colname.equals("dbpage") || colname.equals("commit"))
+			{			col.setStyle( "-fx-text-fill: gray;-fx-alignment: TOP-RIGHT;");
+
+				
+			}	
+			
+			
 			table.getColumns().add(col);
 		}
 						
@@ -1366,9 +1405,6 @@ public class GUI extends Application {
 		Image img2 = new Image(GUI.class.getResource("/closeDB_gray.png").toExternalForm());
 	  
 		ImageView view2 = new ImageView(img2);
-	
-	    //Label filterlabel = new Label();
-	    //filterlabel.setGraphic(view2);
 	    
 	    Button clearFilter = new Button();
 	    clearFilter.setGraphic(view2);
@@ -2212,8 +2248,9 @@ public class GUI extends Application {
 	    	       
 	             
 	    	            String path = GUI.baseDir + Global.separator + job.filename + "_" + off + "-" + number + fext;
-	    	            String text = job.bincache.getHexString(path);
-	    	    		setContent(text);
+	    	            //String text = job.bincache.getHexString(path);
+	    	    		String text = job.bincache.getASCII(path);
+	    	            setContent(text);
 	     	            return;
 	    	    	}
 	    	    
