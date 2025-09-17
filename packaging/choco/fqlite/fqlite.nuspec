@@ -3,7 +3,7 @@
   <metadata>
     <id>fqlite</id>
     <version>3.3</version>
-    <packageSourceUrl>https://github.com/pawlaszczyk/fqlite/releases/download/3.21/fqlite-3.21-windows.exe</packageSourceUrl>
+    <packageSourceUrl>https://github.com/pawlaszczyk/fqlite/releases/download/3.3/fqlite-3.3-windows.exe</packageSourceUrl>
     <title>fqlite (Install)</title>
     <authors>Dirk Pawlaszczyk</authors>
     <projectUrl>https://github.com/pawlaszczyk/fqlite</projectUrl>
