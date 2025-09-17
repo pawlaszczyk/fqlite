@@ -113,7 +113,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           body_path: CHANGELOG.md
-          tag_name: ${{ steps.get-version.outputs.version }}
+          tag_name: ${{ needs.get-version.outputs.version }}
           make_latest: true
           files: |
             artifacts/*
