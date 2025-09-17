@@ -2,7 +2,7 @@
 <package xmlns="http://schemas.microsoft.com/packaging/2015/06/nuspec.xsd">
   <metadata>
     <id>fqlite</id>
-    <version>3.21</version>
+    <version>3.3</version>
     <packageSourceUrl>https://github.com/pawlaszczyk/fqlite/releases/download/3.21/fqlite-3.21-windows.exe</packageSourceUrl>
     <title>fqlite (Install)</title>
     <authors>Dirk Pawlaszczyk</authors>
