@@ -92,26 +92,26 @@ jobs:
         #####
         # Windows - Chocolatey package
         #####
-      - name: Prepare chocolatey package installer
-        if: startsWith(matrix.os, 'windows')
-        env:
-          VERSION: ${{ needs.get-version.outputs.version }}
-        run: |
-          cd packaging\choco\
-          ./replace_config.ps1
-          cd ..\..\
-      - name: Generate chocolatey package
-        if: startsWith(matrix.os, 'windows')
-        uses: crazy-max/ghaction-chocolatey@v3
-        with:
-          args: pack packaging/choco/fqlite/fqlite.nuspec --version ${{ needs.get-version.outputs.version }}
-      - uses: actions/upload-artifact@v4
-        if: startsWith(matrix.os, 'windows')
-        with:
-          name: "fqlite-${{ needs.get-version.outputs.version }}.nupkg"
-          path: "fqlite*.nupkg"
-          overwrite: true
-          retention-days: 14
+      # - name: Prepare chocolatey package installer
+      #  if: startsWith(matrix.os, 'windows')
+      #  env:
+      #    VERSION: ${{ needs.get-version.outputs.version }}
+      #  run: |
+      #    cd packaging\choco\
+      #    ./replace_config.ps1
+      #    cd ..\..\
+      #- name: Generate chocolatey package
+      #  if: startsWith(matrix.os, 'windows')
+      #  uses: crazy-max/ghaction-chocolatey@v3
+      #  with:
+      #    args: pack packaging/choco/fqlite/fqlite.nuspec --version ${{ needs.get-version.outputs.version }}
+      #- uses: actions/upload-artifact@v4
+      #  if: startsWith(matrix.os, 'windows')
+      #  with:
+      #    name: "fqlite-${{ needs.get-version.outputs.version }}.nupkg"
+      #    path: "fqlite*.nupkg"
+      #    overwrite: true
+      #    retention-days: 14
   publish:
   #  if: github.event.pull_request.merged == true
     name: Publish release artefacts
