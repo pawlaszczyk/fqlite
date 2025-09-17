@@ -163,7 +163,6 @@ public HexFXWindow() {
 	/** navigates to the line if row is between [0...lineCount-1], otherwise does nothing */
 	public void goToLine(int row)
 	{
-		System.out.println("WrapLines :: " + editor().isWrapLines());
 		editor().wrapLinesProperty().set(true);
 		
 		// TODO smarter algorithm near the end of file

@@ -4,6 +4,7 @@ import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.util.Properties;
+import java.util.logging.Level;
 
 import fqlite.base.Global;
 import javafx.application.Application;
@@ -33,9 +34,10 @@ public class SettingsDialog extends Application{
 		final	RadioButton r1 = new RadioButton("don't export any BLOBs"); 
 		final   RadioButton r2 = new RadioButton("export BLOB values to .csv"); 
 		final   RadioButton r3 = new RadioButton("export BLOB values as separate files"); 
+        final   ChoiceBox<String> loglevel = new ChoiceBox<String>();
 
 
-	    @Override
+    @Override
 	    public void start(final Stage stage) {
 	        stage.setTitle("FQLite Settings");
 	 
@@ -75,12 +77,7 @@ public class SettingsDialog extends Application{
 	        rootGroup.setSpacing(10);
 	        rootGroup.setAlignment(Pos.CENTER);
 	        rootGroup.getChildren().addAll(heading,fileexportproperties);
-	        
-	        /**
-	         * 
-	         * 
-	         */
-	        
+
 	        final VBox exportBox = new VBox();
 	        exportBox.setPadding(new Insets(5, 5, 5, 5));
 	        exportBox.setSpacing(10);
@@ -106,18 +103,37 @@ public class SettingsDialog extends Application{
 	        
 	        exportBox.getChildren().add(exportTblHeader);
 	        exportBox.setStyle(cssLayout);    
-	        Label text = new Label("Separator");
+	        Label text = new Label("Separator: ");
 	        
 	        //Adding the choice box to the group
 	        //Group newgrp = new Group(choiceBox,text);
-	        HBox newgrp = new HBox(choiceBox, text);
+	        HBox newgrp = new HBox(text, choiceBox);
 	        newgrp.setPadding(new Insets(5, 5, 5, 0));
 	        newgrp.setSpacing(10);
 	       
 	        exportBox.getChildren().add(newgrp);  
 	        rootGroup.getChildren().addAll(heading2, exportBox);
-	        
-	        
+
+            Label text2 = new Label("Level: ");
+            javafx.scene.control.Label heading3 = new javafx.scene.control.Label("Log Settings");
+            heading.setTextAlignment(TextAlignment.CENTER);
+            heading3.setFont(Font.font("Verdana", FontWeight.BOLD, 12));
+            loglevel.getItems().add(Level.SEVERE.toString());
+            loglevel.getItems().add(Level.WARNING.toString());
+            loglevel.getItems().add(Level.INFO.toString());
+            loglevel.getItems().add(Level.FINEST.toString());
+            loglevel.setTooltip(new Tooltip("Select a LOG Level"));
+            loglevel.getSelectionModel().select(Global.LOGLEVEL.toString());
+
+            HBox loggrp = new HBox(text2, loglevel);
+            loggrp.setPadding(new Insets(5, 5, 5, 0));
+            loggrp.setSpacing(10);
+            loggrp.setStyle(cssLayout);
+
+
+            //exportBox.getChildren().add(loggrp);
+            rootGroup.getChildren().addAll(heading3, loggrp);
+
 	        /**
 	         * button bar definition.
 	         * 
@@ -133,7 +149,17 @@ public class SettingsDialog extends Application{
 		            new EventHandler<ActionEvent>() {
 		                @Override
 		                public void handle(final ActionEvent e) {
-		                   
+		                   // read and set log-level
+
+                            switch (loglevel.getValue()){
+
+                                case "SEVERE": Global.LOGLEVEL = Level.SEVERE; break;
+                                case "WARNING": Global.LOGLEVEL = Level.WARNING; break;
+                                case "INFO": Global.LOGLEVEL = Level.INFO; break;
+                                case "FINE": Global.LOGLEVEL = Level.FINE; break;
+
+                            }
+
 		                	if(r1.isSelected())
 		                		Global.EXPORT_MODE = Global.EXPORT_MODES.DONTEXPORT;
 		                	else if (r2.isSelected()) 
@@ -150,17 +176,18 @@ public class SettingsDialog extends Application{
 		            			appProps.load(new FileInputStream(path));
 		            	        appProps.setProperty("EXPORTMODE",Global.EXPORT_MODE.name());
 		            	        Global.EXPORTTABLEHEADER = exportTblHeader.isSelected();
-		            	        appProps.setProperty("EXPORT_THEADER",Global.EXPORTTABLEHEADER?"true":"false");
+		            	        appProps.setProperty("EXPORT_THEADER", Global.EXPORTTABLEHEADER?"true": "false");
 		            	        Global.CSV_SEPARATOR = choiceBox.getSelectionModel().getSelectedItem();
 		            	        appProps.setProperty("CSV_SEPARATOR",Global.CSV_SEPARATOR);
-		            	        
+		            	        appProps.setProperty("LOG-LEVEL",Global.LOGLEVEL.toString());
+
 		            	        appProps.store(new FileOutputStream(path), null);
 
 		            		} catch (Exception err) {
 		            		
 		            		}
 		                		
-		                	// get a handle to the stage
+		                	// get a handle on the stage
 		                    Stage stage = (Stage) applyButton.getScene().getWindow();
 		                    // do what you have to do
 		                    stage.close();
@@ -171,7 +198,7 @@ public class SettingsDialog extends Application{
 		            new EventHandler<ActionEvent>() {
 		                @Override
 		                public void handle(final ActionEvent e) {
-		                	// get a handle to the stage
+		                	// get a handle on the stage
 		                    Stage stage = (Stage) applyButton.getScene().getWindow();
 		                    // do what you have to do
 		                    stage.close();
@@ -187,18 +214,10 @@ public class SettingsDialog extends Application{
 	  
 	        rootGroup.getChildren().add(buttonBar);
 	        
-	        stage.setScene(new Scene(rootGroup,400,400));
+	        stage.setScene(new Scene(rootGroup,400,550));
 	        stage.setAlwaysOnTop(true);
 	        stage.show();
 
 	    }
-	 
-//    public static void main(String[] args) {
-//	        Application.launch(args);
-//	    }
-	         
-	        
-	        
-	
 
 }

@@ -1,35 +1,22 @@
  package fqlite.base;
 
+import fqlite.log.AppLog;
+
 import java.lang.reflect.InvocationTargetException;
 import java.util.concurrent.ExecutionException;
 import java.util.logging.Level;
 
-/**
-* This is the main class, as the name says :-).
-* Use this class to start analyzing a database file from the command line interface
-* (CLI-mode). For the graphic mode please visit class <code>GUI</code>. 
-* 
-* To run the FQLite from the command line you can use the following command:
-*
-* $> java fqlite.base.MAIN <database.db>
-*
-* 
-*     __________    __    _ __     
-*    / ____/ __ \  / /   (_) /____ 
-*   / /_  / / / / / /   / / __/ _ \
-*  / __/ / /_/ / / /___/ / /_/  __/
-* /_/    \___\_\/_____/_/\__/\___/ 
-* 
-* 
-* 
-* @author Dirk Pawlaszczyk
-* @version 1.5.6
-*/
+/// This is the main class, as the name says :-).
+/// Use this class to start analysing a database file from the command line interface
+/// (CLI-mode). For the graphic mode, please visit the <code>GUI</code> class</code>.
+/// To run the FQLite from the command line, you can use the following command:
+/// $> java fqlite.base.MAIN <database.db>
+///
+/// @author Dirk Pawlaszczyk
+/// @version 1.5.6
 public class MAIN {
 
-   
-	
-	
+
 	public static void main(String[] args) throws IllegalAccessException, IllegalArgumentException, InvocationTargetException, NoSuchMethodException, SecurityException {
 
 		System.out.println("**************************************************************");
@@ -40,24 +27,14 @@ public class MAIN {
 		System.out.println("**************************************************************");
 
 		
-		System.out.println("       *                         ");
-		System.out.println("      /|\\                       ");       
-		System.out.println("     /*|O\\                      ");
-		System.out.println("    /*/|\\*\\                    ");
-		System.out.println("   /X/O|*\\X\\                   ");
-		System.out.println("  /*/X/|\\X\\*\\                 ");
-	    System.out.println(" /O/*/X|*\\O\\X\\                ");             
-	   	System.out.println("/*/O/X/|\\X\\O\\*\\              ");
-	   	System.out.println("      |X|                        ");      
-	   	System.out.println("      |X|     <Christmas Edition>");
-	   	System.out.println(" \n\n\n                          ");
+
 	 	  
 		/* create a new job-object to process database file */
 		/* Note: There is a 1:1 connection between a database file and a job object */
 		Job job = new Job();
 
 		/*
-		 * Missing arguments ? We need at least the path and the name of the database
+		 * Missing arguments? We need at least the path and the name of the database
 		 * file to process
 		 */
 		if (args.length == 0) {
@@ -67,70 +44,67 @@ public class MAIN {
 			long start = System.currentTimeMillis();
 
 			if (args.length > 1) {
-				
-				for (int i = 0; i < args.length; i++)
-				{	
-					String option = args[i];
-	
-					/* check parameters */
-					/*
-					 * Note: you can also process WAl-archive files as well as rollback-Journal
-					 * files with this class. Check out the correct parameters.
-					 */
-					if (option.contains("--wal:")) {
-						job.readWAL = true;
-						job.walpath = option.substring(6);
-						System.out.println("wal-filename: " + job.walpath);
-					} else if (option.contains("--rjournal:")) {
-						job.readRollbackJournal = true;
-						job.rollbackjournalpath = option.substring(11);
-						System.out.println("rollbackjournal-filename: " + job.rollbackjournalpath);
-					} 
-					
-					if (option.contains("--threads:"))
-					{
-						
-						try
-						{
-							Global.numberofThreads = Integer.parseInt(option.substring(10));
-							System.out.println("number of threads: " + Global.numberofThreads);
 
-						}
-						catch(NumberFormatException err)
-						{
-							System.out.println(" wrong parameter: " + option.substring(10));
-						}
-						
-					}
-					if (option.contains("--loglevel:"))
-					{
-					    String loglv = option.substring(11);
-						
-					    switch(loglv){
-					    
-						    case "ERROR" :  Global.LOGLEVEL = Level.SEVERE; 
-						    				System.out.println("Loglevel was set to ERROR");
-						    			    break;  
-						    	
-						    case "INFO" :   Global.LOGLEVEL = Level.INFO; 
-						    				System.out.println("Loglevel was set to INFO");
-						    				break;  
-						    	
-						    case "DEBUG" :  Global.LOGLEVEL = Level.FINEST; 
-						    				System.out.println("Loglevel was set to DEBUG");
-						    				break;  
-						    
-						    case "ALL" :  	Global.LOGLEVEL = Level.ALL;
-						    				System.out.println("Loglevel was set to ALL");
-						    				break;  
-						    				
-						    default: Global.LOGLEVEL = Level.INFO;
-					    } 
-						
-					}
-					
-					
-				}
+                for (String option: args) {
+                    /* check parameters */
+                    /*
+                     * Note: you can also process WAl-archive files as well as rollback-Journal
+                     * files with this class. Check out the correct parameters.
+                     */
+                    if (option.contains("--wal:")) {
+                        job.readWAL = true;
+                        job.walpath = option.substring(6);
+                        System.out.println("wal-filename: " + job.walpath);
+                    } else if (option.contains("--rjournal:")) {
+                        job.readRollbackJournal = true;
+                        job.rollbackjournalpath = option.substring(11);
+                        System.out.println("rollbackjournal-filename: " + job.rollbackjournalpath);
+                    }
+
+                    if (option.contains("--threads:")) {
+
+                        try {
+                            Global.numberofThreads = Integer.parseInt(option.substring(10));
+                            System.out.println("number of threads: " + Global.numberofThreads);
+
+                        } catch (NumberFormatException err) {
+                            System.out.println(" wrong parameter: " + option.substring(10));
+                        }
+
+                    }
+                    if (option.contains("--loglevel:")) {
+                        String loglv = option.substring(11);
+
+                        switch (loglv) {
+
+                            case "ERROR":
+                                Global.LOGLEVEL = Level.SEVERE;
+                                System.out.println("Loglevel was set to ERROR");
+                                break;
+
+                            case "INFO":
+                                Global.LOGLEVEL = Level.INFO;
+                                System.out.println("Loglevel was set to INFO");
+                                break;
+
+                            case "DEBUG":
+                                Global.LOGLEVEL = Level.FINEST;
+                                System.out.println("Loglevel was set to DEBUG");
+                                break;
+
+                            case "ALL":
+                                Global.LOGLEVEL = Level.ALL;
+                                System.out.println("Loglevel was set to ALL");
+                                break;
+
+                            default:
+                                Global.LOGLEVEL = Level.INFO;
+                        }
+
+                    }
+
+
+                }
 				
 
 			}
@@ -145,6 +119,7 @@ public class MAIN {
 
 			long end = System.currentTimeMillis();
 			System.out.println("Duration in ms: " + (end - start));
+            AppLog.info("Duration in ms: " + (end - start));
 		}
 	}
 

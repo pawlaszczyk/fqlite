@@ -92,9 +92,9 @@ public class TextAreaHandler extends Handler {
     public void flush() {
         /*
          * This implementation has no "buffer". If the 'recordQueue' is not
-         * empty then the JavaFX Application Thread has already been notified
+         * empty, then the JavaFX Application Thread has already been notified
          * of work, meaning the queue will be emptied eventually. And if the
-         * JavaFX framework has been shutdown, then there's no work to do
+         * JavaFX framework has been shut down, then there's no work to do
          * anyway.
          */
     }

@@ -7,7 +7,7 @@ import fqlite.base.BigByteBuffer;
 /**
  * An efficient byte buffer searching class based on the Knuth-Morris-Pratt algorithm.
  * For more on the algorithm works see: 
- * http://www.inf.fh-flensburg.de/lang/algorithmen/pattern/kmpen.htm.
+ * <a href="http://www.inf.fh-flensburg.de/lang/algorithmen/pattern/kmpen.htm">...</a>.
  */
 public class ByteSeqSearcher{
 
@@ -87,14 +87,10 @@ public class ByteSeqSearcher{
 	        return -1;
 	    }
 
-	    /**
-	     * Builds up a component of longest "borders" for each prefix of the pattern to find. 
-	     * This component is stored internally and aids in implementation of the Knuth-Moore-Pratt 
-	     * string search.
-	     * <p>
-	     * For more information, see: http://www.inf.fh-flensburg.de/lang/algorithmen/pattern/kmpen.htm.
-	     * 
-	     */
+	    /// Builds up a component of longest "borders" for each prefix of the pattern to find.
+	    /// This component is stored internally and aids in implementation of the Knuth-Moore-Pratt
+	    /// string search.
+	    /// For more information, see: <a href="http://www.inf.fh-flensburg.de/lang/algorithmen/pattern/kmpen.htm">...</a>.
 	    private void preProcess()
 	    {
 	        int i = 0;

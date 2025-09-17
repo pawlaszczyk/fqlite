@@ -29,7 +29,7 @@ public class ADComparator implements Comparator<AbstractDescriptor> {
 		//System.out.println(" l2 " + o1.getName()); 
 		
 		
-		if (l1.size()==0 || l2.size()==0)
+		if (l1.isEmpty() || l2.isEmpty())
 			return 0;
 		
 		if(l1.get(0).equals("BLOB") || l1.get(0).equals("TEXT"))
@@ -45,14 +45,9 @@ public class ADComparator implements Comparator<AbstractDescriptor> {
 			second +=1;
 
 		//System.out.println("first:: " + first + " second:: " + second);
-		
-		if(first > second)
-			return 1;
-		
-		if(first == second)
-			return 0;
-		
-		return -1;
-	}
+
+        return Integer.compare(first, second);
+
+    }
 
 }

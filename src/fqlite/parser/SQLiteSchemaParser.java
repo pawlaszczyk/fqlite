@@ -13,7 +13,7 @@ import fqlite.log.AppLog;
  * and types) startRegion the sqlite_master component. This component contains the root page
  * number for every other component and indices in the database file.
  *
- * The Backus Nauer form for this statement looks like this:
+ * The Backus-Naur form for this statement looks like this:
  * 
  * BNF: sql-command ::= CREATE [TEMP | TEMPORARY] TABLE component-name 
  *      				( column-def [, column-def]* [, constraint]* )
@@ -27,9 +27,9 @@ public class SQLiteSchemaParser {
 	public static ArrayList<Integer> roots = new ArrayList<Integer>();
 
 	/**
-	 * 
-	 * @param job reference to calling Job-instance
-	 * @param page    String with schema definition
+	 * Parse SQL table description.
+	 * @param job reference to calling Job instance
+	 * @param tablename String with schema definition
 	 */
 	public static void parse(Job job, String tablename, int root, String sql) {
 
@@ -70,10 +70,10 @@ public class SQLiteSchemaParser {
 			if(tds.isVirtual())
 				job.virtualTables.put(tds.tblname,tds);
 				
-			if (null != tds) {
+			if (null != tds && tds.tblname != null) {
 				AppLog.debug(tds.getStandardPattern().toString());
 				tds.tblname = tablename;
-				tds.ROWID = rowid;  // this flag indicates weather there is a ROWID or not 
+				tds.ROWID = rowid;  // this flag indicates whether there is a ROWID or not
 				/* avoid double entries */
 				if (!job.headers.contains(tds))
 				{	
@@ -89,9 +89,9 @@ public class SQLiteSchemaParser {
 					/*
 					 *  Issue No. 5 (GitHub):
 					 *  
-					 *  In some cases there exist several versions of the same table.
+					 *  In some cases, there exist several versions of the same table.
 					 *  Those different table versions can have different columns. 
-					 *  To solve those issue we always take the table with the highest
+					 *  To solve those issue, we always take the table with the highest
 					 *  number of columns. 
 					 */
 				

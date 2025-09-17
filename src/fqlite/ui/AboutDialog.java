@@ -7,6 +7,7 @@ import java.net.URI;
 
 import fqlite.base.GUI;
 import fqlite.base.Global;
+import fqlite.log.AppLog;
 import javafx.event.ActionEvent;
 import javafx.event.EventHandler;
 import javafx.geometry.Insets;
@@ -98,7 +99,7 @@ public class AboutDialog extends javafx.scene.control.Dialog<Object>{
                         }
                     }
                 } catch (IOException | InternalError err) {
-                    err.printStackTrace();
+                    AppLog.error(err.getMessage());
                 }
             
             }

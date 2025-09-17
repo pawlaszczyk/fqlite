@@ -4,10 +4,13 @@ import fqlite.base.GUI;
 import fqlite.base.Job;
 import fqlite.base.RollbackJournalReader;
 import fqlite.base.WALReader;
+import fqlite.log.AppLog;
 import javafx.application.Platform;
 import javafx.concurrent.Task;
 import javafx.scene.control.TreeItem;
 import javafx.scene.image.ImageView;
+
+import java.util.Objects;
 
 public class ImportDBTask {
   Job job;
@@ -28,11 +31,12 @@ public class ImportDBTask {
         
         public void succeeded() {
           super.succeeded();
-          updateMessage("DB Import Done!");
-          System.out.println("DB Import Done !");
+          AppLog.info("DB Import Done!");
+          System.out.println("DB Import Done!");
           Platform.runLater(new Runnable() {
                 public void run() {
-                  String s = GUI.class.getResource("/database-small-icon.png").toExternalForm();
+                  // database-small-icon.png
+                  String s = Objects.requireNonNull(GUI.class.getResource("/green_database24.png")).toExternalForm();
                   ImageView iv = new ImageView(s);
                   job.dbNode.setGraphic(iv);
                   job.updatePropertyPanel();
@@ -44,7 +48,7 @@ public class ImportDBTask {
             rol.ps = ImportDBTask.this.job.ps;
             rol.parse();
             rol.output();
-            String s2 = GUI.class.getResource("/journal-icon.png").toExternalForm();
+            String s2 = Objects.requireNonNull(GUI.class.getResource("/green_journal24.png")).toExternalForm();
             ImageView iv2 = new ImageView(s2);
             if (ImportDBTask.this.job.rjNode != null)
               ImportDBTask.this.job.rjNode.setGraphic(iv2); 
@@ -57,7 +61,7 @@ public class ImportDBTask {
             ImportDBTask.this.job.wal = wal;
             wal.parse();
             wal.output();
-            String s3 = GUI.class.getResource("/wal-icon.png").toExternalForm();
+            String s3 = GUI.class.getResource("/green_archive24.png").toExternalForm();
             ImageView iv3 = new ImageView(s3);
             if (ImportDBTask.this.job.walNode != null)
               ImportDBTask.this.job.walNode.setGraphic(iv3); 

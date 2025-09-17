@@ -10,8 +10,8 @@ import java.util.ArrayDeque;
  */
 public class WorkerQueue<T> {
 
-	// Internal Deque which gets decorated for synchronization.
-	private ArrayDeque<T> dequeStore;
+	// Internal deque that gets decorated for synchronisation.
+	private final ArrayDeque<T> dequeStore;
 
 	public WorkerQueue(int initialCapacity) {
 		this.dequeStore = new ArrayDeque<>(initialCapacity);

@@ -5,8 +5,7 @@ import fqlite.util.WorkerQueue;
 
 /**
 *  The analysis of the individual database pages can be executed in parallel. 
-*  For this purpose, a corresponding task is assigned to a worker thread. 
-* 
+*  For this purpose, a corresponding task is assigned to a worker thread.
 *     __________    __    _ __     
 *    / ____/ __ \  / /   (_) /____ 
 *   / /_  / / / / / /   / / __/ _ \
@@ -27,17 +26,17 @@ public class Worker implements Runnable {
 	 * Constructor. Used to assign a new ImportDBTask to the 
 	 * Worker object.
 	 * 
-	 * @param rt
+	 * @param rt runtime or job object
 	 */
 	public Worker(Job rt)
 	{
-		toDo = new WorkerQueue<RecoveryTask>();
+		toDo = new WorkerQueue<>();
 		util = new Auxiliary(rt);
 	}
 	
 	/**
-	 * A a new task on top of the internal worker's stack. 
-	 * @param t
+	 * A new task on top of the internal worker's stack.
+	 * @param t the task object to enqueue
 	 */
 	public void addTask(RecoveryTask t)
 	{

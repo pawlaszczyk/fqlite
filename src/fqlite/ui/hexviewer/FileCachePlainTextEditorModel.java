@@ -4,6 +4,8 @@ import java.io.File;
 import java.io.RandomAccessFile;
 import java.util.Hashtable;
 import java.util.concurrent.locks.ReentrantLock;
+
+import fqlite.log.AppLog;
 import goryachev.common.util.text.IBreakIterator;
 import goryachev.fxtexteditor.Edit;
 import goryachev.fxtexteditor.FxTextEditorModel;
@@ -123,7 +125,7 @@ public class FileCachePlainTextEditorModel extends FxTextEditorModel
 	      	return;
 		}
 		catch(Exception err){
-			err.printStackTrace();
+            AppLog.error(err.getMessage());
 		}
 		finally
 		{

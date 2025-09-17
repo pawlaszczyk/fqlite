@@ -12,6 +12,7 @@ import java.util.LinkedList;
 import java.util.List;
 import java.util.Properties;
 
+import fqlite.log.AppLog;
 import org.apache.calcite.jdbc.CalciteConnection;
 import org.apache.calcite.schema.SchemaPlus;
 
@@ -58,7 +59,7 @@ public class SQLParser {
 	static Label statusline;
 
 	/**
-	 * Parse and execute the user defined SQL statement.
+	 * Parse and execute the user-defined SQL statement.
 	 * 
 	 * @param command
 	 * @param dbname
@@ -75,7 +76,7 @@ public class SQLParser {
 		String jtbname = null;
 
 		try {
-			// we use JSqlParser to validate the statement in the first step
+			//We use JSqlParser to validate the statement in the first step
 			select = (Select) CCJSqlParserUtil.parse(command);
 		} catch (JSQLParserException e) {
 			e.printStackTrace();
@@ -97,7 +98,7 @@ public class SQLParser {
 		/* the table name should be the first element in the name parts list */
 		String kk = parts.get(0);
 
-		/*  check the combo box to determine the currently selected data base */
+		/*  check the combo box to determine the currently selected database */
 		//List<SelectItem<?>> selectlist = ps.getSelectItems();
 
 		// build table path (the same as in the tree)
@@ -112,20 +113,20 @@ public class SQLParser {
 
 		
 		String schemaid = null;
-		// Is there already a table schema for the given data base?
+		// Is there already a table schema for the given database?
 		if (!dbname2schema.containsKey(dbname)) {
 			
-			// for internal managing we need a unique schema ID for each database
+			// for internal managing, we need a unique schema ID for each database
 			schemaid = "schema" + (subschemas.size() + 1);
 
-			// remember the connection between database and choosen
+			// remember the connection between the database and chosen
 			dbname2schema.put(dbname, schemaid);
 		} else {
 			// use the already existing schema
 			schemaid = dbname2schema.get(dbname);
 		}
 
-		// did the table path really exists?
+		//Did the table path really exist?
 		if (null != tb) {
 
 			Node nd = gui.tables.get(tablekey);
@@ -142,11 +143,11 @@ public class SQLParser {
 					if (null == subschemas.get(schemaid)) {
 
 						/**
-						 * Check, if table has been added to the analyzer already.
+						 * Check if the table has been added to the analyser already.
 						 */
 						schema = new MemTableSchema();
 						// register the newly defined schema to the root schema
-						// the database name is used as schema name
+						// the database name is used as the schema name
 						rootSchema.add(schemaid, schema);
 						subschemas.put(schemaid, schema);
 					} else {
@@ -170,7 +171,7 @@ public class SQLParser {
 						try {
 							schema.fill(tbname, tb);
 						} catch (Exception err) {
-							err.printStackTrace();
+                            AppLog.error(err.getMessage());
 						}
 					}
 
@@ -209,11 +210,11 @@ public class SQLParser {
 								if (null == subschemas.get(schemaid)) {
 
 									/**
-									 * Check, if table has been added to the analyzer already.
+									 * Check, if the table has been added to the analyser already.
 									 */
 									jschema = new MemTableSchema();
 									// register the newly defined schema to the root schema
-									// the database name is used as schema name
+									// the database name is used as the schema name
 									rootSchema.add(schemaid, jschema);
 								} else {
 									jschema = subschemas.get(schemaid);
@@ -442,7 +443,7 @@ public class SQLParser {
 
 	@SuppressWarnings({ "rawtypes", "unchecked" })
 	private void fillTable(TableView table, List<String> columns, ObservableList<ObservableList> data, boolean rowno) {
-		/* first, remove results from last query, before continue. */
+		/* first, remove results from last query, before continuing. */
 		table.getColumns().clear();
 		table.getItems().clear();
 
@@ -505,7 +506,7 @@ public class SQLParser {
 			this.rootSchema = calciteConnection.getRootSchema();
 
 		} catch (Exception err) {
-			System.err.println(err);
+            AppLog.error(err.getMessage());
 		}
 	}
 }

@@ -2,6 +2,7 @@ package fqlite.ui.hexviewer;
 
 import java.io.File;
 import fqlite.base.GUI;
+import fqlite.log.AppLog;
 import goryachev.common.util.FileSettingsProvider;
 import goryachev.common.util.GlobalSettings;
 import goryachev.log.config.JsonLogConfig;
@@ -89,9 +90,7 @@ public void start(Stage stage) throws Exception
 		});
 		
 	}catch(Exception err) {
-		
-		err.printStackTrace();
-		
+        AppLog.error(err.getMessage());
 	}
 	
 	

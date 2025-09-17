@@ -33,8 +33,8 @@ import javafx.collections.ObservableList;
  * 
  * From the SQLite documentation:
  * 
- * "The original content is preserved in the database file and the changes are appended into a separate WAL file. 
- *  A COMMIT occurs when a special record indicating a commit is appended to the WAL. Thus a COMMIT can happen 
+ * "The original content is preserved in the database file, and the changes are appended into a separate WAL file.
+ *  A COMMIT occurs when a special record indicating a commit is appended to the WAL. Thus, a COMMIT can happen
  *  without ever writing to the original database, which allows readers to continue operating from the original 
  *  unaltered database while changes are simultaneously being committed into the WAL. Multiple transactions can be 
  *  appended to the end of a single WAL file."
@@ -51,7 +51,7 @@ public class WALReader{
 	 * if a new checkpoint or transaction is prepared.
 	 *
 	 * All frames that belong to the same transaction also have an identical "salt1" value
-	 * Accordingly, we use salt1 as key for the data structure. 
+	 * Accordingly, we use salt1 as the key for the data structure.
 	 * 
 	 * A list of all page numbers belonging to the same transaction and their status (committed or not). 
 	 * 
@@ -107,7 +107,7 @@ public class WALReader{
 	/* reference to the MAIN class */
 	Job job;
 
-	/* number of page that is currently analyzed */
+	/* number of pages that is currently analysed */
 	int pagenumber_maindb;
     int pagenumber_wal;
 	int framestart = 0;
@@ -151,8 +151,8 @@ public class WALReader{
 	
 	
 	/**
-	 * This method is the main processing loop. First the header is analyzed.
-	 * Afterwards all write ahead frames are recovered.
+	 * This method is the main processing loop. First, the header is analysed.
+	 * Afterwards, all write-ahead frames are recovered.
 	 * 
 	 * @return
 	 */
@@ -163,7 +163,7 @@ public class WALReader{
 
 		System.out.println("parse WAL-File");
 		/*
-		 * we have to do this before we open the database because of the concurrent
+		 * We have to do this before we open the database because of the concurrent
 		 * access
 		 */
 
@@ -175,7 +175,7 @@ public class WALReader{
 			return;
 		}
 
-		/** Caution!!! we read the complete file into RAM **/
+		/** Caution!!! We read the complete file into RAM **/
 		try {
 			readFileIntoBuffer();
 		} catch (IOException e) {
@@ -193,7 +193,7 @@ public class WALReader{
 			// we can do something in between or just wait ;-).
 		}
 
-		// set filepointer to begin of the file
+		// set filepointer to the beginning of the file
 		buffer.flip();
 
 		try {
@@ -215,8 +215,8 @@ public class WALReader{
 		 *  12	4 	Checkpoint sequence number
 		 *  16	4 	Salt-1: random integer incremented with each checkpoint
 		 *  20	4 	Salt-2: a different random number for each checkpoint
-		 *  24	4 	Checksum-1: First part of a checksum on the first 24 bytes of header
-		 *  28	4 	Checksum-2: Second part of the checksum on the first 24 bytes of header 
+		 *  24	4 	Checksum-1: First part of a checksum on the first 24 bytes of the header
+		 *  28	4 	Checksum-2: Second part of the checksum on the first 24 bytes of the header
 		 * 
 		 * 
 		 *  Source: https://www.sqlite.org/fileformat2.html#walformat
@@ -302,7 +302,7 @@ public class WALReader{
 		AppLog.info(" checksum-2 second part ot the checksum on the first frame header " + hchecksum2);
 
 		
-		/* initialize the BitSet for already visited location within a wal-page */
+		/* initialise the BitSet for already visited location within a wal-page */
 
 		visit = new BitSet(ps);
 		
@@ -315,8 +315,8 @@ public class WALReader{
 		 * WAL Frame Header Format
 		 * 
 		 * Let us now read the WAL Frame Header. Immediately following the wal-header
-		 * are zero or more frames. Each frame consists of a 24-byte frame-header
-		 * followed by a page-size bytes of page data. The frame-header is six
+		 * are zero or more frames. Each frame consists of a 24-byte frame header
+		 * followed by a page-size bytes of page data. The frame header is six
 		 * big-endian 32-bit unsigned integer values, as follows:
 		 * 
 		 * 
@@ -335,7 +335,7 @@ public class WALReader{
 		 */
 		
 		
-		framestart = 32; // this is the position, where the first frame should be
+		framestart = 32; // this is the position where the first frame should be
 
 		boolean next = false;
 		int numberofpages = 0;
@@ -354,33 +354,25 @@ public class WALReader{
 			
 			/* number or size of pages for a commit header, otherwise zero. */
 			int commit = fheader.getInt();
-			if (commit > 0)
-				AppLog.info(" Information of the WAL-archive has been commited successful. ");
-			else
-				AppLog.info(" No commit so far. this frame holds the latest! version of the page ");
-			
 			long fsalt1 = Integer.toUnsignedLong(fheader.getInt());
-			AppLog.info("fsalt1 " + fsalt1);
-			
 			long fsalt2 = Integer.toUnsignedLong(fheader.getInt());
-			AppLog.info("fsalt2" + fsalt2);
-			
+
 			/* A frame is considered valid if and only if the following conditions are true:
 			 * 
-			 * 1) The salt-1 and salt-2 values in the frame-header match salt values in the wal-header
+			 * 1) The salt-1 and salt-2 values in the frame-header match the salt values in the wal-header
 			 * 
-			 * 2) The checksum values in the final 8 bytes of the frame-header exactly match the checksum
-			 *    computed consecutively on the first 24 bytes of the WAL header and the first 8 bytes and 
+			 * 2) The checksum values in the final 8 bytes of the frame header exactly match the checksum
+			 *    computed consecutively on the first 24 bytes of the WAL header and the first 8 bytes, and
 			 *    the content of all frames up to and including the current frame.
 			 */
 			
-			if (hsalt1 == fsalt1 && hsalt2 == fsalt2)
-			{
-				 AppLog.info("seems to be an valid frame. Condition 1 is true at least. ");
-			}	
+			//if (hsalt1 == fsalt1 && hsalt2 == fsalt2)
+			//{
+			//	 AppLog.info("seems to be an valid frame. Condition 1 is true at least. ");
+			//}
 				
 	
-			AppLog.debug("pagenumber of frame in main db " + pagenumber_maindb);
+			//AppLog.debug("pagenumber of frame in main db " + pagenumber_maindb);
 	
 			/* now we can read the page - it follows immediately after the frame header */
 	
@@ -392,14 +384,14 @@ public class WALReader{
 			pagenumber_wal = numberofpages;
 
 			
-			WALFrame frame = updateCheckpoint(pagenumber_maindb, framenumber,fsalt1, fsalt2,(commit==0)? false: true);
+			WALFrame frame = updateCheckpoint(pagenumber_maindb, framenumber,fsalt1, fsalt2, commit != 0);
 			analyzePage(frame);
 
 			
 			framestart += ps +  24;
 			
 		
-			/*  More pages to analyze ? */
+			/*  More pages to analyse? */
 			if(framestart+24+ps < size)
 			{
 				
@@ -419,7 +411,7 @@ public class WALReader{
 		long end = System.currentTimeMillis();
 		System.out.println("WAL Import duration in ms: " + (end-start));
 		
-		AppLog.info("Checkpoints " + checkpoints.toString());
+		//AppLog.info("Checkpoints " + checkpoints.toString());
 	
 	}
 	
@@ -448,7 +440,7 @@ public class WALReader{
 	}
 
 	/**
-	 * Analyze the actual database page and try to recover regular and deleted content.
+	 * Analyse the actual database page and try to recover regular and deleted content.
 	 * 
 	 * @return int success
 	 */
@@ -473,7 +465,7 @@ public class WALReader{
 		 * 
 		 * reason 1:
 		 * 
-		 * It is a dropped page. We have to carve for deleted cells but without cell
+		 * It is a dropped page. We have to carve out for deleted cells, but without the cell
 		 * pointers, cause this list is dropped too or is damaged.
 		 * 
 		 * reason 2:
@@ -488,7 +480,7 @@ public class WALReader{
 			 */
 			buffer.position(0);
 			Integer checksum = buffer.getInt();
-			/* was page dropped ? */
+			/* was page dropped? */
 			if (checksum == 0) {
 				// System.out.println(" DROPPED PAGE !!!");
 				/* no overflow page -> carve for data records - we do our best! ;-) */
@@ -496,7 +488,7 @@ public class WALReader{
 				//	carve(content, null);
 			}
 			/*
-			 * otherwise it seems to be a overflow page - however, that is not 100% save !!!
+			 * otherwise it seems to be an overflow page - however, that is not 100% safe!!!
 			 */
 
 			/* we have to leave in any case */
@@ -509,7 +501,7 @@ public class WALReader{
 		}
 		
 			
-		/************** skip unkown page types ******************/
+		/************** skip unknown page types ******************/
 
 		// no leaf page -> skip this page
 		if (type < 0) {
@@ -661,12 +653,12 @@ public class WALReader{
 		/***************************************************************
 		 * STEP 3:
 		 * 
-		 * Scan unallocated space between header and  the cell
+		 * Scan unallocated space between the header and  the cell
 		 * content region 
 		 * 
 		 ***************************************************************/
 		
-		/* before we go to the free blocks an gaps let us first check the area between the header and 
+		/* before we go to the free blocks and gaps let us first check the area between the header and
 		   the start byte of the cell content region */
 		if (headerend < buffer.limit())
 			buffer.position(headerend);
@@ -674,9 +666,9 @@ public class WALReader{
 			return -1;
 			
 		/* 	Although we have already reached the official end of the cell pointer array, 
-		 *  there may be more pointers startRegion deleted records. They do not belong to the
-		 *  official content region. We have to skip them, before we can search for more 
-		 *  artifacts in the unallocated space. 
+		 * There may be more pointers to start Region deleted records. They do not belong to the
+		 *  official content region. We have to skip them before we can search for more
+		 * artefacts in the unallocated space.
 		 */
 		
 		byte garbage[] = new byte[2];
@@ -711,7 +703,7 @@ public class WALReader{
 			/* try to read record as usual */
 			LinkedList<String> rc;
 			
-			/* Tricky thing : data record could be partly overwritten with a new data record!!!  */
+			/* Tricky thing: data record could be partly overwritten with a new data record!!!  */
 			/* We should read until the end of the unallocated area and not above! */
 			rc = ct.readRecord(buffer.position(), buffer, ps, visit, type, ccrstart - buffer.position(),firstcol,withoutROWID,Global.WAL_ARCHIVE_FILE,framestart+24 + buffer.position());
 			
@@ -739,8 +731,8 @@ public class WALReader{
 		//carve(content,null);
 		
 	} catch (Exception err) {
-		err.printStackTrace();
-		return -1;
+        AppLog.error(err.getMessage());
+        return -1;
 	}
 
 	return 0;
@@ -757,7 +749,7 @@ public class WALReader{
 			     tablelist.add(FXCollections.observableList(line));  // add row 
 		}
 		
-		// create a new data set since table name occurs for the first time
+		// create a new data set since the table name occurs for the first time
 		else {
 		          ObservableList<ObservableList<String>> tablelist = FXCollections.observableArrayList();
 				  tablelist.add(FXCollections.observableList(line)); // add row 
@@ -766,10 +758,10 @@ public class WALReader{
 	}
 
 	/**
-	 * Quick lookup. Does a given hex-String starts with Zeros?
+	 * Quick lookup. Does a given hex-string start with Zeros?
 	 * 
 	 * @param s the String to check
-	 * @return true, if zero bytes could be found
+	 * @return true if zero bytes could be found
 	 */
 	static boolean allCharactersZero(String s) {
 		if (!s.startsWith("0000"))
@@ -803,7 +795,7 @@ public class WALReader{
 			// we can do something in between or we can do nothing ;-).
 		}
 
-		// set filepointer to begin of the file
+		// set filepointer to the beginning of the file
 		wal.position(0);
 
 	}
@@ -811,7 +803,7 @@ public class WALReader{
 	
 
 	/**
-	 * Starting with the current position of the wal-ByteBuffer read the next
+	 * Starting with the current position of the wal-ByteBuffer, read the next
 	 * db-page.
 	 * 
 	 * @return
@@ -826,7 +818,7 @@ public class WALReader{
 	/**
 	 * This method is called to carve a data page for records.
 	 * 
-	 * @param content page content as hex-string
+	 * @param content page content as a hex-string
 	 */
 	public void carve(ByteBuffer buffer, String content, Carver crv) {
 
@@ -834,7 +826,7 @@ public class WALReader{
 
 		if (null == c)
 			/* no type could be found in the first two bytes */
-			/* Maybe the whole page was drop because of a drop component command ? */
+			/* Maybe the whole page was dropped because of a drop component command? */
 			/* start carving on the complete page */
 			c = new Carver(job, buffer, content, visit, ps);
 
@@ -880,7 +872,7 @@ public class WALReader{
 			AppLog.debug("WALReader Check component : " + tablename);
 			if (tablename.startsWith("__FREELIST"))
 				continue;
-			/* create matcher object for constrain check */
+			/* create matcher object for constraint check */
 			SerialTypeMatcher stm = new SerialTypeMatcher(buffer);
 
 			gaps = findGaps();
@@ -890,7 +882,7 @@ public class WALReader{
 				Gap next = gaps.get(a);
 
 				if (next.to - next.from > 10)
-					/* do we have at least one match ? */
+					/* do we have at least one match? */
 					if (c.carve(next.from + 4, next.to, stm, CarverTypes.NORMAL, tab.get(n))!= Global.CARVING_ERROR) {
 						AppLog.debug("*****************************  STEP NORMAL finished with matches");
 
@@ -926,22 +918,22 @@ public class WALReader{
 			 * When a record deletion occurs, the first 2 bytes of the cell are set to the
 			 * offset value of next free block and latter 2 bytes covers the length of the
 			 * current free block. Because of this, the first 4 bytes of a deleted cell
-			 * differ startRegion the normal data. Accordingly, we need a different approach
+			 * differ startRegion from the normal data. Accordingly, we need a different approach
 			 * to recover the data records.
 			 * 
-			 * In most cases, at least the header length information is overwritten. Boyond
-			 * this, sometimes, also the first column type field is overwritten too.
+			 * In most cases, at least the header length information is overwritten.
+			 * This sometimes also overwrites the first column type field is overwritten too.
 			 * 
-			 * We have to cases:
+			 * We have two cases:
 			 * 
 			 * (1) only the first column of the header is missing, but the rest of the
 			 * header is intact.
 			 * 
-			 * (2) both header length field plus first column are overwritten.
+			 * (2) Both the header length field plus the first column are overwritten.
 			 * 
 			 * [cell size | rowid | header size | header bytes | payload ]
 			 * 
-			 * for a deleted cell is looks maybe like this
+			 * for a deleted cell looks maybe like this
 			 * 
 			 * [offset of next free block | length of the current free block | ]
 			 */
@@ -969,11 +961,11 @@ public class WALReader{
 	
 	/**
 	 *  This method can be used to write the result to a file or
-	 *  to update tables in the user interface (in gui-mode). 
+	 *  to update tables in the user interface (in GUI mode).
 	 */
 	public void output()
 	{
-		// Are we in GUI mode or in cli mode?
+		// Are we in GUI mode or in CLI mode?
 		if (job.gui != null) {
 			
 			
@@ -995,7 +987,7 @@ public class WALReader{
 			   	if (line.getFirst().trim().length()==0)
 			   	{
 			 
-			        // Add the new element add the begin 
+			        // Add the new element add the beginning
 			        //line.add(0,"__FREELIST"); 
 			 
 			   	}
@@ -1018,12 +1010,12 @@ public class WALReader{
 				}	
 			
 				
-			} // end of for (String line : lines){...} 	
+			} // end of for (String line: lines){...}
 	
 			
 			Enumeration<String> tables = dataSets.keys();
 			
-			/* finally we can update the TableView for each table */
+			/* finally, we can update the TableView for each table */
 			while(tables.hasMoreElements())
 			{	
 					String tablename = tables.nextElement();
@@ -1035,7 +1027,6 @@ public class WALReader{
 					String walpath = job.guiwaltab.get(tablename);
 					if (walpath == null)
 						continue;
-					System.out.println("WALReader:: called update_table for " + tablename + " path  :: " + walpath);			
 					job.gui.update_table(walpath,dataSets.get(tablename),true);
 					
 			}	
@@ -1074,7 +1065,7 @@ public class WALReader{
 
 		int from = 0;
 
-		/* are there any regions left in the page ? */
+		/* Are there any regions left in the page? */
 		for (int i = 0; i < ps; i++) {
 
 			if (!visit.get(i)) {
@@ -1117,7 +1108,7 @@ public class WALReader{
 	/**
 	 * This method is called to carve a data page for records.
 	 * 
-	 * @param content page content as hex-string
+	 * @param content page content as hex string
 	 */
 	public void carve(String content, Carver crv) {
 
@@ -1125,7 +1116,7 @@ public class WALReader{
 
 		if (null == c)
 			/* no type could be found in the first two bytes */
-			/* Maybe the whole page was drop because of a drop component command ? */
+			/* Maybe the whole page was dropped because of a drop component command? */
 			/* start carving on the complete page */
 			c = new Carver(job, buffer, content, visit, pagenumber_maindb);
 
@@ -1171,7 +1162,7 @@ public class WALReader{
 			AppLog.debug("Check component : " + tablename);
 			if (tablename.startsWith("__FREELIST"))
 				continue;
-			/* create matcher object for constrain check */
+			/* create matcher object for constraint check */
 			SerialTypeMatcher stm = new SerialTypeMatcher(buffer);
 
 			gaps = findGaps();
@@ -1181,7 +1172,7 @@ public class WALReader{
 				Gap next = gaps.get(a);
 
 				if (next.to - next.from > 10)
-					/* do we have at least one match ? */
+					/* do we have at least one match? */
 					if (c.carve(next.from + 4, next.to, stm, CarverTypes.NORMAL, tab.get(n)) != Global.CARVING_ERROR) {
 						AppLog.debug("*****************************  STEP NORMAL finished with matches");
 

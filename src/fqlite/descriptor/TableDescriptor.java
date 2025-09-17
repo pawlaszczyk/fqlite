@@ -57,11 +57,11 @@ public class TableDescriptor extends AbstractDescriptor implements Comparable<Ta
 			byte[] bcol = Auxiliary.decode(match);
 	
 			/* interpret all byte values as a list of varints */
-			/* each varint represents a columntype */
+			/* each varint represents a column type */
 			int[] values = Auxiliary.readVarInt(bcol);
 	
 			/*
-			 * normally, the first byte of the match holds total length of header bytes
+			 * Normally, the first byte of the match holds the total length of header bytes
 			 * including this byte
 			 */
 			int headerlength = values[0];
@@ -69,14 +69,14 @@ public class TableDescriptor extends AbstractDescriptor implements Comparable<Ta
 			
 			boolean valid = true;
 	
-			// check serialtypes, only if all serialtypes are valid the match is also valid
+			// check serialtypes, only if all serialtypes are valid, the match is also valid
 			for (int i = 1; i < values.length; i++) {
 				/* get next column */
 				String type = getColumntypes().get(i - 1);
 	
 				switch (type) {
 				case "INT":
-					/* an INT column has always a value between 0..6 */
+					/* an INT column always has a value between 0..6 */
 					valid = values[i] >= 0 && values[i] <= 6;
 					break;
 				case "REAL":
@@ -84,7 +84,7 @@ public class TableDescriptor extends AbstractDescriptor implements Comparable<Ta
 					valid = values[i] == 7;
 					break;
 				case "TEXT":
-					/* a TEXT COLUMN has always an odd value bigger 13 or is zero */
+					/* a TEXT COLUMN always has an odd value bigger than 13 or is zero */
 					if (values[i] == 0)
 						valid = true;
 					else if (values[i] % 2 != 0)
@@ -93,7 +93,7 @@ public class TableDescriptor extends AbstractDescriptor implements Comparable<Ta
 						valid = false;
 					break;
 				case "BLOB":
-					/* a BLOB COLUMN has always an even value bigger 13 or is zero */
+					/* a BLOB COLUMN always has an even value bigger than 13 or is zero */
 					if (values[i] == 0)
 						valid = true;
 					else if (values[i] % 2 == 0)
@@ -142,11 +142,9 @@ public class TableDescriptor extends AbstractDescriptor implements Comparable<Ta
 	public void signature(List<String> col) {
 		signature = "";
 
-		Iterator<String> iter = getColumntypes().iterator();
-
-		while (iter.hasNext()) {
-			signature += iter.next();
-		}
+        for (String s: getColumntypes()) {
+            signature = signature + s;
+        }
 
 	//	System.out.println("Signature::" + signature + " Table:: " + tblname );
 	
@@ -187,8 +185,7 @@ public class TableDescriptor extends AbstractDescriptor implements Comparable<Ta
 		primarykeycolumnnumbers = new LinkedList<Integer>();
 		boolcolumns = new LinkedList<String>();
 		
-		
-		
+
 		/* find the primary key by checking the column constraint */ 
 		for(int i=0; i < names.size(); i++)
 		{
@@ -197,7 +194,7 @@ public class TableDescriptor extends AbstractDescriptor implements Comparable<Ta
 				break;
 			if (constraints == null)
 				break;
-			/* we look for the keyword PRIMARYKEY */
+            // we look for the keyword PRIMARYKEY
 			if (i < constraints.size() && constraints.get(i).contains("PRIMARYKEY"))
 			{
 			    	
@@ -206,7 +203,6 @@ public class TableDescriptor extends AbstractDescriptor implements Comparable<Ta
 			
 			if (sqltypes.size() > i && sqltypes.get(i).contains("BOOL"))
 			{
-				System.out.println("Bool-Spalte gefunden");
 				this.boolcolumns.add(names.get(i));
 			}
 			
@@ -217,15 +213,13 @@ public class TableDescriptor extends AbstractDescriptor implements Comparable<Ta
 		
 		
 		
-		/* check, if there is a PRIMARYKEY definition in the table constraints */
+		/* check if there is a PRIMARYKEY definition in the table constraints */
 		if (null != tableconstraints)
 			for (int i=0; i<tableconstraints.size();i++)
 			{
 				 
 				String constraint = tableconstraints.get(i);
-				
-				System.out.println("constraint " + constraint);
-				
+
 				Matcher m = Pattern.compile("PRIMARY\\s?KEY\\((.*?)\\)").matcher(constraint);
 				while (m.find()) {
 					String key = m.group(1);
@@ -243,8 +237,8 @@ public class TableDescriptor extends AbstractDescriptor implements Comparable<Ta
 				    }
 				    else
 				    {
-				    	// composite key like 'name,birthdate'
-				    	String[] parts = key.split(",");
+				    	// composite key like 'name', 'birthdate'
+                        String[] parts = key.split(",");
 				        for(String c: parts)
 				        {
 					    	this.primarykeycolumns.add(c);
@@ -274,17 +268,15 @@ public class TableDescriptor extends AbstractDescriptor implements Comparable<Ta
 		if (primarykeycolumns.size()==1)
 		{	
 			int i = names.indexOf(primarykeycolumns.get(0));
-			System.out.println("Primary key column :: " + i);
     		this.primarykeycolumnnumbers.add(i);
 			if(i >= 0 && sqltypes.get(i).toUpperCase().equals("INTEGER"))
 			{
 				if(!constraints.get(i).toUpperCase().contains("DESC"))
 				{
-					System.out.println("Attention!!! integer primary key: " + names.get(i));
-					/* Note: this column has the columntype "00" */
+					/* Note: this column has the column type "00" */
 					rowidcolumn = names.get(i);
 					try {
-					pattern.change2RowID(i+1); // because there is a Header length constraint on index 0 (+1)
+		    			pattern.change2RowID(i+1); // because there is a Header length constraint on index 0 (+1)
 					}catch(Exception err){
 						System.out.println("ERROR: change2RowID doesn't work");
 					}
@@ -293,20 +285,16 @@ public class TableDescriptor extends AbstractDescriptor implements Comparable<Ta
 				}
 			}	
 		}
-		
-		
-		
 		setHpattern(pattern);
 		
 	
 		/* create a table fingerprint for later search */
-		Iterator<String> iter = getColumntypes().iterator();
-		while (iter.hasNext()) {
-			size++;
-			regex += getColumn(iter.next(), false);
-			fingerprint += fingerprint;
-		
-		}
+        for (String s: getColumntypes()) {
+            size++;
+            regex += getColumn(s, false);
+            fingerprint += fingerprint;
+
+        }
 	}
 	
 	
@@ -327,7 +315,7 @@ public class TableDescriptor extends AbstractDescriptor implements Comparable<Ta
 	
 
 	/**
-	 * case 1: Returns the regex for a regular component header including the Header
+	 * case 1: Returns the regex for a regular component header, including the Header
 	 * length byte. This pattern should match all records with a complete header.
 	 * 
 	 * [headerlength] col(1) col(2) col(3) ... col(4)
@@ -339,8 +327,8 @@ public class TableDescriptor extends AbstractDescriptor implements Comparable<Ta
 	}
 
 	/**
-	 * case 2: Returns the regex header without header length byte but with all
-	 * serialtypes. This pattern should match all records startRegion a component, where parts
+	 * case 2: Returns the regex header without the header length byte, but with all
+	 * serial types. This pattern should match all records startRegion a component, where parts
 	 * of the header information has been overwritten.
 	 * 
 	 * @return regex
@@ -350,7 +338,7 @@ public class TableDescriptor extends AbstractDescriptor implements Comparable<Ta
 	}
 
 	/**
-	 * case 3: Returns the regex header without header length byte and first column.
+	 * case 3: Returns the regex header without the header length byte and the first column.
 	 * This pattern should match all records startRegion a component, where parts of the header
 	 * has been overwritten, because it has been deleted.
 	 * 
@@ -363,7 +351,7 @@ public class TableDescriptor extends AbstractDescriptor implements Comparable<Ta
 	}
 
 	/**
-	 * Returns a regex for only some serialtypes of the component.
+	 * Returns a regex for only some serial types of the component.
 	 * 
 	 * @param startcolumn
 	 * @param endcolumn
@@ -388,7 +376,7 @@ public class TableDescriptor extends AbstractDescriptor implements Comparable<Ta
 	}
 
 	/**
-	 * Return the Fingerprint, i.e., a String of colummn types.
+	 * Return the Fingerprint, i.e., a String of column types.
 	 * @return
 	 */
 	public String getFingerprint() {
@@ -399,7 +387,7 @@ public class TableDescriptor extends AbstractDescriptor implements Comparable<Ta
 	 * Compares a given signature with the signature of the current component.
      *
 	 * @param signature
-	 * @return true, if the signature matches
+	 * @return true if the signature matches
 	 */
 	public boolean matches(String signature) {
 		return fingerprint.equals(signature);
@@ -407,9 +395,9 @@ public class TableDescriptor extends AbstractDescriptor implements Comparable<Ta
 
 	/**
 	 * Returns the component header length.
-	 * The header begins with a single varint which determines 
+	 * The header begins with a single varint, which determines
 	 * the total number of bytes in the header. 
-	 * The varint value is the size of the header in bytes including 
+	 * The varint value is the size of the header in bytes, including
 	 * the size varint itself.
 	 * @return
 	 */
@@ -434,9 +422,9 @@ public class TableDescriptor extends AbstractDescriptor implements Comparable<Ta
 	 * a particular serial type.
 	 * 
 	 * The header size varint and serial type varints will usually 
-	 * consist of a single byte. The serial type varints for large 
-	 * strings and BLOBs might extend to two or three byte varints,
-	 * but that is the exception rather than the rule.
+	 * consists of a single byte. The serial type varints for large
+	 * strings and BLOBs might extend to two or three-byte varints.
+	 * But that is the exception rather than the rule.
 	 * 
 	 * @param serialtype
 	 * @param multicol
@@ -470,7 +458,7 @@ public class TableDescriptor extends AbstractDescriptor implements Comparable<Ta
 	}
 
 	/**
-	 * Returns a field of regex-pattern to match the current component.
+	 * Returns a field of regex patterns to match the current component.
 	 * @return field with Pattern objects
 	 */
 	public Pattern[] getRegex() {
@@ -502,23 +490,16 @@ public class TableDescriptor extends AbstractDescriptor implements Comparable<Ta
 	public String toString() {
 		Pattern[] elements = getRegex();
 		String output = "";
-		for (Pattern s : elements) {
+		for (Pattern s: elements) {
 			output += s + "\n";
 		}
 
 		return output;
 	}
 
-	
-	//public boolean equals(Object o) {
-	//	return this.regex.equals(((TableDescriptor) o).regex);
-	//}
-
-
 	public List<String> getColumntypes() {
 		return serialtypes;
 	}
-
 
 	public void setColumntypes(List<String> columntypes) {
 		this.serialtypes = columntypes;

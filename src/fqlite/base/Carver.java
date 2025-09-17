@@ -55,7 +55,7 @@ public class Carver{
 	}
 
 	/**
-	 * This method allows to carve for hidden records in the slack space (uncharted
+	 * This method allows carving for hidden records in the slack space (uncharted
 	 * region: a region that does not belong to the header or to the cell content
 	 * region).
 	 *
@@ -81,7 +81,7 @@ public class Carver{
 				break;
 		}
 		
-		/* gap is to small for a regular record? */
+		/* gap is too small for a regular record? */
 		if((toidx - fromidx) <= 5)
 			return -1;
 		
@@ -92,7 +92,7 @@ public class Carver{
 		/* set pattern to search for */
 		mat.setPattern(tbd.getHpattern());
 		
-		LinkedList<Match> matches = new LinkedList<Match>();
+		LinkedList<Match> matches = new LinkedList<>();
 		
 		/* find every match within the given region */
 		while (mat.find()){
@@ -112,17 +112,12 @@ public class Carver{
 		
 			/* skip matches in first column missing search mode where the second column is a TEXT or BLOB column */
 			/* to many false-positives */
-			if (m.length()>=6)
-				if (headertype == CarverTypes.FIRSTCOLUMNMISSING && (tbd.serialtypes.get(1).equals("TEXT") || tbd.serialtypes.get(1).equals("BLOB")))
-				{
-					List<String> elements = tbd.serialtypes;
-					int gr = elements.size();
-					for(int i=2; i < gr; i++) {
-						if (elements.get(i).equals("INT"))
-							continue;
-					}
-					
-				}
+			//if (m.length()>=6)
+				//if (headertype == CarverTypes.FIRSTCOLUMNMISSING && (tbd.serialtypes.get(1).equals("TEXT") || tbd.serialtypes.get(1).equals("BLOB")))
+				//{
+					//List<String> elements = tbd.serialtypes;
+					//int gr = elements.size();
+				//}
 			/* if there are three zero bytes or even more inside the match -> skip */
 			if (cmatch.length >= 10){
 				int nullbytes = 0;
@@ -149,11 +144,10 @@ public class Carver{
 				continue;
 			}
 			
-			/* match longer than gap ?-) */
+			/* match longer than gap */
 			if ((m.length()/2 + Auxiliary.getPayloadLength(m)) > (toidx - fromidx))
 			{
 				
-				//System.out.println(" PayloadLength:: " + Auxiliary.getPayloadLength(m) + " > " + (toidx - fromidx));
 				// sometimes a match is too long, i.e. 89|19190704, where the first byte belongs to the
 				// length byte of the free block (first column overridden)
 				if (m.startsWith("8")) {
@@ -161,18 +155,18 @@ public class Carver{
 					mat.start+=1;  
 					from+=1;
 				}
-				if (headertype == CarverTypes.NORMAL || headertype == CarverTypes.COLUMNSONLY)
-				{
+				//if (headertype == CarverTypes.NORMAL || headertype == CarverTypes.COLUMNSONLY)
+				//{
 					// do nothing - maybe an overflow record?
-				}
+				//}
 			}
-			else{
-				int abstand = from - 4;
-				if (abstand > 0 && bs.get(from-4)) {
+			//else{
+				//int abstand = from - 4;
+				//if (abstand > 0 && bs.get(from-4)) {
 				   // no action	
-				}
+				//}
 
-			}
+			//}
 			
 			/*
 			 * get the indices of the 1st byte after the header -> this is, where the data
@@ -247,7 +241,7 @@ public class Carver{
 
 		} // end-search loop
 		
-		for (Match e : matches)
+		for (Match e: matches)
 		{
 			// mark as visited
 			bs.set(e.begin,e.end);
@@ -283,7 +277,7 @@ public class Carver{
 				
 				
 			} catch (Exception err) {
-				AppLog.warning("Could not read record" + err.toString());
+				AppLog.warning("Could not read record" + err);
 			}
 			
 		}
@@ -302,7 +296,7 @@ public class Carver{
 					 tablelist.add(FXCollections.observableList(line)); // add row 
 		}
 		
-		// create a new data set since table name occurs for the first time
+		// create a new data set since the table name occurs for the first time
 		else {
 		          ObservableList<ObservableList<String>> tablelist = FXCollections.observableArrayList();
 				  tablelist.add(FXCollections.observableList(line)); // add row 

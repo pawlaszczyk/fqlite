@@ -10,6 +10,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.StandardOpenOption;
+import java.sql.SQLException;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
@@ -34,6 +35,7 @@ import fqlite.descriptor.ADComparator;
 import fqlite.descriptor.AbstractDescriptor;
 import fqlite.descriptor.IndexDescriptor;
 import fqlite.descriptor.TableDescriptor;
+import fqlite.export.SQLiteDatabaseCreator;
 import fqlite.log.AppLog;
 import fqlite.pattern.HeaderPattern;
 import fqlite.types.ExportType;
@@ -53,7 +55,9 @@ import javafx.scene.control.Alert.AlertType;
 import javafx.scene.control.TreeItem;
 import javafx.scene.image.Image;
 
-			
+import static java.nio.file.Files.newBufferedWriter;
+
+
 /**
  * Core application class. It is used to recover lost SQLite records from a
  * sqlite database file. As a carving utility, it is binary based and can
@@ -91,7 +95,7 @@ public class Job {
 	public BigByteBuffer db;
 	
 	
-	/* since version 1.2 - support for write ahead logs WAL */
+	/* since version 1.2 - support for write-ahead logs WAL */
 	public boolean readWAL = false;
 	String walpath = null;
 	public WALReader wal = null;
@@ -115,13 +119,13 @@ public class Job {
 	final static String ROW_ID = "00";
 	
 	
-	/* the next fields hold informations for the GUI */
+	/* the next fields hold information for the GUI */
 	public GUI gui = null;
 	public TreeItem<NodeObject> dbNode = null;
 	public TreeItem<NodeObject> walNode = null;
 	public TreeItem<NodeObject> rjNode = null;
 	
-	/* if a page is handled as a regular overflow page -> don't analyze those pages */
+	/* if a page is handled as a regular overflow page -> don't analyse those pages */
 	//public ConcurrentLinkedQueue<Integer> overflowpages = new ConcurrentLinkedQueue<>();
 	
 	Hashtable<String, String> guitab = new Hashtable<String, String>();
@@ -140,7 +144,7 @@ public class Job {
 	
 	public String filename;
 		
-	/* this field represent the database encoding */
+	/* this field represents the database encoding */
 	public static Charset db_encoding = StandardCharsets.UTF_8;
 	
 	/* the list is used to export the recovered data records */
@@ -655,14 +659,14 @@ public class Job {
 		walpanel.initCheckpointTable(getCheckpointProperties());
 	}
 	
-	private void createUnAssignedTable(){
+	private void createFREELISTTable(int numberofcolumns){
 		
 		
 		List<String> col = new ArrayList<String>();
 		List<String> names = new ArrayList<String>();
 
 		/* create dummy component for unassigned records */
-		for (int i = 0; i < 15; i++) {
+		for (int i = 0; i < numberofcolumns + 10; i++) {
 			col.add("TEXT");
 			names.add("col" + (i + 1));
 		}
@@ -685,25 +689,22 @@ public class Job {
 		bincache = new BLOBCache(this);
 		
 		allreadyvisit = ConcurrentHashMap.newKeySet();
-		// we need to create a table for all "free list" content that could not 
-		// assigned directly
-		createUnAssignedTable();
-		
+
 		try {
 
 			Path p = Paths.get(path);
 			this.filename = p.getFileName().toString();
 			this.path = p.toString();
 
-			/* First - try to analyze the db-schema 	
-			 * we have to do this before we open the database because of the concurrent
-			 * access in multi threading mode
+			/* First - try to analyse the db-schema
+			 * We have to do this before we open the database because of the concurrent
+			 * access in multi-threading mode
 			 */
 
-			/** Caution!!! we read the complete file into RAM **/
+			/** Caution!!! We read the complete file into RAM **/
 			readFileIntoBuffer();
 
-			/* read header of the sqlite db - the first 100 bytes */
+			/* read header of the SQLite DB - the first 100 bytes */
 			ByteBuffer buffer = ByteBuffer.allocate(100);
 
 			db.read(buffer, 0);
@@ -729,7 +730,7 @@ public class Job {
 			 * 40 	 4	The schema cookie.
 			 * 44 	 4	The schema format number. Supported schema formats are 1, 2, 3, and 4.
 			 * 48	 4	Default page cache size.
-			 * 52	 4	The page number of the largest root b-tree page when in auto-vacuum or incremental-vacuum modes, or zero otherwise.
+			 * 52	 4	The page number of the largest root B-tree page when in auto-vacuum or incremental-vacuum modes, or zero otherwise.
 			 * 56	 4	The database text encoding. A value of 1 means UTF-8. A value of 2 means UTF-16le. A value of 3 means UTF-16be.
 			 * 60	 4	The "user version" as read and set by the user_version pragma.
 			 * 64	 4	True (non-zero) for incremental-vacuum mode. False (zero) otherwise.
@@ -1318,10 +1319,10 @@ public class Job {
 				td.printTableDefinition();
 
 				int r = td.getRootOffset();
-				info(" root offset for component " + r);
+				//info(" root offset for component " + r);
 
 				String signature = td.getSignature();
-				info(" signature " + signature);
+				//info(" signature " + signature);
 
 				/* save component fingerprint for compare */
 				if (signature != null && signature.length() > 0)
@@ -1419,21 +1420,16 @@ public class Job {
 						cnames.add(4,"salt2");
 						
 						List<String> ctypes = new ArrayList<>(id.columntypes);
-						//ctypes.add(0,"INT");
-						//ctypes.add(1,"INT");
-						//ctypes.add(2,"INT");
-						//ctypes.add(3,"INT");
-						//ctypes.add(4,"INT");
-						
+
 						String walpath = gui.add_table(this, id.idxname, cnames, ctypes, id.boolcolumns, null, true, false,1);
 						guiwaltab.put(id.idxname, walpath);
-						setWALPath(walpath.toString());
+						setWALPath(walpath);
 					}
 					else if (readRollbackJournal) {
 						
 							String rjpath = gui.add_table(this, id.idxname, id.columnnames, id.columntypes, id.boolcolumns, null, false, true,1);
 							guiroltab.put(id.idxname, rjpath);
-							setRollbackJournalPath(rjpath.toString());
+							setRollbackJournalPath(rjpath);
 					}
 
 					
@@ -1450,14 +1446,23 @@ public class Job {
 			}
 			catch(Exception err)
 			{
+                AppLog.error(err.getMessage());
 				System.out.println(err);
 			}
 
-			
-			/*******************************************************************/
 
-			/**
-			 * Sometimes, a record cannot assigned to a component or index -> these records
+            int maxcol = 0;
+            for(TableDescriptor t : headers){
+                maxcol = Math.max(t.columnnames.size(),maxcol);
+            }
+
+            // We need to create a table for all "free list" content that could not be assigned directly.
+            createFREELISTTable(maxcol);
+
+
+
+			/*
+			 * Sometimes, a record cannot be assigned to a component or index -> these records
 			 * are assigned to the __FREELIST component.
 			 */
 
@@ -1477,7 +1482,7 @@ public class Job {
 				List<String> mnames = new ArrayList<String>();
 				mnames.add("object"); mnames.add("obj name"); mnames.add("namespace");  mnames.add("root page");  mnames.add("Statement");
 				TableDescriptor tdmaster = new TableDescriptor("__SQLiteMaster", "",mcol, mcol, mnames, null, null, hp, false);
-				for (int pg : mastertable) {
+				for (int pg: mastertable) {
 				    if (pg > 0)
 						if(pg < pages.length && pages[pg]== null)
 					    {	
@@ -1492,12 +1497,12 @@ public class Job {
 				
 					
 				}
-									
-					String path = gui.add_table(this, tdefault.tblname, tdefault.columnnames,
-							tdefault.getColumntypes(), tdefault.boolcolumns, null, false, false,0);
-					guitab.put(tdefault.tblname, path);
-					
-					String pathmaster = gui.add_table(this, tdmaster.tblname, tdmaster.columnnames,
+
+                String path = gui.add_table(this, tdefault.tblname, tdefault.columnnames,
+                        tdefault.getColumntypes(), tdefault.boolcolumns, null, false, false,0);
+                guitab.put(tdefault.tblname, path);
+
+                String pathmaster = gui.add_table(this, tdmaster.tblname, tdmaster.columnnames,
 							tdmaster.getColumntypes(), tdmaster.boolcolumns, null, false, false,0);
 					guitab.put(tdmaster.tblname, pathmaster);
 				
@@ -1523,7 +1528,7 @@ public class Job {
 						String walpath = gui.add_table(this, tdefault.tblname, tdefault.columnnames,
 								tdefault.getColumntypes(), tdefault.boolcolumns ,null, true, false,0);
 						guiwaltab.put(tdefault.tblname, walpath);
-						setWALPath(walpath.toString());
+						setWALPath(walpath);
 		
 						tdmaster.columnnames.add(0, "salt2");
 						tdmaster.columnnames.add(0, "salt1");
@@ -1549,7 +1554,7 @@ public class Job {
 						String rjpath = gui.add_table(this, tdefault.tblname, tdefault.columnnames,
 								tdefault.getColumntypes(),tdefault.boolcolumns ,null, false, true,0);
 						guiroltab.put(tdefault.tblname, rjpath);
-						setRollbackJournalPath(rjpath.toString());
+						setRollbackJournalPath(rjpath);
 					
 						String rjpathmaster = gui.add_table(this, tdmaster.tblname, tdmaster.columnnames,
 								tdmaster.getColumntypes(), tdmaster.boolcolumns ,null,false, true,0);
@@ -1566,12 +1571,11 @@ public class Job {
 				System.out.println("Omit analysis of the database since database file is empty ");
 				return 0;
 			}
-			
-			
-			
-			/*******************************************************************/
 
-			byte freepageno[] = new byte[4];
+
+            ///*******************************************************************/
+
+			byte[] freepageno = new byte[4];
 			buffer.position(36);
 			buffer.get(freepageno);
 			info("Total number of free list (trunk) pages " + Auxiliary.bytesToHex3(freepageno));
@@ -1579,9 +1583,9 @@ public class Job {
 			fpnumber = no.getInt();
 			System.out.println(" no " + fpnumber);
 
-			/*******************************************************************/
+			///******************************************************************/
 
-			byte freelistpage[] = new byte[4];
+			byte[] freelistpage = new byte[4];
 			buffer.position(32);
 			buffer.get(freelistpage);
 			info("FreeListPage starts at offset " + Auxiliary.bytesToHex3(freelistpage));
@@ -1591,17 +1595,16 @@ public class Job {
 			fphead = head;
 			long start = (head - 1L) * ps;
 
-			/*******************************************************************/
+			///*****************************************************************/
 
 			if (head == 0) {
 				info("INFO: Couldn't locate any free pages to recover. ");
 			}
 
 			
-			/*******************************************************************
-			 *
-			 * STEP 1: we start recovery process with scanning the free list first
-			 **/
+			/*
+			 * STEP 1: We start the recovery process by scanning the free list first
+			 */
 
 			 if (head > 0) {
 				AppLog.debug("first:: " + start + " 0hx " + Long.toHexString(start));
@@ -1611,10 +1614,10 @@ public class Job {
 
 				// seeking file pointer to the first free page entry
 
-				/* create a new threadpool to analyze the freepages */
+				/* create a new threadpool to analyse the freepages */
 				ThreadPoolExecutor executor = (ThreadPoolExecutor) Executors.newFixedThreadPool(Global.numberofThreads);
 
-				/* a list can extend over several memory pages. */
+				/* A list can extend over several memory pages. */
 				boolean morelistpages = false;
 
 				int freepagesum = 0;
@@ -1628,8 +1631,8 @@ public class Job {
 					// next (possible) freepage list offset or 0xh00000000 + number of entries
 					// example : 00 00 15 3C | 00 00 02 2B
 
-					// now read the first 4 Byte to get the offset for the next free page list
-					byte nextlistoffset[] = new byte[4];
+					// now read the first 4 bytes to get the offset for the next free page list
+					byte[] nextlistoffset = new byte[4];
 
 					try {
 						fplist.get(nextlistoffset);
@@ -1660,14 +1663,14 @@ public class Job {
 						morelistpages = false;
 
 					// now read the number of entries for this particular page
-					byte numberOfEntries[] = new byte[4];
+					byte[] numberOfEntries = new byte[4];
 					try
 					{
 						fplist.get(numberOfEntries);
 					}
 					catch(Exception err)
 					{
-						
+						AppLog.error(err.getMessage());
 					}
 					
 					int entries = 0;
@@ -1682,7 +1685,7 @@ public class Job {
 					/* iterate through free page list and read free page offsets */
 					for (int zz = 1; zz <= entries; zz++) {
 				
-						byte next[] = new byte[4];
+						byte[] next = new byte[4];
 						fplist.position(4 + 4 * zz);
 						fplist.get(next); 
 
@@ -1721,7 +1724,6 @@ public class Job {
 				while (runningTasks.intValue() != 0) {
 					try {
 						TimeUnit.MILLISECONDS.sleep(10);
-						// System.out.println("wait...");
 					} catch (InterruptedException e) {
 						e.printStackTrace();
 					}
@@ -1737,15 +1739,10 @@ public class Job {
 			} // end of free page list recovery
 
 			info("Lines after free page recovery: " + resultlist.size());	
-			
-			/*******************************************************************/
-			// start carving
 
-			
+
 			// full db-scan (including all database pages)
 			scan(numberofpages, ps);
-
-			/*******************************************************************/
 
 			if (gui != null) {
 				
@@ -1754,11 +1751,11 @@ public class Job {
 				
 				Enumeration<String> tables = resultlist.keys();
 				
-				/* finally we can update the TableView for each table */
+				/* finally, we can update the TableView for each table */
 				while(tables.hasMoreElements())
 				{	
 					String tablename = tables.nextElement();
-			        /* get tree path i.e. /data bases/02-05.db/users */
+			        /* get tree path, i.e. /databases/02-05.db/users */
 					String path = guitab.get(tablename);
 					if (null != path)
 						gui.update_table(path,resultlist.get(tablename),false);
@@ -1810,14 +1807,16 @@ public class Job {
 			System.exit(-1);
 		}
 		
-	
+
+
+
 		return 0;
 	}
 	
 	/**
 	 * If the database is still empty, all changes are still in the WAL file. 
 	 * In this case, a snapshot with all changed database pages is stored there.
-	 * This happens quite often, because by default a commit to the actual database 
+	 * This happens quite often, because by default, a commit to the actual database
 	 * only takes place after the WAL archive has reached 1000 pages. 
 	 */
 	private BigByteBuffer readCheckpoint(){
@@ -1844,7 +1843,7 @@ public class Job {
 	    do {
 
 	    	/* 24 Byte - with six 4-Byte big endian values */
-			byte frameheader[] = new byte[24];
+			byte[] frameheader = new byte[24];
 			wal.position(framestart);
 			wal.get(frameheader);
 			ByteBuffer fheader = ByteBuffer.wrap(frameheader);
@@ -1870,11 +1869,11 @@ public class Job {
 		    cptable.put(pagenumber_maindb,page);
 		
 		    
-			WALFrame f = new WALFrame(pagenumber_maindb, frame , salt1, salt2, (commit==0)? false: true);
+			WALFrame f = new WALFrame(pagenumber_maindb, frame , salt1, salt2, commit != 0);
 			checkpointlist.add(f);
 
 		 	
-			/*  More pages to analyze ? */
+			/*  More pages to analyze? */
 			if(framestart+24+ps < size)
 			{
 				
@@ -1901,9 +1900,9 @@ public class Job {
 	        .rewind();
 	    }
 	    
-	    /**
-	     * important:: Whenever the database file is empty and the WAL archive 
-	     * has not been committed yet, all information is in the WAL file. This 
+	    /*
+	     * Important: Whenever the database file is empty and the WAL archive
+	     * has not been committed yet; all information is in the WAL file. This
 	     * also applies to the number of pages in the database. 
 	     */
 		pages = new AbstractDescriptor[cptable.size() + 1];
@@ -1913,60 +1912,106 @@ public class Job {
 	    
 	    return new BigByteBuffer(checkpoint);
 	}
-	
-	
+
+    /**
+     * This method can be used to export all recovered database records into
+     * a new database.
+     *
+     * @param objectname name of the database file
+     * @param exp the type of source file (db, rb-journal or wal)
+     * @return successful or not
+     */
+	public boolean exportDB(String filename, String objectname, ExportType exp){
+
+        String dbname = objectname;
+
+        if(exp == ExportType.SQLITEDB || exp == ExportType.ROLLBACKJOURNAL || exp == ExportType.WALARCHIVE)
+        {
+
+            ConcurrentHashMap<String,ObservableList<ObservableList<String>>> exportlist = switch (exp) {
+                case ROLLBACKJOURNAL -> this.rol.resultlist;
+                case SQLITEDB -> this.resultlist;
+                case WALARCHIVE -> this.wal.resultlist;
+                default -> null;
+            };
+
+            /* 1st step: get a database manager instance and create the database schema */
+            SQLiteDatabaseCreator exporter = SQLiteDatabaseCreator.getInstance();
+            try {
+                exporter.createDatabaseAndSchema(headers, tdefault, objectname,  exp == ExportType.WALARCHIVE);
+            } catch (SQLException e) {
+                throw new RuntimeException(e);
+            }
+
+            /* get all values of the result list*/
+            Enumeration<String> keyset = exportlist.keys();
+
+            /* iterate over all tables inside the file */
+            while (keyset.hasMoreElements()) {
+
+                /* get next table */
+               String tblname = keyset.nextElement();
+               ObservableList<ObservableList<String>> rows = exportlist.get(tblname);
+
+                try {
+                    // skip the internal tables
+                    if(tblname.equals("__SQLiteMaster") || tblname.startsWith("sqlite_"))
+                        continue;
+                    exporter.insertRows(bincache,filename,tblname,headers,tdefault,rows,exp == ExportType.WALARCHIVE);
+                } catch (SQLException e) {
+                    throw new RuntimeException(e);
+                }
+
+            }
+        }
+
+        Alert alert = new Alert(Alert.AlertType.INFORMATION);
+        alert.setTitle("Information Dialog");
+        alert.setHeaderText("Export was successful"); // oder null
+        alert.setContentText("All tables were successfully exported into a new database.");
+        alert.showAndWait();
+
+        return true;
+    }
+
 
 	
-	/**
-	 * This method could be used to export the content of a single table,
-	 * a complete database, a WAL archive or even a rollback-journal
-	 * to disk.
-	 * 
-	 * 
-	 * @param file  		destination
-	 * @param objectname	the name of the table or database to export	
-	 * @param parenttype	is it a normal database, WAL or journal ?
-	 * @param ex			type of export (single table, complete database, WAL, journal)
-	 * 
-	 */
-	
+	/// This method could be used to export the content of a single table,
+	/// a complete database, a WAL archive or even a rollback-journal
+	/// to disk.
+	///
+	/// @param file  		destination
+	/// @param objectname	the name of the table or database to export
+	/// @param parenttype	is it a normal database, WAL or journal?
+	/// @param exp			type of export (single table, complete database, WAL, journal)
 	@SuppressWarnings("incomplete-switch")
 	public boolean exportResults2File(File file,String objectname, FileTypes parenttype, ExportType exp){
 
 		String dbname = null;
 				
-		try (final BufferedWriter writer = Files.newBufferedWriter(file.toPath(),Charset.forName("UTF-8"), StandardOpenOption.CREATE)) 
+		try (final BufferedWriter writer = newBufferedWriter(file.toPath(),StandardCharsets.UTF_8, StandardOpenOption.CREATE))
 		{
 				
-			/*********************************************************************************  
-			 * CASE 1 : Export a complete database file with all table information inside
-			 *********************************************************************************/
+			/*
+			 * CASE 1: Export a complete database file with all table information inside
+			 */
 			
 			if(exp == ExportType.SQLITEDB || exp == ExportType.ROLLBACKJOURNAL || exp == ExportType.WALARCHIVE)
 			{
 				dbname = objectname;
 
-				ConcurrentHashMap<String,ObservableList<ObservableList<String>>> exportlist = null;
-						
-				switch(exp) {
-				
-					case ROLLBACKJOURNAL:
-						exportlist = this.rol.resultlist;
-					break;	
-					case SQLITEDB:
-						exportlist = this.resultlist;	
-					break;
-					case WALARCHIVE:
-						exportlist = this.wal.resultlist;
-					break;
-				
-				}		
-				
-				
-				/* get all values of the result list*/
+				ConcurrentHashMap<String,ObservableList<ObservableList<String>>> exportlist = switch (exp) {
+                    case ROLLBACKJOURNAL -> this.rol.resultlist;
+                    case SQLITEDB -> this.resultlist;
+                    case WALARCHIVE -> this.wal.resultlist;
+                    default -> null;
+                };
+
+
+                /* get all values of the result list*/
 				Enumeration<String> keyset = exportlist.keys();
 				
-				/* iterate of all tables inside the file */
+				/* iterate over all tables inside the file */
 				while (keyset.hasMoreElements()) {
 					
 					/* get next table */
@@ -1977,21 +2022,20 @@ public class Job {
 	  				 	writer.write(prepareHeader(tblname) + "\n");
 		  			
 					/* get table lines */
-					Iterator<ObservableList<String>> iter = table.iterator();
 
-					/* as long as there are lines inside go on */
-					while(iter.hasNext()){
-						String out = prepareOutput(iter.next(),dbname,file.getParent()) + "\n";
-						if(null != out)
-							writer.write(out);
-					}
+                    /* as long as there are lines inside, go on */
+                    for (ObservableList<String> strings : table) {
+                        String out = prepareOutput(strings, dbname, file.getParent()) + "\n";
+                        writer.write(out);
+                    }
 					
 					
 				}
 			}
-			/*********************************************************************************  
-			 * CASE 2 : Export a particular table
-			 *********************************************************************************/
+
+			/*
+			 * CASE 2: Export a particular table
+			 */
 			else{
 				
 				ObservableList<ObservableList<String>> table = null;
@@ -2021,11 +2065,10 @@ public class Job {
   				 if(Global.EXPORTTABLEHEADER)
   				 	writer.write(prepareHeader(objectname) + "\n");
 	  				
-  				 /* as long as there are lines inside go on */
+  				 /* as long as there are lines inside, go on */
 				 while(iter.hasNext()){
 						String out = prepareOutput(iter.next(),dbname,file.getParent()) + "\n";
-						if(null != out)
-							writer.write(out);
+						writer.write(out);
 				 }
 					
 				 
@@ -2068,18 +2111,14 @@ public class Job {
 	}
 	
 	private String[] getColumnNamesForTable (String tablename){
-		
-		Iterator<TableDescriptor> tbls = headers.iterator();
-		
-		while(tbls.hasNext()){
-    		TableDescriptor td = tbls.next();
-    		
-    		if(td.tblname.equals(tablename)) {
-    			
-            	return td.columnnames.toArray(new String[0]);
-            	
-    		}	
-    	}
+
+        for (TableDescriptor td: headers) {
+            if (td.tblname.equals(tablename)) {
+
+                return td.columnnames.toArray(new String[0]);
+
+            }
+        }
 		
 		return null;
 	}
@@ -2114,12 +2153,12 @@ public class Job {
 					continue;
 				}
 				
-				/* put a separator between to values */
+				/* put a separator between the two values */
 				if(counter > 1)
 					output += token;
 				
 				
-				/* column for offset found ? */
+				/* column for offset found? */
 	    		if(counter == 4)
 	    		{
 	    			offset = c;
@@ -2129,8 +2168,8 @@ public class Job {
 	    		}
 				
 				
-				/* If the cell value is a BLOB it depends on the 
-				 * export mode (from the properties dialog) how to 
+				/* If the cell value is a BLOB, it depends on the
+				 * export mode (from the properties dialogue) how to
 				 * continue:
 				 * 
 				 */
@@ -2149,7 +2188,7 @@ public class Job {
 					else if(Global.EXPORT_MODE == Global.EXPORT_MODES.TOCSV || Global.EXPORT_MODE == Global.EXPORT_MODES.TOSEPARATEFILES)
 					{	
 						
-						/* BLOB-value found ? */     		
+						/* BLOB-value found? */
 			    		if(c.length()>7) {
 			    			
 			    			int from = c.indexOf("BLOB-");
@@ -2216,9 +2255,9 @@ public class Job {
 	
 	
 	/**
-	 * Save findings into a comma separated file.
-	 * @param filename
-	 * @param lines
+	 * Save findings into a comma-separated file.
+	 * @param filename name of file to export
+	 * @param lines lines to write into the file
 	 */
 	public void writeResultsToFile(String filename, String [] lines) {
 		System.out.println("Write results to file...");
@@ -2238,13 +2277,13 @@ public class Job {
 		}
 		
 
-		/** convert line to UTF-8 **/
+		/* convert line to UTF-8 */
 		try {
 			
 			final File file = new File(filename);
             
 			
-		    try (final BufferedWriter writer = Files.newBufferedWriter(file.toPath(),Charset.forName("UTF-8"), StandardOpenOption.CREATE)) 
+		    try (final BufferedWriter writer = newBufferedWriter(file.toPath(),Charset.forName("UTF-8"), StandardOpenOption.CREATE))
 		    {
 		      for (String line: lines)
 		      {	
@@ -2259,7 +2298,7 @@ public class Job {
 	}
 	
 	
-	private void readSchema(BigByteBuffer bb, long index, String headerStr) throws IOException
+	private void readSchema(BigByteBuffer bb, long starthere, String headerStr) throws IOException
 	{
 		
 		
@@ -2267,9 +2306,8 @@ public class Job {
 		Auxiliary c = new Auxiliary(this);
 		
 		// compute offset
-		long starthere = index;
-				
-		/* start reading the schema string from the correct position */
+
+        /* start reading the schema string from the correct position */
 		if (db_encoding == StandardCharsets.UTF_8) 
 		{
 			c.readMasterTableRecord(this, starthere - 13, bb, headerStr);
@@ -2288,19 +2326,17 @@ public class Job {
 	
 
 	/**
-	 * The method creates a ImportDBTask object for each page to be scanned.
-	 * Each task is then scheduled into a worker thread's ToDo list. 
-	 * 
+	 * The method creates an ImportDBTask object for each page to be scanned.
+	 * Each task is then scheduled into a worker thread's To-Do list.
 	 * After all tasks are assigned, the worker threads are started 
-	 * and begin processing.  
-	 * 
-	 * @param number
-	 * @param ps
+	 * and begin processing.
+	 * @param number number of threads
+	 * @param ps page size
 	 */
 	public void scan(int number, int ps) {
 		info("Start with scan...");
 		
-		/* create a new threadpool to analyze the freepages */
+		/* create a new thread pool to analyse the freepages */
 		ThreadPoolExecutor executor = (ThreadPoolExecutor) Executors.newFixedThreadPool(Global.numberofThreads);
 
 		long begin = System.currentTimeMillis();
@@ -2351,7 +2387,7 @@ public class Job {
 		
 		//int c = 1;
 		/* start executing the work threads */
-		for (Worker w : worker)
+		for (Worker w: worker)
 		{	
 			//System.out.println(" Start worker thread" + c++);
 			/* add new task to executor queue */
@@ -2468,10 +2504,10 @@ public class Job {
 
 
 	/**
-	 * Start processing a new Sqlite file.
+	 * Start processing a new SQLite file.
 	 * 
-	 * @param p
-	 * @return
+	 * @param p path
+	 * @return success or not
 	 */
 	public int run(String p) {
 		
@@ -2495,8 +2531,8 @@ public class Job {
 	/**
 	 * Read a database page from a given offset with a fixed pagesize.
 	 * 
-	 * @param offset
-	 * @param pagesize
+	 * @param offset byte position in database
+	 * @param pagesize number in bytes for a single database page
 	 * @return  A <code>ByteBuffer</code> object containing the page content. 
 	 */
 	public ByteBuffer readDBPageWithOffset(long offset, int pagesize) {
@@ -2522,10 +2558,10 @@ public class Job {
 	
 
 	/**
-	 * Read a wal page from a given offset with a fixed pagesize.
+	 * Read a WAL page from a given offset with a fixed pagesize.
 	 * 
 	 * @param pagenumber in the database
-	 * @param pagesize
+	 * @param pagesize number of bytes for one database page
 	 * @return  A <code>ByteBuffer</code> object containing the page content. 
 	 */
 	 public ByteBuffer readWALOverflowPage(int frame, int pagenumber, int pagesize, int firstpage) {
@@ -2544,7 +2580,7 @@ public class Job {
 			
 		do 
 		{
-			// Check, if frame is committed?
+			// Check if frame is committed?
 			boolean isCommited = isCommitted(frame);
 			
 			if (offset >= db.capacity()){
@@ -2553,10 +2589,10 @@ public class Job {
 			
 			db.position(offset);
 			
-			// get the pagenumber of the wal frame
+			// get the page number of the WAL frame
 			pnumber = db.getInt();
 			
-			// did we found the overflow page?			 
+			//Did we find the overflow page?
 			if(pnumber == pagenumber){
 				
 				if ((offset >  db.limit()) || (offset < 0)){
@@ -2566,7 +2602,7 @@ public class Job {
 				}
 				
 			
-				/* Note: the maximum size for a WAL-Archive in the moment is 2,1 GB */
+				/* Note: the maximum size for a WAL-Archive at the moment is 2,1 GB */
 				db.position(offset+24);
 			
 				
@@ -2608,7 +2644,7 @@ public class Job {
 	public boolean isCommitted(int frame) {
 	
 			// read up until next commit! frame 
-			for (WALFrame f : checkpointlist){
+			for (WALFrame f: checkpointlist){
 			    	  
 				  if (f.framenumber == frame){
 			    	   if (f.committed) {		    		   
@@ -2634,7 +2670,7 @@ public class Job {
 	 *  page by using this value together with the pagesize. 
 	 *  
 	 * @param pagenumber (>=1)
-	 * @param pagesize
+	 * @param pagesize - number of bytes for one single database page
 	 * @return  A <code>ByteBuffer</code> object containing the page content. 
 	 */
 	public ByteBuffer readPageWithNumber(int pagenumber, int pagesize) {
@@ -2652,7 +2688,7 @@ public class Job {
 	 *  page by using this value together with the pagesize. 
 	 *  
 	 * @param pagenumber (>=1)
-	 * @param pagesize
+	 * @param pagesize - number of bytes for one single database page
 	 * @return  A <code>ByteBuffer</code> object containing the page content. 
 	 */
 	public ByteBuffer readPageWithNumberFromBuffer(int pagenumber, int pagesize, BigByteBuffer bb) {
@@ -2662,7 +2698,7 @@ public class Job {
 		   return null;
 		}
 		
-		long offset = pagenumber*pagesize;
+		long offset = (long) pagenumber * pagesize;
 		
 		if ((offset > bb.limit()) || (offset < 0))
 		{
@@ -2679,18 +2715,16 @@ public class Job {
 
 
 	/**
-	 * The B-tree , or, more specifically, the B+-tree, 
+	 * The B-tree, or, more specifically, the B+-tree,
 	 * is the most widely used physical database structure 
-	 * for primary and secondary indexes on database relations. 
-	 * 
+	 * for primary and secondary indexes on database relations.
 	 * This method can be called to traverse all nodes of 
-	 * a table-tree. 
-	 * 
+	 * a table-tree.
 	 * Attention! This is a recursive function. 
 	 * 
 	 * 
-	 * @param root  the root node.
-	 * @param td   this reference holds a Descriptor for the page type. 
+	 * @param root the root node.
+	 * @param td this reference holds a Descriptor for the page type.
 	 * @throws IOException
 	 */
 	private void exploreBTree(int root, AbstractDescriptor td, BigByteBuffer filebuffer) throws IOException {
@@ -2741,7 +2775,7 @@ public class Job {
 			int e = Auxiliary.TwoByteBuffertoInt(noc);	
 			
 			
-			byte cpn[] = new byte[2];
+			byte[] cpn = new byte[2];
 			buffer.position(5);
 
 			buffer.get(cpn);
@@ -2750,7 +2784,7 @@ public class Job {
 			for (int i = 0; i < e; i++) {
 
 				// address of the next cell pointer
-				byte pointer[] = new byte[2];
+				byte[] pointer = new byte[2];
 				buffer.position(12 + 2 * i);
 				if (buffer.capacity() <= buffer.position()+2)
 					continue;
@@ -2760,7 +2794,7 @@ public class Job {
 
 				AppLog.debug(" celloff " + celloff);
 				// read page number of next node in the b*tree
-				byte pnext[] = new byte[4];
+				byte[] pnext = new byte[4];
 				if (celloff >= buffer.capacity() || celloff < 0)
 					continue;
 				if (celloff > ps)
@@ -2803,24 +2837,16 @@ public class Job {
 			int e = Auxiliary.TwoByteBuffertoInt(noc);	
 			
 			
-			byte cpn[] = new byte[2];
+			byte[] cpn = new byte[2];
 			buffer.position(5);
 
 			buffer.get(cpn);
-
-	//		ByteBuffer.wrap(cpn);
-    //		ByteBuffer size = ByteBuffer.wrap(cpn);
-	//		int cp = Auxiliary.TwoByteBuffertoInt(size);
-
-			//System.out.println(" cell offset start: " + cp);
-			//System.out.println(" root is " + root + " number of elements: " + e);
-			
 
 			/* go on with the cell pointer array */
 			for (int i = 0; i < e; i++) {
 
 				// address of the next cell pointer
-				byte pointer[] = new byte[2];
+				byte[] pointer = new byte[2];
 				buffer.position(12 + 2 * i);
 				if (buffer.capacity() <= buffer.position()+2)
 					continue;
@@ -2871,57 +2897,4 @@ public class Job {
 	}
 
 
-
-	/**
-	 * Return the columnnames as a String array for a given table or indextable name.
-	 * @param tablename
-	 * @return
-	 */
-	public String[] getHeaderString(String tablename)
-	{
-		/* check tables first */
-		Iterator<TableDescriptor> iter = this.headers.iterator();
-		while (iter.hasNext())
-		{
-			TableDescriptor td = iter.next();
-			if (td.tblname.equals(tablename))
-			{
-				return td.columnnames.toArray(new String[0]);
-			}	
-			
-		}
-		
-		/* check indicies next */
-		Iterator<IndexDescriptor> itI = this.indices.iterator();
-		while (itI.hasNext())
-		{
-			IndexDescriptor id = itI.next();
-			if (id.idxname.equals(tablename))
-			{
-				return id.columnnames.toArray(new String[0]);
-			}	
-			
-		}
-
-		/* no luck */
-		return null;
-	}
-
-}
-
-
-
-
-class Signatures {
-
-	static String getTable(String signature) {
-
-		signature = signature.trim();
-
-		signature = signature.replaceAll("[0-9]", "");
-
-		signature = signature.replaceAll("PRIMARY_KEY", "");
-
-		return signature;
-	}
 }

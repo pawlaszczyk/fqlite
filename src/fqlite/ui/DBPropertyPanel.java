@@ -61,7 +61,7 @@ public class DBPropertyPanel extends StackPane{
 		this.gui = gui;
 		VBox base = new VBox();
 		
-		String s = GUI.class.getResource("/find.png").toExternalForm();
+		String s = GUI.class.getResource("/gray_schema32.png").toExternalForm();
 		Button btnSchema = new Button("Show Schema Info");
 		ImageView iv = new ImageView(s);
 		btnSchema.setGraphic(iv);
@@ -92,7 +92,7 @@ public class DBPropertyPanel extends StackPane{
         tabpane.getTabs().add(headerinfotab);
 	
         
-        String column[]={"Offset","Property","Value"};         
+        String[] column ={"Offset","Property","Value"};
 		
 		TableView table = new TableView<>();
 		table.getSelectionModel().setSelectionMode(
@@ -121,15 +121,15 @@ public class DBPropertyPanel extends StackPane{
 				    	
 				}
 				
-				/* first column is a integer column */
+				/* first column is an integer column */
 				if (i == 0) {
 					col.setComparator(new Comparator<Object>() {
 			            @Override
 			            public int compare(Object o1, Object o2) {
 			            
-			            	Long i1 = Long.parseLong((String)o1);
-			                Long i2 = Long.parseLong((String)o2);
-			                return (i1 < i2) ? -1 : +1 ;
+			            	long i1 = Long.parseLong((String)o1);
+			                long i2 = Long.parseLong((String)o2);
+			                return (i1 < i2) ? -1: +1 ;
 			            }
 			        });
 				}
@@ -309,7 +309,7 @@ public class DBPropertyPanel extends StackPane{
 	{
 		
 		
-		String column[]={"page","offset","type of page","table","signature"};         
+		String[] column ={"page","offset","type of page","table","signature"};
 		
 		TableView table = new TableView<>();
 		table.getSelectionModel().setSelectionMode(
@@ -354,9 +354,6 @@ public class DBPropertyPanel extends StackPane{
 							  break;
 				    case 4:   col.prefWidthProperty().bind(table.widthProperty().multiply(0.30));
 							  break;
-//							    
-//					default:  col.prefWidthProperty().bind(table.widthProperty().multiply(0.20));    	
-//				    	
 				}
 				
 				
@@ -403,7 +400,7 @@ public class DBPropertyPanel extends StackPane{
 	            }                    
 				});
 				
-				/* first column is a integer columns */
+				/* first column is an integer column */
 				if (i == 0 || i == 3) {
 					col.setComparator(new Comparator<Object>() {
 			            @Override
@@ -448,7 +445,7 @@ public class DBPropertyPanel extends StackPane{
 	@SuppressWarnings("unchecked")
 	private void fillTable(TableView table, String[][] data, boolean rowno)
 	{
-		// define array list for all table rows 
+		// define an array list for all table rows
 	    ObservableList<ObservableList> obdata = FXCollections.observableArrayList();
 		
 	    int rownumber = 1;

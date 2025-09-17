@@ -6,12 +6,9 @@ import java.util.Date;
 import java.util.TimeZone;
 
 /**
- * This class offers some basic date conversion routines. 
- *
- * @author pawlaszc
- *
- * 
- * 07/05/2023 @ 9:42am	UTC
+ * This class offers some basic date conversion routines.
+ * Formats supported:
+ * 07/05/2023 @ 9:42 am	UTC
  * 2023-07-05T09:42:38+00:00	ISO 8601
  * Wed, 05 Jul 2023 09:42:38 +0000	RFC 822, 1036, 1123, 2822
  * Wednesday, 05-Jul-23 09:42:38 UTC	RFC 2822
@@ -29,13 +26,13 @@ public class DatetimeConverter{
 	
 	/**
 	 * Core Data is a data storage framework to manage objects in iOS and OS X applications.
-	 * Core Data is part of the Cocoa API. These timestamps are sometimes labeled 'Mac absolute time'.
+	 * Core Data is part of the Cocoa API. These timestamps are sometimes labelled 'Mac absolute time'.
 	 * A Core Data timestamp is the number of seconds (or nanoseconds) since midnight, January 1, 2001, GMT (see CFAbsoluteTime).
 	 * The difference between a Core Data timestamp and a Unix timestamp (seconds since 1/1/1970) is 978307200 seconds.
 	 * 
 	 * 
-	 * @param timestamp
-	 * @return
+	 * @param timestamp the timestamp to check
+	 * @return true if MAC Absoulte Time
 	 */
 	
 	public static String isMacAbsoluteTime(double timestamp)
@@ -47,28 +44,28 @@ public class DatetimeConverter{
 		if (time > UNIX_MIN_DATE && time < UNIX_MAX_DATE)
 		{
 			Date d = new Date(time); 
-			return f.format(d).toString();
+			return f.format(d);
 		}
 		return null;
 	}
 	
 	/**
-	 *  Current Unix epoch time in  So the Epoch is Unix time 0 (1-1-1970) but it is also used as Unix Time or Unix Timestamp.
+	 *  Current Unix epoch time in  So the Epoch is Unix time 0 (1-1-1970), but it is also used as Unix Time or Unix Timestamp.
 	 *  
-	 * @param time
-	 * @return
+	 * @param timestamp the long value representing the time
+	 * @return the timestamp string
 	 */
 	public static String isUnixEpoch(long timestamp)
 	{
 		Date d = new Date(timestamp);
-		return f.format(d).toString();
+		return f.format(d);
 			
 	}
 	
 	/**
-	 * 
-	 * @param timestamp
-	 * @return
+	 * Check for Julian Date.
+	 * @param timestamp the timestamp to check.
+	 * @return the result
 	 */
 	public static String isJulianDate(double timestamp)
 	{
@@ -78,7 +75,7 @@ public class DatetimeConverter{
 	
   	/**     
   	 * Convert the given Julian Day to Gregorian Date (in UT time zone).
-     * Based on the formula given in the Explanitory Supplement to the
+     * Based on the formula given in the Explanatory Supplement to the
      * Astronomical Almanac, pg 604.
      */
     private static Date calculateGregorianDate(double jd) {

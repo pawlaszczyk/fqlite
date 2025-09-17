@@ -4,36 +4,32 @@ import java.nio.ByteBuffer;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
-
 import fqlite.base.Job;
 import fqlite.types.BLOBElement;
 import fqlite.util.Auxiliary;
 
-/**
- * This is a wrapper class for managing BLOB content.
- * 
- * Note: All binary cell values are completely managed in RAM be default.
- * 
- */
+/// This is a wrapper class for managing BLOB content.
+/// Note: All binary cell values are completely managed in RAM by default.
 public class BLOBCache {
 
 	// The cache is backed by a Map.
-	public Map<String,BLOBElement> cache = new ConcurrentHashMap<String,BLOBElement>();
+	public Map<String,BLOBElement> cache;
 
-	// we define a 1-to-1 relation between a job object and a cache object
+	//We define a 1-to-1 relation between a job object and a cache object
 	public Job job;
 	
 	/**
 	 * assign BLOB list to this cache
-	 * @param job
+	 * @param job the parent object
 	 */
 	public BLOBCache(Job job){
 		this.job = job;
-	}
+        cache = new ConcurrentHashMap<String,BLOBElement>();
+    }
 	
 	/**
-	 * Returns all keys currently that are currently in the cache.
-	 * @return
+	 * Returns all keys that are in the cache.
+	 * @return keyset
 	 */
 	public Set<String> keySet(){
 		return cache.keySet();
@@ -41,7 +37,7 @@ public class BLOBCache {
 	
 	/**
 	 * Returns the number of binary elements in the cache.
-	 * @return
+	 * @return number of elements
 	 */
 	public int size(){			
 		return cache.size();
@@ -49,26 +45,26 @@ public class BLOBCache {
 	
 	/**
 	 * Get the BLOBElement for a given key.
-	 * @param offset
-	 * @return
+	 * @param key access key to blob object
+	 * @return a BLOBElement
 	 */
 	public BLOBElement get(String key){
 		return cache.get(key);
 	}
 	
 	/**
-	 * Insert a new binary object to the cache.
-	 * @param key
-	 * @param value
+	 * Insert a new binary object into the cache.
+	 * @param key the key
+	 * @param value the value to store
 	 */
 	public void put(String key, BLOBElement value){
 		cache.put(key,value);
 	}
 	
 	/**
-	 * Get the BLOB content as hex-string.
-	 * @param path
-	 * @return
+	 * Get the BLOB content as a hex string.
+	 * @param path location on the filesystem.
+	 * @return hex string
 	 */
 	public String getHexString(String path){
 	    
@@ -102,8 +98,8 @@ public class BLOBCache {
 	/**
 	 * Get the underlying byte array.
 	 *
-	 * @param path
-	 * @return
+	 * @param path path to the blob element on the filesystem
+	 * @return a byte array
 	 */
 	public byte[] read(String path){
 		return get(path).binary;

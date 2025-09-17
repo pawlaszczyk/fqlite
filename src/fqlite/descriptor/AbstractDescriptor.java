@@ -5,14 +5,11 @@ import java.util.List;
 import fqlite.pattern.HeaderPattern;
 
 /**
- * An abstract base class for possible database 
- * objects like index,table, trigger or view.
- * 
- * At the moment FQLite only supports tables and
+ * An abstract base class for a possible database
+ * objects like index, table, trigger or view.
+ * At the moment, FQLite only supports tables and
  * indices.
- * 
  * @author pawlaszc
- *
  */
 public abstract class AbstractDescriptor {
 
@@ -27,7 +24,7 @@ public abstract class AbstractDescriptor {
 	
 	/**
 	 * Return the name of the database object.
-	 * @return
+	 * @return element name
 	 */
 	abstract public String getName();
 	

@@ -12,7 +12,7 @@ import java.util.List;
 
 /**
  * 
- * BigByteBuffer allows mmaping files larger than Integer.MAX_VALUE bytes.
+ * BigByteBuffer allows mmaping files larger than an Integer.MAX_VALUE bytes.
  * 
  */
 public class BigByteBuffer {
@@ -111,7 +111,7 @@ public class BigByteBuffer {
 
 	/**
 	 * Sets this buffer's position. If the mark is defined and larger than the new
-	 * position then it is discarded.
+	 * position, then it is discarded.
 	 * 
 	 * @param newPosition The new position value; must be non-negative and no larger
 	 *                    than the current limit.
@@ -147,7 +147,7 @@ public class BigByteBuffer {
 	/**
 	 * mmap the file and return a BigByteBuffer for it.
 	 * 
-	 * @param file the file to mmap
+	 * @param filename the file to mmap
 	 * @throws java.io.IOException if there is an error reading the file
 	 */
 	public BigByteBuffer(String filename) throws IOException {
@@ -182,7 +182,6 @@ public class BigByteBuffer {
 
 		pos=0;
 		limit = cap = length;
-		mark = -1;
 		ByteBuffer bb = ByteBuffer.wrap(array, offset, length);
 		buffers = new ArrayList<ByteBuffer>();
 		buffers.add(bb);
@@ -192,7 +191,6 @@ public class BigByteBuffer {
 
 		pos=0;
 		limit = cap = array.length;
-		mark = -1;
 		ByteBuffer bb = ByteBuffer.wrap(array);
 		buffers = new ArrayList<ByteBuffer>();
 		buffers.add(bb);
@@ -207,7 +205,6 @@ public class BigByteBuffer {
 	public BigByteBuffer(ByteBuffer buffer) {
 		limit = cap = buffer.limit();
 		pos = 0;
-		mark = -1;
 		buffers = Arrays.asList(buffer);
 	}
 
@@ -234,7 +231,7 @@ public class BigByteBuffer {
      *
      * @return the byte at the current position.
      * @exception BufferUnderflowException
-     *                if the position is equal or greater than limit.
+     *                if the position is equal to or greater than the limit.
      */
     
 	public byte get(long position){
@@ -247,13 +244,13 @@ public class BigByteBuffer {
      * Returns a sliced buffer that shares its content with this buffer.
      * <p>
      * The sliced buffer's capacity will be this buffer's
-     * {@code remaining()}, and it's zero position will correspond to
+     * {@code remaining()}, and its zero position will correspond to
      * this buffer's current position. The new buffer's position will be 0,
-     * limit will be its capacity, and its mark is cleared. The new buffer's
+     * The limit will be its capacity, and its mark is cleared. The new buffer's
      * read-only property and byte order are the same as this buffer's.
      * <p>
      * The new buffer shares its content with this buffer, which means either
-     * buffer's change of content will be visible to the other. The two buffer's
+     * buffer's change of content will be visible to the other. The two buffers
      * position, limit and mark are independent.
      *
      * @return a sliced buffer that shares its content with this buffer.
@@ -308,7 +305,7 @@ public class BigByteBuffer {
     /**
      * Returns the int at the current position and increases the position by 4.
      * <p>
-     * The 4 bytes starting at the current position are composed into a int
+     * The 4 bytes starting at the current position are composed into an int
      * according to the current byte order and returned.
      *
      * @return the int at the current position.

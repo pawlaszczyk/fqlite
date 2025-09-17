@@ -5,24 +5,18 @@ import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Map;
 
-/**
- * This class works as a dispatcher to run the correct main() function.
- * Note: FQLite does support 2 modes: command line interface (cli) and graphical (gui).
- * 
- * To run the FQLite from the command line you can use one of the  following options:
- *
- * $> java -jar  fqliteXXX.jar gui						-> start program in gui mode
- * $> java -jar  fqliteXXX.jar nogui <database.db>      -> starts the command line version
- * $> java -jar  fqliteXXX.jar cli <database.db>		-> starts the command line version
- * $> java -jar  fqliteXXX.jar -> start program in gui mode
- * 
- * 
- * @author pawlaszc
- *
- */
+/// This class works as a dispatcher to run the correct main() function.
+/// Note: FQLite does support 2 modes: command line interface (cli) and graphical (gui).
+/// To run the FQLite from the command line, you can use one of the  following options:
+/// $> java -jar  fqliteXXX.jar gui						-> start program in gui mode
+/// $> java -jar  fqliteXXX.jar nogui <database.db>      -> starts the command line version
+/// $> java -jar  fqliteXXX.jar cli <database.db>		-> starts the command line version
+/// $> java -jar  fqliteXXX.jar -> start program in gui mode
+///
+/// @author pawlaszc
 public class JARStarter {
 
-   private static Map<String, Class<?>> PROGRAM_MODES = new HashMap<String, Class<?>>();
+   private static final Map<String, Class<?>> PROGRAM_MODES = new HashMap<String, Class<?>>();
 	   
 	    static{
 	        PROGRAM_MODES.put("gui", GUI.class);
@@ -34,7 +28,7 @@ public class JARStarter {
 		
 		    if (args.length == 0)
 		    {
-		    	/* no arguments -> start in gui mode (default)*/
+		    	/* no arguments -> start in GUI mode (default)*/
                 GUI.main(args);
 		    }
 		    else

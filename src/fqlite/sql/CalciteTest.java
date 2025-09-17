@@ -26,7 +26,7 @@ public class CalciteTest {
 	
 	    CalciteConnection calciteConnection = connection.unwrap(CalciteConnection.class);
 	    
-	    // we need add a self defined schema to the root schema
+	    // we need to add a self-defined schema to the root schema
 	    SchemaPlus rootSchema = calciteConnection.getRootSchema();
 	    
 	    
@@ -43,7 +43,7 @@ public class CalciteTest {
 	    // this is our schema 
 	    MemTableSchema schema = new MemTableSchema();
 	    // register the newly defined schema to the root schema
-	    // the database name is used as schema name
+	    // the database name is used as the schema name
 	    rootSchema.add("testdb", schema);
 	
 	    schema.createTable("employees", columns, sqltypes);
@@ -111,11 +111,8 @@ public class CalciteTest {
 	    int size = 0;
 	    while (rs.next()) {
 	    	
-        //    long id = rs.getLong("id");
               String name = rs.getString("name");
-        //    int age = rs.getInt("age");
-        //    System.out.println("id: " + id + "; name: " + name + "; age: " + age);
-              System.out.println(name);
+               System.out.println(name);
 	    size++;
 	    }
 

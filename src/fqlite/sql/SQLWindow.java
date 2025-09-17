@@ -1,12 +1,7 @@
 package fqlite.sql;
 
 import java.time.Duration;
-import java.util.Collection;
-import java.util.Collections;
-import java.util.Enumeration;
-import java.util.Hashtable;
-import java.util.Iterator;
-import java.util.List;
+import java.util.*;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.regex.Matcher;
@@ -72,7 +67,8 @@ public class SQLWindow extends Application {
     VBox root = new VBox();
     org.fxmisc.richtext.CodeArea codeArea = new CodeArea();
     public Label statusline;
-    
+    private String preselection;
+
     private static final String[] KEYWORDS = new String[] {
             "ADD","ADD CONSTRAINT","ALL","ALTER","ALTER COLUMN","ALTER TABLE",
             "AND","ANY","AS","ASC","BACK DATABASE","BETWEEN","CASE","CHECK","COLUMN",
@@ -112,15 +108,17 @@ public class SQLWindow extends Application {
 
     
     /**
-     * Constructor of the SQL Analyzer window.
-     * @param app
+     * Constructor of the SQL Analyser window.
+     * @param app reference to the parent frame
+     * @param selectedDB the name of the db for preselection
      */
-    public SQLWindow(GUI app){
+    public SQLWindow(GUI app, String selectedDB){
 
     	this.app = app;
     	tabledata = app.datasets;
     	this.dbnames = app.dbnames;
-   
+        this.preselection = selectedDB;
+
        // xEnumeration<String> keys = tabledata.keys();
        // while(keys.hasMoreElements()) {
        // 	String key = keys.nextElement();        
@@ -183,18 +181,16 @@ public class SQLWindow extends Application {
         	@SuppressWarnings("rawtypes")
             public void handle(ActionEvent event) {
                resultview.getSelectionModel().selectAll();
-            	StringBuffer sb = new StringBuffer();			
+            	StringBuilder sb = new StringBuilder();
              	final javafx.scene.input.Clipboard clipboard = javafx.scene.input.Clipboard.getSystemClipboard();
                 final ClipboardContent content = new ClipboardContent();
-                ObservableList<TablePosition> selection = resultview.getSelectionModel().getSelectedCells();	        
-                Iterator<TablePosition> iter = selection.iterator();
-                
-                while(iter.hasNext()) {
-                	
-                	TablePosition pos = iter.next();	        	
-                	@SuppressWarnings("unchecked")
-					ObservableList<String> hl = (ObservableList<String>)resultview.getItems().get(pos.getRow());
-                	  sb.append(hl.toString() + "\n");
+                ObservableList<TablePosition> selection = resultview.getSelectionModel().getSelectedCells();
+
+                for (TablePosition pos: selection) {
+
+                    @SuppressWarnings("unchecked")
+                    ObservableList<String> hl = (ObservableList<String>) resultview.getItems().get(pos.getRow());
+                    sb.append(hl.toString()).append("\n");
                 }
                 content.putString(sb.toString());
                 clipboard.setContent(content);
@@ -203,7 +199,7 @@ public class SQLWindow extends Application {
         });
         
 	    Button btnExit = new Button();
-        s = GUI.class.getResource("/analyzer-exit.png").toExternalForm();
+        s = Objects.requireNonNull(GUI.class.getResource("/analyzer-exit.png")).toExternalForm();
 		iv = new ImageView(s);
 		btnExit.setGraphic(iv);
 		btnExit.setTooltip(new Tooltip("Quit SQL Analyzer"));
@@ -221,7 +217,9 @@ public class SQLWindow extends Application {
         dbBox.getItems().addAll(dbnames);
         
         Label dblabel = new Label("Choose database: ");
-        dbBox.getSelectionModel().selectFirst();
+        if (null != preselection)
+            dbBox.getSelectionModel().select(preselection);
+            //selectFirst();
         
         ToolBar dbbar = new ToolBar();
         

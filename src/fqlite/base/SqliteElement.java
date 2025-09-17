@@ -3,7 +3,6 @@ package fqlite.base;
 import java.nio.ByteBuffer;
 import java.nio.CharBuffer;
 import java.util.Arrays;
-
 import fqlite.types.SerialTypes;
 import fqlite.types.StorageClass;
 import fqlite.util.Auxiliary;
@@ -19,7 +18,7 @@ public class SqliteElement {
 	
 	public final SerialTypes type;
 	public final StorageClass serial;
-	private int length;
+	private final int length;
 	
 
 	public SqliteElement(SerialTypes type, StorageClass serial, int l) {
@@ -43,12 +42,12 @@ public class SqliteElement {
 		/* we took only the first 32 characters of the byte array 
 		 * to display if truncBLOB is true */
 		String s;
-		if (truncBLOB)
-			s = toString(value,false,true);
-		else
+		if (truncBLOB) {
+            s = toString(value,false,true);
+        } else
 			s = toString(value,false,false);
-		
-		return parseBLOB(s)+s;
+        assert s != null;
+        return parseBLOB(s) + s;
 	}
 	
 	
@@ -56,7 +55,6 @@ public class SqliteElement {
 	public final String toString(byte[] value, boolean withoutQuotes, boolean truncBLOB) {
 		
 		try {
-		//System.out.println("type:::: " + type + " " + " Serial " + serial);
 		if (type == SerialTypes.INT0)
 			return String.valueOf(0);
 		else if (type == SerialTypes.INT1)
@@ -65,18 +63,15 @@ public class SqliteElement {
 		   	return "";
 		}
 		else if (value.length == 0) {
-			//System.out.println("Achtung!!! länge null type:: " + type);
 			return "";
 		}
 		else if (type == SerialTypes.STRING)
 		{
-			//withoutQuotes=false;
-			
 			String result = decodeString(value).toString();
 		    if (withoutQuotes)
 		    	return result;
 		    else
-		    	return result; //"\""+ result + "\"";
+		    	return result;
 		}
 		else if (type == SerialTypes.INT8)
 			return String.valueOf(decodeInt8(value[0]));
@@ -141,18 +136,17 @@ public class SqliteElement {
 		return "";
 	}
 	
-	public final static int decodeInt8(byte v) {
+	public static int decodeInt8(byte v) {
 		return v;
 	}
 
-	public final static int decodeInt16(byte[] v) {
+	public static int decodeInt16(byte[] v) {
 		ByteBuffer bf = ByteBuffer.wrap(v);
 		return bf.getShort();
 	}
 
-	public final static int decodeInt24(byte[] v) {
-		int result = int24bytesToUInt(v);
-		return result;
+	public static int decodeInt24(byte[] v) {
+		return int24bytesToUInt(v);
 	}
 
 	private static int int24bytesToUInt(byte[] input) {
@@ -164,13 +158,13 @@ public class SqliteElement {
 	}
 	
 
-	public final static int decodeInt32(byte[] v) {
+	public static int decodeInt32(byte[] v) {
 		ByteBuffer bf = ByteBuffer.wrap(v);
 		return bf.getInt();
 	}
 
 	
-	public final static long decodeInt48ToLong(byte[] v){
+	public static long decodeInt48ToLong(byte[] v){
 				// we have to read 6 Bytes
 				if (v.length < 6)
 					return 0;
@@ -182,14 +176,10 @@ public class SqliteElement {
 					converted[i + 2] = value[i];
 				}
 				ByteBuffer result = ByteBuffer.wrap(converted);
-		 
-		       // bf.order(ByteOrder.BIG_ENDIAN);
-					
-				long z = result.getLong();
-				return z;
+				return result.getLong();
 	}
 	
-	public final static String decodeInt48(byte[] v) {
+	public static String decodeInt48(byte[] v) {
 		// we have to read 6 Bytes
 		if (v.length < 6)
 			return "00";
@@ -201,66 +191,26 @@ public class SqliteElement {
 			converted[i + 2] = value[i];
 		}
 		ByteBuffer result = ByteBuffer.wrap(converted);
- 
-       // bf.order(ByteOrder.BIG_ENDIAN);
-			
 		long z = result.getLong();
-			
-		//if (z > 1000000000000000L && z < 1800000000000000L)
-		//	return convertToDate(z);
-		//else
-		//	return Long.toString(z);
-		
-		//String int64 = DatetimeConverter.isUnixEpoch(z);
-		//if (null == int64)
-		//{
-			return Long.toString(z);
-		//}
-		//return int64;
+        return Long.toString(z);
 	}
 
-	final static String decodeInt64(byte[] v) {
+	static String decodeInt64(byte[] v) {
 		ByteBuffer bf = ByteBuffer.wrap(v);
 		long z = bf.getLong();
-
-		//String int64 = DatetimeConverter.isUnixEpoch(z);
-		//if (null == int64)
-		//{
-		String int64 = Long.toString(z);
-		//}
-		//if (z > 100000000000L)
-		//	return convertToDate(z);
-		return int64;
+        return Long.toString(z);
 	}
 
-//	final static String convertToDate(long value) {
-		
-//		ZonedDateTime utc = ZonedDateTime.ofInstant(Instant.ofEpochMilli(value),ZoneOffset.UTC);
-//		Date d = new Date(value / 1000);
-		//SimpleDateFormat dateFormat = new SimpleDateFormat("dd/MM/yyyy hh:mm:ss");
-//		DateTimeFormatter formatter = DateTimeFormatter.ofPattern("MM/dd/yyyy - HH:mm:ss Z");
 
-//		return utc.format(formatter);//dateFormat.format(d);
-//	}
 
-	final static String decodeFloat64(byte[] v) {
+	 static String decodeFloat64(byte[] v) {
 		ByteBuffer bf = ByteBuffer.wrap(v);
 		
 		double d = bf.getDouble();
-		
-		//if(d > 600000000)
-		//{
-			//System.out.println("MAC-Time gefunden " + d);
-		//}
-		//String fp64 = DatetimeConverter.isMacAbsoluteTime(d);
-		//if (null == fp64)
-		return String.format("%.8f", d);
-		// return bf.getDouble();
-		// System.out.println("Rückgabe :: " + fp64);
-		//return fp64;
+        return String.format("%.8f", d);
 	}
 
-	final static CharBuffer decodeString(byte[] v) {
+	 static CharBuffer decodeString(byte[] v) {
 		
 		return Job.db_encoding.decode(ByteBuffer.wrap(v));
 	}
@@ -281,7 +231,7 @@ public class SqliteElement {
 		float threshold = 0.8f;
 		int printable = 0;
 
-		for (byte b : value) {
+		for (byte b: value) {
 			if (b >= 32 && b < 127) {
 				printable++;
 			}

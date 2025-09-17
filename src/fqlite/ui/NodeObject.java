@@ -23,7 +23,8 @@ public class NodeObject{
 	public VBox tablePane; //TableView<List<Object>> table;
 	public int tabletype;  // 0.. Normal Table, 1.. Index Table, 2.. Virtual Table, 3.. View, 4.. Trigger
     public boolean isRoot = false;
-    
+    public boolean isTable = false;
+
     public NodeObject(String name, boolean isRoot)
     {
     	this.name = name;
@@ -31,13 +32,14 @@ public class NodeObject{
     }
 	
 	
-	public NodeObject(String name, VBox tablePane, int numberOfColumns,FileTypes type, int tabletype)
+	public NodeObject(String name, VBox tablePane, int numberOfColumns,FileTypes type, int tabletype, boolean isTable)
 	{
 		this.name = name;
 		this.numberOfColumns = numberOfColumns;
 		this.type = type;
 		this.tablePane = tablePane;
 		this.tabletype = tabletype;
+        this.isTable = isTable;
 	}
 	
 	public String toString() {

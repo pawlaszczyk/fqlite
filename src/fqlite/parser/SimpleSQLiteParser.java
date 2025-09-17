@@ -21,12 +21,10 @@ import fqlite.pattern.IntegerConstraint;
 
 
 /**
- * With the help of the present class CREATE TABLE and CREATE INDEX statements can be parsed and decomposed. 
- * 
+ * With the help of the present class, CREATE TABLE and CREATE INDEX statements can be parsed and decomposed.
  * Note: ANTLR (ANother Tool for Language Recognition) is a powerful parser generator for 
- * reading, processing, executing, or translating structured text or binary files. 
- * 
- * This class builds up on the parser classes of ANTLR-library.
+ * reading, processing, executing, or translating structured text or binary files.
+ * This class builds on the parser classes of the ANTLR-library.
  * 
  * 
  * @author pawlaszc
@@ -54,58 +52,49 @@ public class SimpleSQLiteParser {
 
 	/* could by any of the above STORAGE class */
 	static String[] numerictype = { "NUMERIC", "DECIMAL", "BOOLEAN", "DATE", "DATETIME" };
-	
-	
-	
-	SQLiteLexer lexer;
-	SQLiteLexer parser;
+
 	String tablename = null;
 	String modulname = null;
 	
 	/* prepare data fields */
-	List<String> coltypes = new ArrayList<String>();
-	List<String> sqltypes = new ArrayList<String>();
-	List<String> colconstraints = new ArrayList<String>();
-	ArrayList<String> colnames = new ArrayList<String>();
-	List<String> tableconstraint = new ArrayList<String>();
-	Map<Integer,String> constraints = new HashMap<Integer,String>();
-	HeaderPattern pattern = new HeaderPattern();
-
+	List<String> coltypes = new ArrayList<>();
+	List<String> sqltypes = new ArrayList<>();
+	List<String> colconstraints = new ArrayList<>();
+	ArrayList<String> colnames = new ArrayList<>();
+	List<String> tableconstraint = new ArrayList<>();
+	Map<Integer,String> constraints = new HashMap<>();
 	TableDescriptor tds  = null;
-	IndexDescriptor ids  = null;
 	int column;
 	
 	
 	/**
-	 * Call this method to parse the SQL-statement CREATE TABLE.
-	 * The result will be a TableDescriptor object, that contains component name, column names 
+	 * Call this method to parse the SQL statement CREATE TABLE.
+	 * The result will be a TableDescriptor object that contains the component name, column names
 	 * an types. This information is necessary for matching the data records.
-	 * 
 	 * Example statement would look like this:
-	 * 	
 	 * CREATE TABLE 'users' (
 	 *		'name' TEXT,
 	 *		'surname' TEXT,
      *		'lastUpdate' TEXT
 	 *	);
 	 * 
-	 * @param stmt
+	 * @param stmt the sql statement
 	 * @return a TableDescriptor Object with all the information about the component. 
 	 */
 	public TableDescriptor parseTable(String stmt)
 	{
 		
-		/* what kind of SQL statement ? */
+		/* what kind of SQL statement? */
 		
-		if ((stmt.indexOf("CREATE TABLE")) >= 0)
+		if (stmt.contains("CREATE TABLE"))
 		{
 			return parseCreateTable(stmt);
 		}
-		else if ((stmt.indexOf("CREATE TEMP TABLE")) >= 0)
+		else if (stmt.contains("CREATE TEMP TABLE"))
 		{
 			AppLog.debug("Found CREATE TEMP TABLE statement");
 		}
-		else if ((stmt.indexOf("CREATE VIRTUAL TABLE")) >= 0)
+		else if (stmt.contains("CREATE VIRTUAL TABLE"))
 		{
 			return parseCreateVirtualTable(stmt);	
 		}
@@ -116,7 +105,7 @@ public class SimpleSQLiteParser {
 	
 	public IndexDescriptor parseIndex(Job job, String stmt)
 	{
-		if ((stmt.indexOf("CREATE INDEX ") >= 0))
+		if ((stmt.contains("CREATE INDEX ")))
 		{
 			return parseCreateIndex(job, stmt);
 		}
@@ -145,7 +134,7 @@ public class SimpleSQLiteParser {
 	 * Parse a CREATE VIRTUAL TABLE statement and return a TableDescriptor object.
 	 * 
 	 * @param stmt String with the CREATE VIRTUAL TABLE statement to parse.
-	 * @return
+	 * @return descriptor object
 	 */
 	private TableDescriptor parseCreateVirtualTable(String stmt)
 	{
@@ -169,7 +158,7 @@ public class SimpleSQLiteParser {
         	{
         		tablename = ctx.getText();
         		tablename = trim(tablename);
-        		if (tablename.length()==0)
+        		if (tablename.isEmpty())
         			tablename = "<no name>";
         		System.out.println("Tablename "  + tablename);
         		
@@ -200,16 +189,15 @@ public class SimpleSQLiteParser {
         	@Override public void enterModule_argument(SQLiteParser.Module_argumentContext ctx) 
         	{ 
         		String modulargument = ctx.getText();
-        		System.out.println(" arg " + modulargument);
-        		
+
         		// FTS3/4 module?
         		if(modulname.equalsIgnoreCase("fts3") || modulname.equalsIgnoreCase("fts4"))
         		{
-        			String clname = "";
+        			String clname;
         			
         			if(modulargument.startsWith("'") || modulargument.startsWith("\""))
         			{
-            			int l = 0;
+            			int l;
         				//example: 'name' TEXT
         				if(modulargument.startsWith("'"))
         				
@@ -291,9 +279,8 @@ public class SimpleSQLiteParser {
     	{ 
 		
     		idxname = ctx.getText(); //"_IDX_" + ctx.getText();
-        	
-    		System.out.println("INDEX " + idxname);
-        }  
+
+        }
     	
     	
     	/**
@@ -317,16 +304,16 @@ public class SimpleSQLiteParser {
     			
     		colname = trim(colname);
     		colnames.add(colname);
-    		System.out.println("Columnname " + colname);		
+
     	}
 
     	@Override public void enterTable_name(SQLiteParser.Table_nameContext ctx) 
     	{
     		tablename = ctx.getText();
     		tablename = trim(tablename);
-    		if (tablename.length()==0)
+    		if (tablename.isEmpty())
     			tablename = "<no name>";
-    		System.out.println("Tablename "  + tablename);
+
     	}
     	
     	
@@ -344,7 +331,7 @@ public class SimpleSQLiteParser {
 	 * Parse a CREATE TABLE statement and return a TableDescriptor object.
 	 * 
 	 * @param stmt String with the CREATE TABLE statement to parse.
-	 * @return
+	 * @return descriptor object
 	 */
 	private TableDescriptor parseCreateTable(String stmt)
 	{
@@ -367,7 +354,7 @@ public class SimpleSQLiteParser {
         		isTableConstraint = false;
         		tablename = ctx.getText();
         		tablename = trim(tablename);
-        		if (tablename.length()==0)
+        		if (tablename.isEmpty())
         			tablename = "<no name>";
         		
         		
@@ -401,8 +388,7 @@ public class SimpleSQLiteParser {
         		{
         			colname = trim(colname);
         			colnames.add(colname);
-        			
-        			//System.out.println("Columnname " + colname);
+
         		}
         		else
         		{
@@ -420,16 +406,10 @@ public class SimpleSQLiteParser {
         	 */
         	@Override public void enterForeign_table(SQLiteParser.Foreign_tableContext ctx)
         	{
-        		System.out.println("Enter foreign Table!!!");
         		inForeignTable = true;
         	}
         	
-        	@Override public void exitForeign_table(SQLiteParser.Foreign_tableContext ctx)
-        	{
-        		System.out.println("Exit foreign Table!!!");
-        		
-        	}
-        	
+
         	
         	@Override public void enterType_name(SQLiteParser.Type_nameContext ctx) 
         	{ 
@@ -437,10 +417,10 @@ public class SimpleSQLiteParser {
         		String value = ctx.getText();
         	    value = value.trim();
         		
-        	    if(value.length()==0)
+        	    if(value.isEmpty())
         	    	value = "BLOB";
         	    	
-        		/* the CONSTRAINT key word is mistakenly identified a type */
+        		/* the CONSTRAINT keyword is mistakenly identified as a type */
         		if (tblconstraint)
         		{
         			//System.out.println("Table Constraint: " + value);
@@ -455,7 +435,7 @@ public class SimpleSQLiteParser {
 	        		
 	        		//System.out.println("SQLType::" + value);
 	        		String type = getType(value);
-	        		if (type.length()>0)
+	        		if (!type.isEmpty())
 	        		{
 	        			coltypes.add(type);
 	        			//System.out.println("Typename " + trim(type));
@@ -530,7 +510,7 @@ public class SimpleSQLiteParser {
         	
         	@Override public void exitCreate_table_stmt(SQLiteParser.Create_table_stmtContext ctx)
         	{ 
-        	    /* create a pattern object for constrain matching of records */
+        	    /* create a pattern object for constrained matching of records */
     		    HeaderPattern pattern = new HeaderPattern();
     		  
     		    /* the pattern always starts with a header constraint */ 
@@ -539,9 +519,9 @@ public class SimpleSQLiteParser {
     		    /* Bug-fix: the sqlite_XXX columns do not have a type
     		     * https://www.sqlite.org/datatype3.html
                  * 3.1. Determination Of Column Affinity
-                 * If the declared type for a column contains the string "BLOB" or if no type is specified then the column has affinity BLOB.
+                 * If the declared type for a column contains the string "BLOB" or if no type is specified, then the column has affinity BLOB.
     		     */
-    		    if (coltypes.size() == 0)
+    		    if (coltypes.isEmpty())
     		    {
     		    	for(int i =0; i < colnames.size(); i++)
     		    	{
@@ -555,8 +535,8 @@ public class SimpleSQLiteParser {
 				 *	
 			     *	3.1. Determination Of Column Affinity
 				 *	
-				 *	If the declared type for a column contains the string "BLOB" or if no type is specified then the column has affinity BLOB.
-				 *	So we can assume that default type is a BLOB.
+				 *	If the declared type for a column contains the string "BLOB" or if no type is specified, then the column has affinity BLOB.
+				 *	So we can assume that the default type is a BLOB.
     		     */
     		    if (coltypes.size() > sqltypes.size())
     		    {
@@ -604,8 +584,7 @@ public class SimpleSQLiteParser {
 	        		
   
         		tds = new TableDescriptor(tablename,stmt,sqltypes,coltypes,colnames,colconstraints,tableconstraint,pattern,stmt.contains("WITHOUT ROWID"));
-        		System.out.println("PATTTERN: " + pattern);
-        		
+
         	}
         	
         	
@@ -616,10 +595,10 @@ public class SimpleSQLiteParser {
 	
 	
 	/**
-	 * Find out if there is any type information (key word) in
+	 * Find out if there is any type of information (keyword) in
 	 * the substring 
-	 * @param s the string, that should be parsed. 
-	 * @return  the type (INT, TEXT, REAL etc.)
+	 * @param s the string that should be parsed.
+	 * @return  the type (INT, TEXT, REAL, etc.)
 	 */
 	private String getType(String s)
 	{

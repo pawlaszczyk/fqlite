@@ -3,7 +3,7 @@ package fqlite.util;
 import java.util.LinkedList;
 
 /**
- * Container class. It is used to return some result from 
+ * Container class. It is used to return a result from
  * carving back to the calling thread. 
  * 
  * @author pawlaszc

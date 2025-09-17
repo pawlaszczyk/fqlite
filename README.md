@@ -16,7 +16,7 @@ FQLite is a tool to find and restore deleted records in SQLite databases. It the
 
 FQLite allows you to:
 * browse and recover the content of freelist pages
-* recover records in all database pages including unallocated space and free blocks!
+* recover records in all database pages, including unallocated space and free blocks!
 * support of UTF-8,UTF-16BE,UTF-16LE encoded databases
 * support for multi-byte columns as well as overflow pages
 * recover dropped tables
@@ -24,10 +24,10 @@ FQLite allows you to:
 * support for Rollback-Journals and WAL-Archives
 * integrated Hex-Viewer
 * support a forensically sound investigation of database files
-* support for decoding of bplist, protobuffer and BASE64 encoded cell values
+* support for decoding of bplist, protobuf and BASE64 encoded cell values
 * automatic detection of different BLOB types like .png, .bmp, .gif, .jpeg, .tiff, .heic, .pdf
-* analyzing BLOB formats like google protobuffer, AVRO, Apple plist, Thrift,... 
-* integrated SQL-Analyzer 
+* analysing BLOB formats like Google protobuf, AVRO, Apple plist, Thrift,... 
+* integrated SQL-Analyser 
 * Displaying database PRAGMA values
 
 Some features:
@@ -45,11 +45,11 @@ Some features:
 
 ### Official Project Webpage
 
-Check out the the official project homepage
+Check out the official project homepage
 
 https://www.staff.hs-mittweida.de/~pawlaszc/fqlite/                          
 
-### Official User guide
+### Official User Guide
 
 You can find the current version of the user manual under the following link: 
 
@@ -84,25 +84,16 @@ In the latest version, the FQLite is bundled with a Java Runtime Environment (JR
 3. You can now launch FQLite from the Applications folder.
 
 ## Important node: 
-If you try to open an app by an unknown developer and you see a warning dialog on your Mac.
-A dialog is displayed saying that the app is damaged. In fact, the app is simply not signed 
+If you try to open an app by an unknown developer, and you see a warning dialogue on your Mac.
+A dialogue is displayed saying that the app is damaged. In fact, the app is simply not signed 
 with a developer certificate. For this reason, Gatekeeper refuses to execute. 
-The first method will allow a single program to run, without having to disable Gatekeeper. 
+The first method will allow a single program to run without having to disable Gatekeeper. 
 Open a terminal and run the following command:
 
 ```bash
-sudo  xattr -dr com.apple.quarantine /Applications/fqlite.app
+sudo xattr -dr com.apple.quarantine /Applications/fqlite.app
 ```
 The app should then start without any further complaints. 
-
-### Installation via Homebrew
-
-1. Open the Terminal.
-2. Install FQLite with the following command:
-
-```bash
-brew install --cask bocian67/fqlite/fqlite
-```
 
 3. After installation, FQLite can be launched directly from the Applications folder.
 
@@ -113,17 +104,6 @@ brew install --cask bocian67/fqlite/fqlite
 2. Run the .exe file and follow the installation instructions.
 3. After installation, FQLite can be opened from the Start menu.
 
-### Installation via Chocolatey
-
-1. Download the .nupkg file for FQLite from the Release page.
-2. Open Command Prompt or PowerShell with administrator privileges.
-3. Install FQLite using the following command:
-
-```bash
-choco install fqlite --source ./fqlite.nupkg
-```
-
-4. After installation, FQLite can be opened from the Start menu.
 
 ## Linux
 ### Installation via .deb File

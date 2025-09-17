@@ -50,8 +50,8 @@ import javafx.embed.swing.SwingFXUtils;
 import javafx.scene.image.Image;
 
 /**
- * This class offers a number of useful methods that are needed from time to
- * time for the acquisition process.
+ * This class offers several useful methods that are needed from time to time
+ * for the acquisition process.
  * 
  * @author pawlaszc
  *
@@ -59,7 +59,6 @@ import javafx.scene.image.Image;
 public class Auxiliary{
 
 	public AtomicInteger found = new AtomicInteger();
-	public AtomicInteger inrecover = new AtomicInteger();
 
 	public static final String TABLELEAFPAGE = "0d";
 	public static final String TABLEINTERIORPAGE = "05";
@@ -75,10 +74,9 @@ public class Auxiliary{
 	 * Get the type of page. There are 4 different basic types in SQLite: (1)
 	 * component-leaf (2) component-interior (3) indices-leaf and (4)
 	 * indices-interior.
-	 * 
-	 * Beside this, we can further find overflow pages and removed pages. Both start
+	 * Besides this, we can further find overflow pages and removed pages. Both start
 	 * with the 2-byte value 0x00.
-	 * 
+     *
 	 * @param content the page content as a String
 	 * @return type of page
 	 */
@@ -116,8 +114,8 @@ public class Auxiliary{
 	}
 
 	/**
-	 * Constructor. To return values to the calling job environment, an object
-	 * reference of job object is required.
+	 * Constructor. To return values to the calling job environment,
+     * An object reference of the job object is required.
 	 * 
 	 * @param job
 	 */
@@ -129,11 +127,11 @@ public class Auxiliary{
 	 * An important step in data recovery is the analysis of the database schema.
 	 * This method allows to read in the schema description into a ByteBuffer.
 	 * 
-	 * @param job
-	 * @param start
-	 * @param buffer
-	 * @param header
-	 * @throws IOException
+	 * @param job the job object
+	 * @param start byte position to start
+	 * @param buffer  the actual database inside the buffer
+	 * @param header the header string
+	 * @throws IOException if something goes wrong
 	 */
 	public boolean readMasterTableRecord(Job job, long start, BigByteBuffer buffer, String header) throws IOException {
 
@@ -336,16 +334,13 @@ public class Auxiliary{
 
 
 	/**
-	 * This method is used to extract a previously deleted record in unused space a
-	 * page.
-	 * 
-	 * @param buffer     a ByteBuffer with the data page to analyze.
-	 * @param header     the record header bytes including header length and serial
-	 *                   types.
+	 * This method is used to extract a previously deleted record from unused space.
+	 *
+	 * @param buffer a ByteBuffer with the data page to analyse.
 	 * @param bs         a data structure that is used to record which areas have
 	 *                   already been searched
-	 * @param pagenumber the number of the page we going to analyze
-	 * @return
+	 * @param pagenumber the number of the page we are going to analyse
+	 * @return the result object
 	 * @throws IOException if something went wrong during read-up.
 	 */
 	public CarvingResult readDeletedRecordNew(Job job, ByteBuffer buffer, BitSet bs, Match m, Match next,
@@ -353,7 +348,7 @@ public class Auxiliary{
 
 		//System.out.println("readDeletedRecordNew() - Entry");
 		
-		LinkedList<String> record = new LinkedList<String>();
+		LinkedList<String> record = new LinkedList<>();
 		List<SqliteElement> columns;
 		int rowid = -1;
 
@@ -560,7 +555,7 @@ public class Auxiliary{
 					
 					String tablecelltext = en.getBLOB(value,true);
 					
-					if(tablecelltext.length() > 0) 
+					if(!tablecelltext.isEmpty())
 				    {
 						record.add("[BLOB-" + blobcolidx + "] " + tablecelltext + "..");	
 						storeBLOB(record, blobcolidx, tablecelltext,value,2);
@@ -613,7 +608,7 @@ public class Auxiliary{
 						//if(isVT);
 
 						String tablecelltext = en.getBLOB(value,true);
-					    if(tablecelltext.length() > 0) 
+					    if(!tablecelltext.isEmpty())
 					    {
 					    	String vv = "[BLOB-" + blobcolidx + "] " + tablecelltext;
 					        if(tablecelltext.length() > 32)
@@ -702,7 +697,7 @@ public class Auxiliary{
 									//if(isVT);
 									
 									String tablecelltext = en.getBLOB(value,true);
-								    if(tablecelltext.length() > 0) 
+								    if(!tablecelltext.isEmpty())
 								    {
 										record.add("[BLOB-" + blobcolidx + "] " + tablecelltext + "..");	
 										storeBLOB(record, blobcolidx, tablecelltext,value,0);
@@ -729,7 +724,7 @@ public class Auxiliary{
 							//if(isVT);
 							
 							String tablecelltext = en.getBLOB(value,true);
-						    if(tablecelltext.length() > 0) 
+						    if(!tablecelltext.isEmpty())
 						    {
 								record.add("[BLOB-" + blobcolidx + "] " + tablecelltext + "..");	
 								storeBLOB(record, blobcolidx, tablecelltext,value,0);
@@ -837,14 +832,11 @@ public class Auxiliary{
 	
 	/**
 	 * This method can be used to read an active data record.
-	 * 
 	 * A regular cell has the following structure
-	 * 
 	 * [Cell Size / Payload][ROW ID] [Header Size][Header Columns] [Data] varint
 	 * varint varint varint ...
-	 * 
-	 * We only need to parse the headerbytes including the serial types of each
-	 * column. Afterwards we can read each data cell of the tablerow and convert
+	 * We only need to parse the header bytes including the serial types of each
+	 * column. Afterwards, we can read each data cell of the table row and convert
 	 * into an UTF8 string.
 	 * 
 	 * 
@@ -856,7 +848,7 @@ public class Auxiliary{
 		/* we use a list to hold the fields of the data record to read */
 		LinkedList<String> record = new LinkedList<String>();
 
-		/* true, if table a therefore record structure of page is unkown */
+		/* true, if table a, therefore record structure of page is unknown */
 		boolean unkown = false;
 		boolean isVT = false;		
 		int rowid_col = -1;
@@ -1669,10 +1661,11 @@ public class Auxiliary{
 	
 	
 	/**
-	 * Convert a SQL-TIMESTAMP value into a human readable format.
+	 * Convert a SQL-TIMESTAMP value into a human-readable format.
 	 * 
-	 * @param original
-	 * @return
+	 * @param en the SQL element (with type description)
+     * @param value the byte array from the db
+     * @return the timestamp string
 	 */
 	private TimeStamp timestamp2String(SqliteElement en, byte[] value) {
 
@@ -2666,17 +2659,17 @@ public class Auxiliary{
      * Read an integer stored in variable-length format using zig-zag decoding from
      * <a href="http://code.google.com/apis/protocolbuffers/docs/encoding.html"> Google Protocol Buffers</a>.
      *
-     * @param array to read from
-     * @return a array of all integers read
+     * @param values to read from
+     * @return an array of all integers read
      *
-     * If variable-length value does not terminate after 5 bytes have been read the complete result is
+     * If a variable-length value does not terminate after 5 bytes have been read, the complete result is
      * discarded.
      */
     public synchronized static int[] readVarInt_test(byte[] values) {
     	 	  
     	    int number = 0;
      
-    		/* iterate over the complete value array byte wise*/
+    		/* iterate over the complete value array byte-wise*/
 	    	for(int c = 0; c < values.length; c++) {
 		        int value = 0;
 		        int i = 0;
@@ -2730,9 +2723,9 @@ public class Auxiliary{
      }
     
     /**
- 	 * Read a variable length integer from the supplied ByteBuffer
+ 	 * Read a variable-length integer from the supplied ByteBuffer
  	 * 
- 	 * @param in buffer to read from
+ 	 * @param values buffer to read from
  	 * @return the int value
  	 */
  	public static int[] readVarInt_alt(byte[] values) {
@@ -2767,9 +2760,9 @@ public class Auxiliary{
     static byte b = 0;
 
 	/**
-	 * Read a variable length integer from the supplied ByteBuffer
+	 * Read a variable-length integer from the supplied ByteBuffer
 	 * 
-	 * @param in buffer to read from
+	 * @param values byte array to read from
 	 * @return the int value
 	 */
 	public static int[] readVarInt(byte[] values) {

@@ -5,6 +5,7 @@ import java.nio.file.FileSystems;
 import fqlite.analyzer.Converter;
 import fqlite.base.Global;
 import fqlite.base.Job;
+import fqlite.log.AppLog;
 import fqlite.util.Auxiliary;
 
 public class Protoc extends Converter{
@@ -48,7 +49,7 @@ public class Protoc extends Converter{
 			}
 			
 		}catch(Exception err){
-			err.printStackTrace();
+            AppLog.error(err.getMessage());
 			return "not a valid buffer, shellscript:" + shellscript + " path: " + path;
 		}
 		

@@ -70,7 +70,7 @@ public class RollbackJournalReader{
 	/* reference to the MAIN class */
 	Job job;
 
-	/* number of page that is currently analyzed */
+	/* number of pages that is currently analysed */
 	int pagenumber_rol;
 	int pagenumber_maindb;
 	
@@ -116,8 +116,8 @@ public class RollbackJournalReader{
 	}
 
 	/**
-	 * This method is the main processing loop. First the header is analyzed.
-	 * Afterwards all write ahead frames are recovered.
+	 * This method is the main processing loop. First, the header is analysed.
+	 * Afterwards, all write-ahead frames are recovered.
 	 * 
 	 * @return
 	 */
@@ -126,7 +126,7 @@ public class RollbackJournalReader{
 
 		
 		/*
-		 * we have to do this before we open the database because of the concurrent
+		 * We have to do this before we open the database because of the concurrent
 		 * access
 		 */
 
@@ -138,7 +138,7 @@ public class RollbackJournalReader{
 			return;
 		}
 
-		/** Caution!!! we read the complete file into RAM **/
+		/** Caution!!! We read the complete file into RAM **/
 		try {
 			readFileIntoBuffer();
 		} catch (IOException e) {
@@ -159,10 +159,10 @@ public class RollbackJournalReader{
 		
 		
 		/*
-		 * In practice when a transaction is committed it seems that the journal 
-		 * header is normally zeroed and the data in the journal remains. 
+		 * In practice, when a transaction is committed, it seems that the journal
+		 * The header is normally zeroed, and the data in the journal remains.
 		 * This is not a problem when it comes to reading each page from 
-		 * the journal as we can obtain the page size from the database itself.
+		 * the journal, as we can obtain the page size from the database itself.
 		 */
 
 		/*******************************************************************/
@@ -227,7 +227,7 @@ public class RollbackJournalReader{
 	    journalpointer = 512; // this is the position, where the first frame should be
 
 
-		/* initialize the BitSet for already visited location within */
+		/* initialise the BitSet for already visited location within */
 
 		visit = new BitSet(ps);
 
@@ -261,7 +261,7 @@ public class RollbackJournalReader{
 			
 			//System.out.println(" Position in RollbackJournal-file " + journalpointer + " " );
 			
-			/*  More pages to analyze ? */
+			/*  More pages to analyse? */
 			if(journalpointer + ps  <= size)
 			{
 				next = true;
@@ -285,7 +285,7 @@ public class RollbackJournalReader{
 			     tablelist.add(FXCollections.observableList(line)); // add row 
 		}
 		
-		// create a new data set since table name occurs for the first time
+		// create a new data set since the table name occurs for the first time
 		else {
 		          ObservableList<ObservableList<String>> tablelist = FXCollections.observableArrayList();
 				  tablelist.add(FXCollections.observableList(line)); // add row 
@@ -294,7 +294,7 @@ public class RollbackJournalReader{
 	}
 
 	/**
-	 * Analyze the actual database page and try to recover regular and deleted content.
+	 * Analyse the actual database page and try to recover regular and deleted content.
 	 * 
 	 * @return int success
 	 */
@@ -319,7 +319,7 @@ public class RollbackJournalReader{
 		 * 
 		 * reason 1:
 		 * 
-		 * It is a dropped page. We have to carve for deleted cells but without cell
+		 * It is a dropped page. We have to carve out for deleted cells, but without the cell
 		 * pointers, cause this list is dropped too or is damaged.
 		 * 
 		 * reason 2:
@@ -334,21 +334,21 @@ public class RollbackJournalReader{
 			 */
 			buffer.position(0);
 			Integer checksum = buffer.getInt();
-			/* was page dropped ? */
+			/* was page dropped? */
 			if (checksum == 0) {
 				System.out.println(" DROPPED PAGE !!!");
 				/* no overflow page -> carve for data records - we do our best! ;-) */
 				carve(content, null);
 			}
 			/*
-			 * otherwise it seems to be a overflow page - however, that is not 100% save !!!
+			 * otherwise it seems to be an overflow page - however, that is not 100% safe!!!
 			 */
 
 			/* we have to leave in any case */
 			return 0;
 		}
 
-		/************** skip unkown page types ******************/
+		/************** skip unknown page types ******************/
 
 		// no leaf page -> skip this page
 		if (type < 0) {
@@ -468,10 +468,10 @@ public class RollbackJournalReader{
 	
 	
 	/**
-	 * Quick lookup. Does a given hex-String starts with Zeros?
+	 * Quick lookup. Does a given hex-string start with Zeros?
 	 * 
 	 * @param s the String to check
-	 * @return true, if zero bytes could be found
+	 * @return true if zero bytes could be found
 	 */
 	static boolean allCharactersZero(String s) {
 		if (!s.startsWith("0000"))
@@ -505,7 +505,7 @@ public class RollbackJournalReader{
 			// we can do something in between or we can do nothing ;-).
 		}
 
-		// set filepointer to begin of the file
+		// set filepointer to the beginning of the file
 		rollbackjournal.position(0);
 
 	}
@@ -513,7 +513,7 @@ public class RollbackJournalReader{
 	/**
 	 * Starting with the current position of the RollbackJournal-ByteBuffer 
 	 * 
-	 * read the next db-page.
+	 * Read the next DB page.
 	 * 
 	 * @return
 	 */
@@ -531,7 +531,7 @@ public class RollbackJournalReader{
 	/**
 	 * This method is called to carve a data page for records.
 	 * 
-	 * @param content page content as hex-string
+	 * @param content page content as hex string
 	 */
 	public void carve(ByteBuffer buffer, String content, Carver crv) {
 
@@ -539,7 +539,7 @@ public class RollbackJournalReader{
 
 		if (null == c)
 			/* no type could be found in the first two bytes */
-			/* Maybe the whole page was drop because of a drop component command ? */
+			/* Maybe the whole page was dropped because of a drop component command? */
 			/* start carving on the complete page */
 			c = new Carver(job, buffer, content, visit, ps);
 
@@ -584,7 +584,7 @@ public class RollbackJournalReader{
 			String tablename = tab.get(n).tblname;
 			if (tablename.startsWith("__FREELIST"))
 				continue;
-			/* create matcher object for constrain check */
+			/* create matcher object for constraint check */
 			SerialTypeMatcher stm = new SerialTypeMatcher(buffer);
 
 			gaps = findGaps();
@@ -594,7 +594,7 @@ public class RollbackJournalReader{
 				Gap next = gaps.get(a);
 
 				if (next.to - next.from > 10)
-					/* do we have at least one match ? */
+					/* do we have at least one match? */
 					if (c.carve(next.from + 4, next.to, stm, CarverTypes.NORMAL, tab.get(n)) != Global.CARVING_ERROR) {
 						AppLog.debug("*****************************  STEP NORMAL finished with matches");
 
@@ -630,22 +630,22 @@ public class RollbackJournalReader{
 			 * When a record deletion occurs, the first 2 bytes of the cell are set to the
 			 * offset value of next free block and latter 2 bytes covers the length of the
 			 * current free block. Because of this, the first 4 bytes of a deleted cell
-			 * differ startRegion the normal data. Accordingly, we need a different approach
+			 * differ startRegion from the normal data. Accordingly, we need a different approach
 			 * to recover the data records.
 			 * 
-			 * In most cases, at least the header length information is overwritten. Boyond
-			 * this, sometimes, also the first column type field is overwritten too.
+			 * In most cases, at least the header length information is overwritten.
+			 * This, sometimes, also overwrites the first column type field.
 			 * 
-			 * We have to cases:
+			 * We have two cases:
 			 * 
 			 * (1) only the first column of the header is missing, but the rest of the
 			 * header is intact.
 			 * 
-			 * (2) both header length field plus first column are overwritten.
+			 * (2) Both the header length field plus the first column are overwritten.
 			 * 
 			 * [cell size | rowid | header size | header bytes | payload ]
 			 * 
-			 * for a deleted cell is looks maybe like this
+			 * for a deleted cell looks maybe like this
 			 * 
 			 * [offset of next free block | length of the current free block | ]
 			 */
@@ -670,7 +670,7 @@ public class RollbackJournalReader{
 	
 	/**
 	 *  This method can be used to write the result to a file or
-	 *  to update tables in the user interface (in gui-mode). 
+	 *  to update tables in the user interface (in GUI mode).
 	 */
 	public void output()
 	{
@@ -693,7 +693,7 @@ public class RollbackJournalReader{
 			   	if (line.getFirst().trim().length()==0)
 			   	{
 			 
-			        // Add the new element add the begin 
+			        // Add the new element add the beginning
 			       // line.set(0,"__FREELIST"); 			   	
 			   	}
 				
@@ -725,11 +725,11 @@ public class RollbackJournalReader{
 			
 			Enumeration<String> tables = dataSets.keys();
 			
-			/* finally we can update the TableView for each table */
+			/* finally, we can update the TableView for each table */
 			while(tables.hasMoreElements())
 			{	
 				String tablename = tables.nextElement();
-		        /* get tree path i.e. /data bases/02-05.db/users */
+		        /* get tree path, i.e. /data bases/02-05.db/users */
 				String rpath = job.guiroltab.get(tablename);
 				job.gui.update_table(rpath,dataSets.get(tablename),false);
 				
@@ -765,7 +765,7 @@ public class RollbackJournalReader{
 
 		int from = 0;
 
-		/* are there any regions left in the page ? */
+		/* Are there any regions left in the page? */
 		for (int i = 0; i < ps; i++) {
 
 			if (!visit.get(i)) {
@@ -808,7 +808,7 @@ public class RollbackJournalReader{
 	/**
 	 * This method is called to carve a data page for records.
 	 * 
-	 * @param content page content as hex-string
+	 * @param content page content as hex string
 	 */
 	public void carve(String content, Carver crv) {
 
@@ -816,7 +816,7 @@ public class RollbackJournalReader{
 
 		if (null == c)
 			/* no type could be found in the first two bytes */
-			/* Maybe the whole page was drop because of a drop component command ? */
+			/* Maybe the whole page was dropped because of a drop component command? */
 			/* start carving on the complete page */
 			c = new Carver(job, buffer, content, visit, pagenumber_maindb);
 
@@ -862,7 +862,7 @@ public class RollbackJournalReader{
 			AppLog.debug("Check component : " + tablename);
 			if (tablename.startsWith("__FREELIST"))
 				continue;
-			/* create matcher object for constrain check */
+			/* create matcher object for constraint check */
 			SerialTypeMatcher stm = new SerialTypeMatcher(buffer);
 
 			gaps = findGaps();
@@ -872,7 +872,7 @@ public class RollbackJournalReader{
 				Gap next = gaps.get(a);
 
 				if (next.to - next.from > 10)
-					/* do we have at least one match ? */
+					/* do we have at least one match? */
 					if (c.carve(next.from + 4, next.to, stm, CarverTypes.NORMAL, tab.get(n)) != Global.CARVING_ERROR) {
 						AppLog.debug("*****************************  STEP NORMAL finished with matches");
 

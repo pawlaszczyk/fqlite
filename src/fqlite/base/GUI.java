@@ -1,7 +1,6 @@
 package fqlite.base;
 
 import java.awt.AWTException;
-import java.awt.Font;
 import java.awt.SystemTray;
 import java.awt.Taskbar;
 import java.awt.TrayIcon;
@@ -18,21 +17,13 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
-import java.util.ArrayList;
-import java.util.Comparator;
-import java.util.Hashtable;
-import java.util.Iterator;
-import java.util.LinkedList;
-import java.util.List;
-import java.util.Properties;
+import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.CountDownLatch;
+import java.util.logging.Level;
 
-import javax.swing.ImageIcon;
-import javax.swing.UIManager;
-import javax.swing.tree.TreeNode;
-import javax.swing.tree.TreePath;
+import javax.swing.*;
 
+import javafx.scene.control.*;
 import org.apache.commons.lang3.StringUtils;
 
 import fqlite.analyzer.ConverterFactory;
@@ -41,7 +32,6 @@ import fqlite.analyzer.avro.Avro;
 import fqlite.analyzer.javaserial.Deserializer;
 import fqlite.analyzer.pblist.BPListParser;
 import fqlite.descriptor.TableDescriptor;
-import fqlite.export.DBExportWindow;
 import fqlite.log.AppLog;
 import fqlite.sql.SQLWindow;
 import fqlite.types.BLOBElement;
@@ -79,41 +69,15 @@ import javafx.event.EventHandler;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
 import javafx.scene.Scene;
-import javafx.scene.control.Alert;
 import javafx.scene.control.Alert.AlertType;
-import javafx.scene.control.Button;
-import javafx.scene.control.CheckMenuItem;
-import javafx.scene.control.ComboBox;
-import javafx.scene.control.ContextMenu;
-import javafx.scene.control.Label;
-import javafx.scene.control.Menu;
-import javafx.scene.control.MenuBar;
-import javafx.scene.control.MenuItem;
-import javafx.scene.control.ScrollPane;
-import javafx.scene.control.SelectionMode;
-import javafx.scene.control.SeparatorMenuItem;
-import javafx.scene.control.SplitPane;
-import javafx.scene.control.TableColumn;
 import javafx.scene.control.TableColumn.CellDataFeatures;
-import javafx.scene.control.TablePosition;
-import javafx.scene.control.TableView;
-import javafx.scene.control.TextArea;
-import javafx.scene.control.TextField;
-import javafx.scene.control.ToolBar;
-import javafx.scene.control.Tooltip;
-import javafx.scene.control.TreeItem;
-import javafx.scene.control.TreeView;
-import javafx.scene.control.cell.TextFieldTableCell;
 import javafx.scene.image.Image;
 import javafx.scene.image.ImageView;
 import javafx.scene.input.ClipboardContent;
-import javafx.scene.input.ContextMenuEvent;
-import javafx.scene.input.DragEvent;
 import javafx.scene.input.Dragboard;
 import javafx.scene.input.KeyCode;
 import javafx.scene.input.KeyCodeCombination;
 import javafx.scene.input.KeyCombination;
-import javafx.scene.input.KeyEvent;
 import javafx.scene.input.MouseButton;
 import javafx.scene.input.TransferMode;
 import javafx.scene.layout.Background;
@@ -131,7 +95,6 @@ import javafx.stage.Screen;
 import javafx.stage.Stage;
 import javafx.util.Callback;
 import javafx.util.Duration;
-import javafx.util.converter.DefaultStringConverter;
 
 /*
     ---------------
@@ -162,13 +125,9 @@ import javafx.util.converter.DefaultStringConverter;
 /**
  * This class offers a basic graphical user interface. It is based on JavaFX 
  * and extends the class <code>Application</code>.
- * 
  * Most of the decoration code was generated manually.
- * 
- * If you want to start FQLite in aphic-mode you have to call this class. 
- * 
+ * If you want to start FQLite in graphic mode, you have to call this class.
  * It contains a main()-function.
- * 
  *     __________    __    _ __     
  *    / ____/ __ \  / /   (_) /____ 
  *   / /_  / / / / / /   / / __/ _ \
@@ -189,47 +148,29 @@ public class GUI extends Application {
 	
 	public static int pos = 0;
 	
-	public static final CountDownLatch latch = new CountDownLatch(1);
    	public static GUI mainwindow;
-	public ConcurrentHashMap<String, javafx.scene.Node> tables = new ConcurrentHashMap<String, javafx.scene.Node>();
-	private Hashtable<Object, String> rowcolors = new Hashtable<Object, String>();
+	public ConcurrentHashMap<String, javafx.scene.Node> tables = new ConcurrentHashMap<>();
+	private final Hashtable<Object, String> rowcolors = new Hashtable<>();
 
 	public Hashtable<String,ObservableList<ObservableList<String>>> datasets = new Hashtable<>(); 
 	
 	protected ContextMenu cm = null;
-	protected TextArea logwindow;
 	protected MenuBar menuBar;
 	
-	public List<String> dbnames = new ArrayList<String>();
+	public List<String> dbnames = new ArrayList<>();
 	
-	public static ScrollPane CellDetailsScrollPane;
-	VBox table_panel_with_filter;
 	SplitPane splitPane;
 	final StackPane leftSide = new StackPane();
     final VBox rightSide = new VBox();
     public static HexViewManager HEXVIEW = HexViewManager.getInstance();
     
-	/* search filter */
-	TextField currentFilter = null;
-	HBox head;
     int datacounter = 0;
-	
-	static GUI app;
-	static TreeView<NodeObject> tree;
+    static TreeView<NodeObject> tree;
 	TreeItem<NodeObject>  walNode;
 	TreeItem<NodeObject>  rjNode;
-
-	public static Font ttfFont = null;
-
-	TreeItem<NodeObject>  root = new TreeItem<NodeObject>(new NodeObject("Databases",true));
+	TreeItem<NodeObject>  root = new TreeItem<>(new NodeObject("Databases", true));
     
-	ConcurrentHashMap<String, TreeItem<NodeObject>> treeitems  = new ConcurrentHashMap<String, TreeItem<NodeObject>>();
-	
-	String lasthit = "";
-	int lasthitrow = 0;
-	int lasthitcol = 0;
-
-	File lastDir = null;
+	ConcurrentHashMap<String, TreeItem<NodeObject>> treeitems  = new ConcurrentHashMap<>();
 
 	ImageIcon facewink;
 	ImageIcon findIcon;
@@ -245,31 +186,39 @@ public class GUI extends Application {
 	public static VBox  topContainer;
 	
 	SQLWindow sqlAnalyzer = null;
-	
-	Font appFont = null;
-	
-	/**
+
+    /* Buttons for toolbar */
+    Button btnSQL;
+    Button btnExport;
+    Button btnExportDB;
+    Button hexViewBtn;
+
+    
+    MenuItem cmExport;
+    MenuItem mntmExportDB;
+    MenuItem mntmHex;
+    MenuItem mntmSQL;
+
+  	/**
 	 * Launch the graphic front-end with this method.
 	 */
     public static void main(String[] args) {
    	
-		/**
+		/*
 		  * This is needed because only one main class can be called in an
 		  * executable jar archive. 
 		  * 
-		  **/
+		  */
 		if (args.length > 0)
 		{			     
-			// There is a least one parameter -> check, if nogui-option is set
-            String option = args[0];
-			
-            // take the first argument - if there is one - an put to global variables
-            Global.WORKINGDIRECTORY = option;
+			// There is a least one parameter -> check if nogui-option is set
+            // take the first argument - if there is one - put to the global variables
+            Global.WORKINGDIRECTORY = args[0];
             
 		}
 		
 	
-		ImageIcon img = new ImageIcon(GUI.class.getResource("/logo.png"));
+		ImageIcon img = new ImageIcon(Objects.requireNonNull(GUI.class.getResource("/logo.png")));
 		
 		
 	 	SystemTray st = SystemTray.getSystemTray();
@@ -299,24 +248,6 @@ public class GUI extends Application {
 		
     }
     
-    
-
-	/**
-	 * Set the TTF-font for the user interface. 
-	 * @param f the font we want to set. 
-	 */
-	public static void setUIFont(javax.swing.plaf.FontUIResource f) {
-		java.util.Enumeration<Object> keys = UIManager.getDefaults().keys();
-		while (keys.hasMoreElements()) {
-			Object key = keys.nextElement();
-			Object value = UIManager.get(key);
-			if (value instanceof javax.swing.plaf.FontUIResource)
-				UIManager.put(key, f);
-		}
-	}
-	
-	
-	
 
 	/**
 	 * Constructor of the user interface class. 
@@ -335,14 +266,14 @@ public class GUI extends Application {
 		baseDir = new File(System.getProperty("user.home"), ".fqlite");
 
 		//Attach the icon to the stage/window
-	    stage.getIcons().add(new Image(GUI.class.getResourceAsStream("/logo.png")));
+	    stage.getIcons().add(new Image(Objects.requireNonNull(GUI.class.getResourceAsStream("/logo.png"))));
 	 	  
 		
-		/* create hidden directory inside users home */
+		/* create hidden directory inside the user's home */
 		Path pp = Path.of(baseDir.getAbsolutePath());
         System.out.println("FQlite home::" + baseDir.getAbsolutePath());
 		if (!Files.exists(pp)) {
-			// path does not exist in the moment -> create a new hidden folder
+			// path does not exist at the moment -> create a new hidden folder
 			baseDir.mkdir();
 		}
 		
@@ -355,29 +286,29 @@ public class GUI extends Application {
 	
 		rootPane.setBackground(new Background(new BackgroundFill(Color.WHITE, CornerRadii.EMPTY, Insets.EMPTY)));
 
-		
-		String s = GUI.class.getResource("/leaf.jpg").toExternalForm();
+		// /leaf.jpg
+		String s = Objects.requireNonNull(GUI.class.getResource("/green_root24.png")).toExternalForm();
 		ImageView iv = new ImageView(s);
 		root.setGraphic(iv);
         root.setExpanded(true);
 			
-		URL url = GUI.class.getResource("/find.png");
-		findIcon = new ImageIcon(url);
+		URL url = GUI.class.getResource("/gray_schema32.png");
+        assert url != null;
+        findIcon = new ImageIcon(url);
 		
-
 		MenuItem mntopen = new MenuItem("Open Database...");
 		mntopen.setAccelerator(KeyCombination.keyCombination("Ctrl+O"));
 		mntopen.setOnAction(e -> open_db(null));
 
-		MenuItem mntmExport = new MenuItem("Export Node to CSV...");
-		mntmExport.setAccelerator(KeyCombination.keyCombination("Ctrl+X"));
-		mntmExport.setOnAction(e -> doExport());
+		cmExport = new MenuItem("Export Node to CSV...");
+		cmExport.setAccelerator(KeyCombination.keyCombination("Ctrl+X"));
+        cmExport.setDisable(true);
+		cmExport.setOnAction(e -> doExport());
 		
-		MenuItem mntmExportDB = new MenuItem("Export db to SQLite...");
-		mntmExportDB.setOnAction( e -> {
-			showDBExportWindow();
-		});
-		
+		mntmExportDB= new MenuItem("Export to a new SQLite database");
+		mntmExportDB.setOnAction( e -> doExportDB());
+		mntmExportDB.setDisable(true);
+
 		MenuItem mntclose = new MenuItem("Close All");
 		mntclose.setAccelerator(KeyCombination.keyCombination("Ctrl+D"));
 		mntclose.setOnAction(e -> closeAll());
@@ -391,7 +322,7 @@ public class GUI extends Application {
 		
 		MenuItem mntFont= new MenuItem("Font...");
 		mntFont.setOnAction(e -> {
-				javafx.scene.text.Font fff = javafx.scene.text.Font.font(Global.font_name, FontPosture.findByName(Global.font_style),Double.valueOf(Global.font_size));
+				javafx.scene.text.Font fff = javafx.scene.text.Font.font(Global.font_name, FontPosture.findByName(Global.font_style),Double.parseDouble(Global.font_size));
 				System.out.println(fff.toString());
 				
 				FontDialog fdia = new FontDialog(fff,topContainer);
@@ -400,29 +331,21 @@ public class GUI extends Application {
 		);
 
 		MenuItem mntmLog = new MenuItem("View Log...");
-		mntmLog.setOnAction( e -> {
-			showLog();
-		});
-		
+		mntmLog.setOnAction( e -> showLog());
 		
 		MenuItem mntmProp = new MenuItem("Settings...");
-		mntmProp.setOnAction( e -> {
-			showPropertyWindow();
-		});
+		mntmProp.setOnAction( e -> showPropertyWindow());
 		
-		MenuItem mntmSQL = new MenuItem("SQL Analyzer...");
-		mntmSQL.setOnAction( e -> {
-			showSqlWindow();
-		});
-		
-	
-		
-		
+		mntmSQL = new MenuItem("SQL-Analyzer...");
+		mntmSQL.setDisable(true);
+        mntmSQL.setOnAction( e -> showSqlWindow());
+
+        mntmHex = new MenuItem("Hex-Viewer...");
+        mntmHex.setDisable(true);
+        mntmHex.setOnAction( e-> openHexViewer());
 		
 		MenuItem mntmHelp = new MenuItem("Help");
-		mntmHelp.setOnAction(e -> {
-				showHelp();
-			}
+		mntmHelp.setOnAction(e -> showHelp()
 		);
 		
 	
@@ -430,27 +353,30 @@ public class GUI extends Application {
 		SeparatorMenuItem sep2 = new SeparatorMenuItem();
 
 		Menu mnFiles = new Menu("File");
-		Menu mnAnalyze = new Menu("Analyze");
-		Menu mnInfo = new Menu("Info");
+		Menu mnExport = new Menu("Export");
+        Menu mnAnalyze = new Menu("Analyze");
+        Menu mnInfo = new Menu("Info");
 
-		mnFiles.getItems().addAll(mntopen,mntmExport,sep,mntclose,sep2,mntmProp,mntmExit);
-        mnAnalyze.getItems().addAll(mntmSQL);
+		mnFiles.getItems().addAll(mntopen,sep,mntclose,sep2,mntmProp,mntmExit);
+        mnExport.getItems().addAll(cmExport,mntmExportDB);
+        mnAnalyze.getItems().addAll(mntmSQL,mntmHex);
 		mnInfo.getItems().addAll(mntmHelp,mntmLog,mntFont,mntAbout);
 		
 		
 		/* MenuBar */
 		menuBar = new MenuBar();
-		menuBar.getMenus().addAll(mnFiles,mnAnalyze,mnInfo);
+		menuBar.getMenus().addAll(mnFiles,mnExport,mnAnalyze,mnInfo);
 	    	
 		splitPane = new SplitPane();
 
-		s = GUI.class.getResource("/root.png").toExternalForm();
-		Button starthere = new Button();
-		starthere.setMaxSize(200, 200);
-		
+		s = Objects.requireNonNull(GUI.class.getResource("/blue_dragdrop.png")).toExternalForm();
+		Label starthere = new Label();
+        starthere.setMaxSize(200, 200);
+		starthere.setTooltip(new Tooltip("Drag your files here"));
+
 		iv = new ImageView(s);
 		starthere.setGraphic(iv);
-		starthere.setOnAction(e->open_db(null));
+		//starthere.setOnAction(e->open_db(null));
 		rootPane.setAlignment(Pos.CENTER);
 		rootPane.getChildren().add(starthere);
 		rootPane.setPrefHeight(4000);
@@ -464,95 +390,124 @@ public class GUI extends Application {
 	    SplitPane.setResizableWithParent(rightSide, true);
 
 		ToolBar toolBar = new ToolBar();
-		
-	    s = GUI.class.getResource("/openDB_gray.png").toExternalForm();
+
+        //openDB_gray.png
+	    s = Objects.requireNonNull(GUI.class.getResource("/gray_open24.png")).toExternalForm();
 		Button btnOeffne = new Button();
 		iv = new ImageView(s);
 		btnOeffne.setGraphic(iv);
 		btnOeffne.setOnAction(e->open_db(null));
-		btnOeffne.setTooltip(new Tooltip("open database file"));
+		btnOeffne.setTooltip(new Tooltip("Open database file"));
 		toolBar.getItems().add(btnOeffne);
 
-		s = GUI.class.getResource("/export_gray.png").toExternalForm();
-		Button btnExport = new Button();
-		iv = new ImageView(s);
-		btnExport.setGraphic(iv);
-		btnExport.setOnAction(e->doExport());
-		btnExport.setTooltip(new Tooltip("export data base to file"));
-		toolBar.getItems().add(btnExport);
+        //closeDB_gray.png
+        s = Objects.requireNonNull(GUI.class.getResource("/gray_closeall24.png")).toExternalForm();
+        Button btnClose = new Button();
+        iv = new ImageView(s);
+        btnClose.setGraphic(iv);
+        btnClose.setTooltip(new Tooltip("Close All"));
+        toolBar.getItems().add(btnClose);
+        btnClose.setOnAction(e->closeAll());
 
-		s = GUI.class.getResource("/closeDB_gray.png").toExternalForm();
-		Button btnClose = new Button();
-		iv = new ImageView(s);
-		btnClose.setGraphic(iv);
-		btnClose.setTooltip(new Tooltip("close All"));
-		toolBar.getItems().add(btnClose);
-		btnClose.setOnAction(e->closeAll());
+        toolBar.getItems().add(new Separator());
 
-		s = GUI.class.getResource("/helpcontent_gray.png").toExternalForm();
+        //hex-32.png
+        s = Objects.requireNonNull(GUI.class.getResource("/gray_hex24.png")).toExternalForm();
+        hexViewBtn = new Button();
+        iv = new ImageView(s);
+        hexViewBtn.setGraphic(iv);
+        hexViewBtn.setDisable(true);
+        hexViewBtn.setTooltip(new Tooltip("Show database in HexView"));
+        hexViewBtn.setOnAction(e-> openHexViewer());
+        toolBar.getItems().add(hexViewBtn);
+
+        // sql.png
+        s = Objects.requireNonNull(GUI.class.getResource("/gray_analyzer24.png")).toExternalForm();
+        btnSQL = new Button();
+        iv = new ImageView(s);
+        btnSQL.setGraphic(iv);
+        btnSQL.setDisable(true);
+        btnSQL.setTooltip(new Tooltip("Open SQL-Analyzer"));
+        toolBar.getItems().add(btnSQL);
+        btnSQL.setOnAction(e->showSqlWindow());
+
+        toolBar.getItems().add(new Separator());
+
+        //export_gray.png
+        s = Objects.requireNonNull(GUI.class.getResource("/gray_csv24.png")).toExternalForm();
+        btnExport = new Button();
+        iv = new ImageView(s);
+        btnExport.setGraphic(iv);
+        btnExport.setOnAction(e->doExport());
+        btnExport.setDisable(true);
+        btnExport.setTooltip(new Tooltip("Export database to CSV"));
+        toolBar.getItems().add(btnExport);
+        //   document-save-as.png
+        s = Objects.requireNonNull(GUI.class.getResource("/gray_export24.png")).toExternalForm();
+        btnExportDB = new Button();
+        iv = new ImageView(s);
+        btnExportDB.setGraphic(iv);
+        btnExportDB.setDisable(true);
+        btnExportDB.setOnAction(e->doExportDB());
+        btnExportDB.setTooltip(new Tooltip("Export database to new database"));
+        toolBar.getItems().add(btnExportDB);
+
+        toolBar.getItems().add(new Separator());
+
+        //helpcontent_gray.png
+		s = Objects.requireNonNull(GUI.class.getResource("/gray_help24.png")).toExternalForm();
 		Button about = new Button();
 		iv = new ImageView(s);
 		about.setGraphic(iv);
 		about.setOnAction(e->
-		{
-			showHelp();
-		});
-		
-		s = GUI.class.getResource("/sql.png").toExternalForm();
-		Button btnSQL = new Button();
-		iv = new ImageView(s);
-		btnSQL.setGraphic(iv);
-		btnSQL.setTooltip(new Tooltip("open SQL Analyzer"));
-		toolBar.getItems().add(btnSQL);
-		btnSQL.setOnAction(e->showSqlWindow());
+                showHelp());
 
-		
-		s = GUI.class.getResource("/properties.png").toExternalForm();
+
+		//properties.png
+		s = Objects.requireNonNull(GUI.class.getResource("/gray_settings24.png")).toExternalForm();
 		Button btnProp = new Button();
 		iv = new ImageView(s);
 		btnProp.setGraphic(iv);
-		btnProp.setTooltip(new Tooltip("open setting window"));
+		btnProp.setTooltip(new Tooltip("Open setting window"));
 		toolBar.getItems().add(btnProp);
 		btnProp.setOnAction(e->showPropertyWindow());
 
-		about.setTooltip(new Tooltip("help"));
+		about.setTooltip(new Tooltip("Get help"));
 		toolBar.getItems().add(about);
 
-		s = GUI.class.getResource("/exit3_gray.png").toExternalForm();
+        // exit3_gray.png
+		s = Objects.requireNonNull(GUI.class.getResource("/gray_exit24.png")).toExternalForm();
 		Button btnexit = new Button();
 		iv = new ImageView(s);
 		btnexit.setGraphic(iv);
-		btnexit.setTooltip(new Tooltip("exit"));
+		btnexit.setTooltip(new Tooltip("Exit FQLite"));
 		btnexit.setOnAction(e->{Platform.exit(); System.exit(0);});
 		toolBar.getItems().add(btnexit);
 
-		s = GUI.class.getResource("/hex-32.png").toExternalForm();
-		Button hexViewBtn = new Button();
-		iv = new ImageView(s);
-		hexViewBtn.setGraphic(iv);
-		hexViewBtn.setTooltip(new Tooltip("open database in HexView"));
-		hexViewBtn.setOnAction(e->{	
-			openHexViewer();	
-		});
-		toolBar.getItems().add(hexViewBtn);	
+
 		
 		url = GUI.class.getResource("/facewink.png");
-		facewink = new ImageIcon(url);
+        assert url != null;
+        facewink = new ImageIcon(url);
 
 		url = GUI.class.getResource("/error-48.png");
-		errorIcon = new ImageIcon(url);
+        assert url != null;
+        errorIcon = new ImageIcon(url);
 
 		url = GUI.class.getResource("/information-48.png");
-		infoIcon = new ImageIcon(url);
+        assert url != null;
+        infoIcon = new ImageIcon(url);
 
 		url = GUI.class.getResource("/question-48.png");
-		questionIcon = new ImageIcon(url);
+        assert url != null;
+        questionIcon = new ImageIcon(url);
 
 		url = GUI.class.getResource("/warning-48.png");
-		warningIcon = new ImageIcon(url);
+        assert url != null;
+        warningIcon = new ImageIcon(url);
 
 		
-		/**
+		/*
 		    Bring together all components:
 		 */
 		topContainer = new VBox();
@@ -563,65 +518,70 @@ public class GUI extends Application {
 	    VBox.setVgrow(splitPane, Priority.ALWAYS);
         
 		
-		stage.showingProperty().addListener(new ChangeListener<Boolean>() {
+		stage.showingProperty().addListener(new ChangeListener<>() {
 
-		    @Override
-		    public void changed(ObservableValue<? extends Boolean> observable, Boolean oldValue, Boolean newValue) {
-		        if (newValue) {
-		            splitPane.setDividerPositions(0.25f);
-		            observable.removeListener(this);
-		    	    //rightSide.autosize();
+            @Override
+            public void changed(ObservableValue<? extends Boolean> observable, Boolean oldValue, Boolean newValue) {
+                if (newValue) {
+                    splitPane.setDividerPositions(0.25f);
+                    observable.removeListener(this);
+                    //rightSide.autosize();
 
-		        }
-		    }
-		});
+                }
+            }
+        });
 		
 		
-		tree.setOnContextMenuRequested(new
-				EventHandler<ContextMenuEvent>() {
-				 @Override
-				 public void handle(ContextMenuEvent event) {
-				 
-					 hideContextMenu();
-					 cm = createContextMenu(CtxTypes.TABLE);
-					 tree.setContextMenu(cm);
-					 cm.show(tree,event.getScreenX(), event.getScreenY());
-					 cm.show(tree.getScene().getWindow(), event.getScreenX(), event.getScreenY());
+		tree.setOnContextMenuRequested(event -> {
+            hideContextMenu();
 
-				 }
-		});
+            TreeItem<NodeObject> node = tree.getSelectionModel().getSelectedItem();
+            if (node == null || node == root) {
+                cm = createContextMenu(CtxTypes.ROOT);
+            }
+            else if (null != node.getValue()) {
+
+                NodeObject no = node.getValue();
+
+                if (node.getValue().isTable)
+                    cm = createContextMenu(CtxTypes.TABLE);
+                else
+                    cm = createContextMenu(CtxTypes.DATABASE);
+
+
+            }
+
+            tree.setContextMenu(cm);
+            cm.show(tree, event.getScreenX(), event.getScreenY());
+            cm.show(tree.getScene().getWindow(), event.getScreenX(), event.getScreenY());
+
+        });
 		
 		// OnDrag a file Over
-		scene.setOnDragOver(new EventHandler<DragEvent>() {
-            @Override
-            public void handle(DragEvent event) {
-                Dragboard db = event.getDragboard();
-                if (db.hasFiles()) {
-                    event.acceptTransferModes(TransferMode.COPY);
-                } else {
-                    event.consume();
-                }
+		scene.setOnDragOver(event -> {
+            Dragboard db = event.getDragboard();
+            if (db.hasFiles()) {
+                event.acceptTransferModes(TransferMode.COPY);
+            } else {
+                event.consume();
             }
         });
         
         // Dropping over surface
-        scene.setOnDragDropped(new EventHandler<DragEvent>() {
-            @Override
-            public void handle(DragEvent event) {
-                Dragboard db = event.getDragboard();
-                boolean success = false;
-                if (db.hasFiles()) {
-                    success = true;
-                    String filePath = null;
-                    for (File file:db.getFiles()) {
-                        filePath = file.getAbsolutePath();
-                        System.out.println(filePath);
-                        open_db(file);
-                    }
+        scene.setOnDragDropped(event -> {
+            Dragboard db = event.getDragboard();
+            boolean success = false;
+            if (db.hasFiles()) {
+                success = true;
+                String filePath = null;
+                for (File file:db.getFiles()) {
+                    filePath = file.getAbsolutePath();
+                    System.out.println(filePath);
+                    open_db(file);
                 }
-                event.setDropCompleted(success);
-                event.consume();
             }
+            event.setDropCompleted(success);
+            event.consume();
         });
         
        
@@ -646,33 +606,9 @@ public class GUI extends Application {
 		pd.start(new Stage());
 	}
 
-	private void showDBExportWindow(){	
+    private void showSqlWindow(){
 		
-		if(dbnames.size() == 0){
-		
-			Alert alert = new Alert(AlertType.INFORMATION);
-			alert.setTitle("Information");
-			alert.setContentText("You must open at least one database before you can use the export function.");
-			alert.showAndWait();	
-			
-			return;
-		}
-	
-		DBExportWindow exp = new DBExportWindow(this);
-		Stage expstage = new Stage();
-		expstage.initModality(Modality.APPLICATION_MODAL);
-		try {
-			exp.start(expstage);
-		} catch (Exception e) {
-			e.printStackTrace();
-		}
-		
-}
-		
-	
-	private void showSqlWindow(){
-		
-		if(dbnames.size() == 0){
+		if(dbnames.isEmpty()){
 		
 			Alert alert = new Alert(AlertType.INFORMATION);
 			alert.setTitle("Information");
@@ -682,17 +618,18 @@ public class GUI extends Application {
 			return;
 		}
 		
-		if (!Global.SQLWARNING_SEEN) {
-			showWarning(stage,"Important note: Please note that the SQL Analyzer is a beta version. Use the results with care. ");
-			Global.SQLWARNING_SEEN = true;
-		}
-		
-			SQLWindow sql = new SQLWindow(this);
-			Stage sqlstage = new Stage();
-			sqlstage.initModality(Modality.APPLICATION_MODAL);
-			sql.start(sqlstage);
-			sqlAnalyzer = sql;
-			
+		//if (!Global.SQLWARNING_SEEN) {
+		//	showWarning(stage,"Important note: Please note that the SQL Analyzer is a beta version. Use the results with care. ");
+		//	Global.SQLWARNING_SEEN = true;
+		//}
+        TreeItem<NodeObject> node = tree.getSelectionModel().getSelectedItem();
+
+        SQLWindow sql = new SQLWindow(this, node.getValue().name);
+        Stage sqlstage = new Stage();
+        sqlstage.initModality(Modality.APPLICATION_MODAL);
+        sql.start(sqlstage);
+        sqlAnalyzer = sql;
+
 	}
 	
 	private static void showWarning(Stage stage, String details) {
@@ -704,11 +641,11 @@ public class GUI extends Application {
 	}
 	
 	private void openHexViewer(){
-		TreeItem<NodeObject> node = (TreeItem<NodeObject>) tree.getSelectionModel().getSelectedItem();
+		TreeItem<NodeObject> node = tree.getSelectionModel().getSelectedItem();
 		if (node == null || node == root) {
 			
 		} else if (null != node.getValue()) {
-			NodeObject no = (NodeObject) node.getValue();
+			NodeObject no = node.getValue();
 		
 			// prepare Hex-View of DB-File
 			if (no.type == FileTypes.SQLiteDB)
@@ -743,16 +680,14 @@ public class GUI extends Application {
 		}	
 		
 		
-		Platform.runLater(new Runnable() {
-			       public void run() {             
-			           try {
-			        	   HEXVIEW.show();
-			        	   
-			           } catch (Exception e) {
-						e.printStackTrace();
-					}
-			       }
-		});			    
+		Platform.runLater(() -> {
+            try {
+                HEXVIEW.show();
+
+            } catch (Exception e) {
+             e.printStackTrace();
+         }
+        });
 		
 		
 			
@@ -761,13 +696,7 @@ public class GUI extends Application {
 	
 	private void showHelp()
 	{
-		Platform.runLater(new Runnable() {
-			 
-			   public void run() {     
-				   
-			    	new UserGuideWindow().start(new Stage());									   	
-			   }  
-		});
+		Platform.runLater(() -> new UserGuideWindow().start(new Stage()));
 		
 	}
 	
@@ -801,21 +730,25 @@ public class GUI extends Application {
 	}
 	
 	@SuppressWarnings("unlikely-arg-type")
-	private ContextMenu createContextMenu(CtxTypes type){
+    /**
+     * @param the type of node
+     * @return the new ContextMenu
+     */
+    private ContextMenu createContextMenu(CtxTypes type){
 		
 		final ContextMenu contextMenu = new ContextMenu();
-	
-		MenuItem mntclosesingle = new MenuItem("Close Database");
-		String s = GUI.class.getResource("/closeDB_gray.png").toExternalForm();
+
+		MenuItem cmCloseSingle = new MenuItem("Close database file");
+		String s = Objects.requireNonNull(GUI.class.getResource("/gray_close24.png")).toExternalForm();
 		ImageView iv = new ImageView(s);
-		mntclosesingle.setGraphic(iv);
-		mntclosesingle.setOnAction(e->{
+		cmCloseSingle.setGraphic(iv);
+		cmCloseSingle.setOnAction(e->{
 			TreeItem<NodeObject> node = tree.getSelectionModel().getSelectedItem();
 			if (node == null || node.getValue().isRoot) {
-				return;
-			} 
+                //root node -> do nothing
+            }
 			else if (null != node.getValue()) {
-				NodeObject no = (NodeObject) node.getValue();
+				NodeObject no = node.getValue();
 	            boolean remove = node.getParent().getChildren().remove(node);
 	            if (remove) {
 	            	AppLog.info(" Database " + no.name + " closed.");
@@ -828,28 +761,69 @@ public class GUI extends Application {
     
        
 		MenuItem mntopen = new MenuItem("Open Database...");
-		s = GUI.class.getResource("/openDB_gray.png").toExternalForm();
+		s = Objects.requireNonNull(GUI.class.getResource("/gray_open24.png")).toExternalForm();
 		iv = new ImageView(s);
 		mntopen.setGraphic(iv);
 		mntopen.setOnAction(e->open_db(null));
 
-		MenuItem mntmExport = new MenuItem("Export Node...");
-		mntmExport.setAccelerator(KeyCombination.keyCombination("Ctrl+X"));
-		mntmExport.setOnAction(e ->{ doExport();});
-		
-		MenuItem mnthex = new MenuItem("Open HexViewer");
-		mnthex.setAccelerator(KeyCombination.keyCombination("Ctrl+H"));
-		s = GUI.class.getResource("/hex-32.png").toExternalForm();
+        MenuItem cmExport;
+        if(type == CtxTypes.TABLE)
+	        cmExport = new MenuItem("Export Table...");
+		else
+            cmExport = new MenuItem("Export Database to CSV...");
+
+        cmExport.setAccelerator(KeyCombination.keyCombination("Ctrl+X"));
+		cmExport.setOnAction(e -> doExport());
+
+        MenuItem cmExport2DB;
+        cmExport2DB = new MenuItem("Export to new Database...");
+        cmExport2DB.setOnAction(e -> doExportDB());
+        s = Objects.requireNonNull(GUI.class.getResource("/gray_export24.png")).toExternalForm();
+        iv = new ImageView(s);
+        cmExport2DB.setGraphic(iv);
+
+        MenuItem cmSQLAnalyser;
+        cmSQLAnalyser = new MenuItem("Inspect with SQL-Analyzer...");
+        cmSQLAnalyser.setOnAction(e->showSqlWindow());
+
+		MenuItem cmHex = new MenuItem("Open HexViewer");
+        cmHex.setAccelerator(KeyCombination.keyCombination("Ctrl+H"));
+		s = Objects.requireNonNull(GUI.class.getResource("/gray_hex24.png")).toExternalForm();
 		iv = new ImageView(s);
-		mnthex.setOnAction(e ->{openHexViewer();});
-		mnthex.setGraphic(iv);
+		cmHex.setOnAction(e -> openHexViewer());
+		cmHex.setGraphic(iv);
 			
 		SeparatorMenuItem sepA = new SeparatorMenuItem();
 		SeparatorMenuItem sepB = new SeparatorMenuItem();
-	
-		
-	    contextMenu.getItems().addAll(sepA,mntopen,mntmExport,mntclosesingle,sepB,mnthex);
-		
+        SeparatorMenuItem sepC = new SeparatorMenuItem();
+
+
+        contextMenu.getItems().addAll(sepA,mntopen, cmCloseSingle,sepB, cmExport, cmExport2DB, sepC, cmSQLAnalyser, cmHex);
+
+        if (type == CtxTypes.ROOT){
+            cmExport.setDisable(true);
+            cmExport2DB.setDisable(true);
+            cmCloseSingle.setDisable(true);
+            cmHex.setDisable(true);
+            cmSQLAnalyser.setDisable(true);
+        }
+
+        if (type == CtxTypes.DATABASE){
+            cmExport.setDisable(false);
+            cmExport2DB.setDisable(false);
+            cmCloseSingle.setDisable(false);
+            cmHex.setDisable(false);
+            cmSQLAnalyser.setDisable(false);
+        }
+
+        if (type == CtxTypes.TABLE){
+            cmExport.setDisable(false);
+            cmExport2DB.setDisable(true);
+            cmHex.setDisable(true);
+            cmCloseSingle.setDisable(true);
+            cmSQLAnalyser.setDisable(true);
+        }
+
 	    return contextMenu;
 	}
 
@@ -868,9 +842,10 @@ public class GUI extends Application {
 				if(null == cache)
 					return;
 				
-				for(File file: baseDir.listFiles()) 
-				    if (!file.isDirectory() && !file.getName().endsWith(".conf")) 
-				    	file.delete();
+				for(File file: Objects.requireNonNull(baseDir.listFiles()))
+				    if (!file.isDirectory() && !file.getName().endsWith(".conf")) {
+                        file.delete();
+                    }
 			}
 			catch(Exception err){
 				// do nothing - no cache directory	
@@ -883,21 +858,22 @@ public class GUI extends Application {
 	
 	/**
 	 *  This method loads the file fqlite.conf from .fqlite directory. 
-	 *  The directory is hidden and normally resides in the users home directory. 
+	 *  The directory is hidden and normally resides in the user's home directory.
 	 */
 	private void loadConfiguration(){
 		
-				//check, if settings.conf file exists
+				//check if settings.conf file exists
 				String path = baseDir.getAbsolutePath()+ File.separator + "fqlite.conf";
 				Properties appProps = new Properties();
 				
-				/**
+				/*
 				 * Example: configuration file
 				 * 
 				 * #Mon Aug 12 19:01:12 CEST 2024
 				 * CSV_SEPARATOR=;
 				 * EXPORTMODE=DONTEXPORT
 				 * EXPORT_THEADER=true
+				 * LOG-LEVEL=INFO
 				 * font_name=Tamil Sangam MN
 				 * font_size=14.0
 				 * font_style=Bold
@@ -915,19 +891,20 @@ public class GUI extends Application {
 					
 					Object tvalue = appProps.get("EXPORT_THEADER");
 					if (null != tvalue){
-						if(tvalue.equals("true"))
-							Global.EXPORTTABLEHEADER = true;
-						else
-							Global.EXPORTTABLEHEADER = false;
+                        Global.EXPORTTABLEHEADER = tvalue.equals("true");
 					}
 				
 					Object cvalue = appProps.get("CSV_SEPARATOR");
 					if (null != cvalue){
 						Global.CSV_SEPARATOR = (String)cvalue;
 					}
-					
-					
-					Object fn = appProps.get("font_name");
+
+                    Object lvalue = appProps.get("LOG-LEVEL");
+                    if (null != lvalue){
+                        Global.LOGLEVEL = Level.parse((String)lvalue);
+                    }
+
+                    Object fn = appProps.get("font_name");
 					if (null != fn){
 						Global.font_name = (String)fn;
 					}
@@ -959,60 +936,68 @@ public class GUI extends Application {
 	public void closeAll() {
 
 		TreeItem<NodeObject> root = tree.getRoot();
-		Iterator<TreeItem<NodeObject>> it = root.getChildren().iterator();
-	
-	
-		while (it.hasNext()) {
-			
-			TreeItem<NodeObject> node = it.next();
-			if (null != node.getValue()) {
-				NodeObject no = (NodeObject) node.getValue();
-				if (null != no.job) {		
-					no.job.checkpointlist = null;
-					no.job.FileCache = null;
-					if(no.job.db != null)	
-						no.job.db.clear();
-					if(no.job.freelistpages != null)
-						no.job.freelistpages.clear();
-					if(no.job.tasklist != null)
-						no.job.tasklist.clear();
-					if (no.job.guiroltab != null)
-						no.job.guiroltab.clear();
-					if (no.job.rol != null)
-						no.job.rol = null;
-					if (no.job.wal != null)
-						no.job.wal = null;
-					no.job = null;
-					no.tablePane = null;
-				}
-				
-				
-			}
-		}
+
+
+        for (TreeItem<NodeObject> node : root.getChildren()) {
+
+            if (null != node.getValue()) {
+                NodeObject no = node.getValue();
+                if (null != no.job) {
+                    no.job.checkpointlist = null;
+                    no.job.FileCache = null;
+                    if (no.job.db != null)
+                        no.job.db.clear();
+                    if (no.job.freelistpages != null)
+                        no.job.freelistpages.clear();
+                    if (no.job.tasklist != null)
+                        no.job.tasklist.clear();
+                    if (no.job.guiroltab != null)
+                        no.job.guiroltab.clear();
+                    if (no.job.rol != null)
+                        no.job.rol = null;
+                    if (no.job.wal != null)
+                        no.job.wal = null;
+                    no.job = null;
+                    no.tablePane = null;
+                }
+
+
+            }
+        }
 		
 		// remove all nodes -> simply create a new TreeView 
-		if (root != null) {
-			 root.getChildren().clear();
-		}
+        root.getChildren().clear();
 
 		this.tables.clear(); 
-	    this.treeitems.clear(); 
+	    this.treeitems.clear();
 	    this.dbnames.clear();
 	    HEXVIEW.close();
-	
-	    //long free = Runtime.getRuntime().freeMemory();
-        //long total = Runtime.getRuntime().totalMemory();
-        //long max = Runtime.getRuntime().maxMemory();
-        
-        //System.out.println("free memory " + free);
-        //System.out.println("total memory " + total);
-        //System.out.println("max memory " + max);
-   
 	    System.gc();	
 	    
 	    
 
 	}
+
+
+    /**
+     * Start a data export.
+     */
+    public void doExportDB() {
+        NodeObject no = null;
+
+        /* Do we really have a database node currently selected? */
+        TreeItem<NodeObject> node = tree.getSelectionModel().getSelectedItem();
+        if (node == null || node.getValue().isRoot) {
+            return;
+        }
+        else if (null != node.getValue()) {
+            no = node.getValue();
+        }
+
+        /* it is indeed a valid node (database, table, journal, WAL archive) -> begin with export */
+        assert no != null;
+        export_db(no);
+    }
 
 	/**
 	 * Start a data export.
@@ -1020,32 +1005,28 @@ public class GUI extends Application {
 	public void doExport() {
 		NodeObject no = null;
 		
-		/* Do we really have a database node currently selected ? */
+		/* Do we really have a database node currently selected? */
 		TreeItem<NodeObject> node = tree.getSelectionModel().getSelectedItem();
 		if (node == null || node.getValue().isRoot) {
 			return;
 		} 
 		else if (null != node.getValue()) {
-			no = (NodeObject) node.getValue();
-			if (null == no.job) {}
+			no = node.getValue();
 		}
 
 		/* it is indeed a valid node (database, table, journal, WAL archive) -> begin with export */
 		export_table(no);
 	}
-	 
-	private static final String CSS = """
-	           .invalid {
-	               -fx-text-fill: red;
-	           }
-	           """;
+
 	
 	/**
 	 * Add a new table header to the database tree.
 	 * 
-	 * @param job
-	 * @param tablename
-	 * @param columns
+	 * @param job  the import thread
+	 * @param tablename table name
+	 * @param columns list of all columns
+     * @param columntypes list of SQL types
+     *
 	 * @return tree path
 	 */
 	@SuppressWarnings({ "unchecked", "rawtypes" })
@@ -1057,7 +1038,7 @@ public class GUI extends Application {
 		
 		Path p = Paths.get(job.path);
 		
-		FQTableView<Object> table = new FQTableView<Object>(tablename,p.getFileName().toString(),job, columns,columntypes);
+		FQTableView<Object> table = new FQTableView<>(tablename, p.getFileName().toString(), job, columns, columntypes);
 		
  		
 		table.getSelectionModel().setSelectionMode(
@@ -1065,240 +1046,80 @@ public class GUI extends Application {
 		);
 		
 		
-		Image img = new Image(GUI.class.getResource("/icon_status.png").toExternalForm());
+		Image img = new Image(Objects.requireNonNull(GUI.class.getResource("/green_info24.png")).toExternalForm());
 	    ImageView view = new ImageView(img);
 	  
 	
-		// normal table ?
+		// normal table?
 		if (!walnode) {
 	    //yes		
-		//add the standard columns (index 0 <>'line number', 2 <> 'status',3 <> 'offset' - '1' <>is the table name 
-	    //Label NoLabel = new Label("No.");
-	    //NoLabel.setTooltip(new Tooltip("row number")); 
+		//add the standard columns (index 0 <>'line number', 2 <> 'status',3 <> 'offset' - '1' <>is the table name
 		TableColumn numbercolumn = new TableColumn<>("No.");
-		//numbercolumn.setGraphic(NoLabel);
-		numbercolumn.setCellValueFactory(new Callback<CellDataFeatures<ObservableList,String>,ObservableValue<String>>(){                    
-			public ObservableValue<String> call(CellDataFeatures<ObservableList, String> param) {                                                                                              
-					return new SimpleStringProperty(param.getValue().get(0).toString());               //line number index   
-			}                    
-		});  
+		numbercolumn.setCellValueFactory((Callback<CellDataFeatures<ObservableList, String>, ObservableValue<String>>) param -> {
+                return new SimpleStringProperty(param.getValue().get(0).toString());               //line number index
+        });
 		
 		numbercolumn.setStyle( "-fx-text-fill: gray;-fx-alignment: TOP-RIGHT;");
-//		numbercolumn.setCellFactory(param -> new TextFieldTableCell<>(new DefaultStringConverter()) {
-//			   @Override
-//			   public void updateItem(String item, boolean empty) {
-//			      super.updateItem(item, empty);
-//
-//			       if (item != null && !empty) {
-//			          if (!getStyleClass().contains(CSS)) {
-//			             getStyleClass().add(CSS);
-//			          }
-//			       } else {
-//			          getStyleClass().remove(CSS);
-//			       }
-//			       
-//			       if (super.getIndex() % 2 == 0)
-//			    	   this.setStyle("-fx-font-style: italic; -fx-alignment: TOP-RIGHT; -fx-background-color: honeydew;");
-//			       else
-//			    	   this.setStyle("-fx-font-style: italic; -fx-alignment: TOP-RIGHT; -fx-background-color: lavender;");
-//
-//			   }
-//
-//			 
-//		});
 
-		//Label PLLLabel = new Label("PLL");
-		//PLLLabel.setTooltip(new Tooltip("shows payload length in bytes")); 
 		TableColumn pllcolumn = new TableColumn<>("PLL|HL");
-		//pllcolumn.setGraphic(PLLLabel);
 		pllcolumn.setCellFactory(TooltippedTableCell.forTableColumn(tablename,job,this.stage));
-     	pllcolumn.setCellValueFactory(new Callback<CellDataFeatures<ObservableList,String>,ObservableValue<String>>(){                    
-            public ObservableValue<String> call(CellDataFeatures<ObservableList, String> param) {                                                                                              
-                return new SimpleStringProperty(param.getValue().get(2).toString());                        
-            }                    
-		});
+     	pllcolumn.setCellValueFactory((Callback<CellDataFeatures<ObservableList, String>, ObservableValue<String>>) param -> new SimpleStringProperty(param.getValue().get(2).toString()));
      	
 		pllcolumn.setStyle( "-fx-text-fill: gray;-fx-alignment: TOP-RIGHT;");
 
-//		pllcolumn.setCellFactory(param -> new TextFieldTableCell<>(new DefaultStringConverter()) {
-//			   @Override
-//			   public void updateItem(String item, boolean empty) {
-//			      super.updateItem(item, empty);
-//
-//			       if (item != null && !empty) {
-//			          if (!getStyleClass().contains(CSS)) {
-//			             getStyleClass().add(CSS);
-//			          }
-//			       } else {
-//			          getStyleClass().remove(CSS);
-//			       }
-//			       
-//			       if (super.getIndex() % 2 == 0)
-//			    	   this.setStyle("-fx-font-style: italic; -fx-alignment: TOP-RIGHT; -fx-background-color: honeydew;");
-//			       else
-//			    	   this.setStyle("-fx-font-style: italic; -fx-alignment: TOP-RIGHT; -fx-background-color: lavender;");
-//
-//			   }
-//
-//			 
-//		});
-//		
-     
-     	
-    	//Label HLLabel = new Label("HL");
-		//HLLabel.setTooltip(new Tooltip("shows the header length in bytes")); 
-		TableColumn hlcolumn = new TableColumn<>("ROWID");
-		//hlcolumn.setGraphic(HLLabel);
+        TableColumn hlcolumn = new TableColumn<>("ROWID");
 		hlcolumn.setCellFactory(TooltippedTableCell.forTableColumn(tablename,job,this.stage));
-     	hlcolumn.setCellValueFactory(new Callback<CellDataFeatures<ObservableList,String>,ObservableValue<String>>(){                    
-            public ObservableValue<String> call(CellDataFeatures<ObservableList, String> param) {                                                                                              
-                return new SimpleStringProperty(param.getValue().get(3).toString());                        
-            }                    
-		});
+     	hlcolumn.setCellValueFactory((Callback<CellDataFeatures<ObservableList, String>, ObservableValue<String>>) param -> new SimpleStringProperty(param.getValue().get(3).toString()));
      	
 		hlcolumn.setStyle( "-fx-text-fill: gray;-fx-alignment: TOP-RIGHT;");
-//		hlcolumn.setCellFactory(param -> new TextFieldTableCell<>(new DefaultStringConverter()) {
-//			   @Override
-//			   public void updateItem(String item, boolean empty) {
-//			      super.updateItem(item, empty);
-//
-//			       if (item != null && !empty) {
-//			          if (!getStyleClass().contains(CSS)) {
-//			             getStyleClass().add(CSS);
-//			          }
-//			       } else {
-//			          getStyleClass().remove(CSS);
-//			       }
-//			       
-//			       if (super.getIndex() % 2 == 0)
-//			    	   this.setStyle("-fx-font-style: italic; -fx-alignment: TOP-RIGHT; -fx-background-color: honeydew;");
-//			       else
-//			    	   this.setStyle("-fx-font-style: italic; -fx-alignment: TOP-RIGHT; -fx-background-color: lavender;");
-//
-//			   }
-//
-//			 
-//		});
-     	 
-     	
+
      	Label statusLabel = new Label(Global.STATUS_CLOMUN);
 		
      	statusLabel.setTooltip(new Tooltip("indicates if data record is deleted or not")); 
      	TableColumn statuscolumn = new TableColumn<>();
         statuscolumn.setGraphic(statusLabel);
 		statuscolumn.setCellFactory(TooltippedTableCell.forTableColumn(tablename,job,this.stage));
-     	statuscolumn.setCellValueFactory(new Callback<CellDataFeatures<ObservableList,String>,ObservableValue<String>>(){                    
-			public ObservableValue<String> call(CellDataFeatures<ObservableList, String> param) {                                                                                              
-                return new SimpleStringProperty(param.getValue().get(4).toString());                        
-            } 
-     	});
+     	statuscolumn.setCellValueFactory((Callback<CellDataFeatures<ObservableList, String>, ObservableValue<String>>) param -> new SimpleStringProperty(param.getValue().get(4).toString()));
      	statuscolumn.setGraphic(view);
 		statuscolumn.setStyle( "-fx-text-fill: gray;-fx-alignment: TOP-RIGHT;");
-//		statuscolumn.setCellFactory(param -> new TextFieldTableCell<>(new DefaultStringConverter()) {
-//			   @Override
-//			   public void updateItem(String item, boolean empty) {
-//			      super.updateItem(item, empty);
-//
-//			       if (item != null && !empty) {
-//			          if (!getStyleClass().contains(CSS)) {
-//			             getStyleClass().add(CSS);
-//			          }
-//			       } else {
-//			          getStyleClass().remove(CSS);
-//			       }
-//			       
-//			       if (super.getIndex() % 2 == 0)
-//			    	   this.setStyle("-fx-font-style: italic; -fx-alignment: TOP-RIGHT; -fx-background-color: honeydew;");
-//			       else
-//			    	   this.setStyle("-fx-font-style: italic; -fx-alignment: TOP-RIGHT; -fx-background-color: lavender;");
-//
-//			   }
-//
-//			 
-//		});
+
 	  	
      	TableColumn offsetcolumn = new TableColumn<>("Offset");
 		offsetcolumn.setCellFactory(TooltippedTableCell.forTableColumn(tablename,job,this.stage));
-     	offsetcolumn.setCellValueFactory(new Callback<CellDataFeatures<ObservableList,String>,ObservableValue<String>>(){                    
-			public ObservableValue<String> call(CellDataFeatures<ObservableList, String> param) {                                                                                              
-                return new SimpleStringProperty(param.getValue().get(5).toString());                        
-            }                    
-		});
+     	offsetcolumn.setCellValueFactory((Callback<CellDataFeatures<ObservableList, String>, ObservableValue<String>>) param -> new SimpleStringProperty(param.getValue().get(5).toString()));
      		
 		offsetcolumn.setStyle( "-fx-text-fill: gray;-fx-alignment: TOP-RIGHT;");
-//		offsetcolumn.setCellFactory(param -> new TextFieldTableCell<>(new DefaultStringConverter()) {
-//			   @Override
-//			   public void updateItem(String item, boolean empty) {
-//			      super.updateItem(item, empty);
-//
-//			       if (item != null && !empty) {
-//			          if (!getStyleClass().contains(CSS)) {
-//			             getStyleClass().add(CSS);
-//			          }
-//			       } else {
-//			          getStyleClass().remove(CSS);
-//			       }
-//			       
-//			       if (super.getIndex() % 2 == 0)
-//			    	   this.setStyle("-fx-font-style: italic; -fx-alignment: TOP-RIGHT; -fx-background-color: honeydew;");
-//			       else
-//			    	   this.setStyle("-fx-font-style: italic; -fx-alignment: TOP-RIGHT; -fx-background-color: lavender;");
-//
-//			   }
-//
-//			 
-//		});
-     		
+
      	//[no,pll,hl,tabname,status,...]
 		table.getColumns().addAll(numbercolumn,statuscolumn,offsetcolumn,pllcolumn,hlcolumn);
 		
 		}
 		else {
-			/**
+			/*
 			 * Attention: Table is a WAL-Table and has some extra columns !!!
 			 */
 		
 			//add the standard columns (index 0 <>'line number', 2 <> 'status',3 <> 'offset' - '1' <>is the table name 
-		    //Label NoLabel = new Label("No.");
-		    //NoLabel.setTooltip(new Tooltip("row number")); 
 			TableColumn numbercolumn = new TableColumn<>("No.");
-			//numbercolumn.setGraphic(NoLabel);
 			numbercolumn.setComparator(new CustomComparator());
-			numbercolumn.setCellValueFactory(new Callback<CellDataFeatures<ObservableList,String>,ObservableValue<String>>(){                    
-				public ObservableValue<String> call(CellDataFeatures<ObservableList, String> param) {                                                                                              
-						return new SimpleStringProperty(param.getValue().get(0).toString());               //line number index   
-				}                    
-			});  
+			numbercolumn.setCellValueFactory((Callback<CellDataFeatures<ObservableList, String>, ObservableValue<String>>) param -> {
+                    return new SimpleStringProperty(param.getValue().get(0).toString());               //line number index
+            });
 			numbercolumn.setStyle( "-fx-text-fill: gray;-fx-alignment: TOP-RIGHT;");
 
 
-			//Label PLLLabel = new Label("PLL");
-			//PLLLabel.setTooltip(new Tooltip("shows payload length in bytes")); 
 			TableColumn pllcolumn = new TableColumn<>("PLL|HL");
 			pllcolumn.setCellFactory(TooltippedTableCell.forTableColumn(tablename,job,this.stage));
-			//pllcolumn.setGraphic(PLLLabel);
 			pllcolumn.setComparator(new CustomComparator());
-	     	pllcolumn.setCellValueFactory(new Callback<CellDataFeatures<ObservableList,String>,ObservableValue<String>>(){                    
-	            public ObservableValue<String> call(CellDataFeatures<ObservableList, String> param) {                                                                                              
-	                return new SimpleStringProperty(param.getValue().get(2).toString());                        
-	            }                    
-			});
-			//pllcolumn.setStyle( "-fx-alignment: CENTER-RIGHT;");
+	     	pllcolumn.setCellValueFactory((Callback<CellDataFeatures<ObservableList, String>, ObservableValue<String>>) param -> new SimpleStringProperty(param.getValue().get(2).toString()));
 			pllcolumn.setStyle( "-fx-text-fill: gray;-fx-alignment: TOP-RIGHT;");
 			
 		
 	     	
-	    	//Label HLLabel = new Label("HL");
-			//HLLabel.setTooltip(new Tooltip("shows the header length in bytes")); 
-			TableColumn hlcolumn = new TableColumn<>("ROWID");
+            TableColumn hlcolumn = new TableColumn<>("ROWID");
 			hlcolumn.setCellFactory(TooltippedTableCell.forTableColumn(tablename,job,this.stage));
-			//hlcolumn.setGraphic(HLLabel);
 			hlcolumn.setComparator(new CustomComparator());
-	     	hlcolumn.setCellValueFactory(new Callback<CellDataFeatures<ObservableList,String>,ObservableValue<String>>(){                    
-	            public ObservableValue<String> call(CellDataFeatures<ObservableList, String> param) {                                                                                              
-	                return new SimpleStringProperty(param.getValue().get(3).toString());                        
-	            }                    
-			});
+	     	hlcolumn.setCellValueFactory((Callback<CellDataFeatures<ObservableList, String>, ObservableValue<String>>) param -> new SimpleStringProperty(param.getValue().get(3).toString()));
 			hlcolumn.setStyle( "-fx-text-fill: gray;-fx-alignment: TOP-RIGHT;");
 
 	     	
@@ -1307,25 +1128,14 @@ public class GUI extends Application {
 	     	TableColumn statuscolumn = new TableColumn<>();
 	        statuscolumn.setGraphic(statusLabel);
 			statuscolumn.setCellFactory(TooltippedTableCell.forTableColumn(tablename,job,this.stage));
-	        statuscolumn.setCellValueFactory(new Callback<CellDataFeatures<ObservableList,String>,ObservableValue<String>>(){                    
-	            public ObservableValue<String> call(CellDataFeatures<ObservableList, String> param) {                                                                                              
-	                return new SimpleStringProperty(param.getValue().get(4).toString());                        
-	            } 
-	     	});
+	        statuscolumn.setCellValueFactory((Callback<CellDataFeatures<ObservableList, String>, ObservableValue<String>>) param -> new SimpleStringProperty(param.getValue().get(4).toString()));
 	     	statuscolumn.setGraphic(view);
-			//statuscolumn.setStyle( "-fx-alignment: TOP-RIGHT;");
 
-		  	
 	     	TableColumn offsetcolumn = new TableColumn<>("Offset");
 			offsetcolumn.setComparator(new CustomComparator());
 			offsetcolumn.setCellFactory(TooltippedTableCell.forTableColumn(tablename,job,this.stage));
-	     	offsetcolumn.setCellValueFactory(new Callback<CellDataFeatures<ObservableList,String>,ObservableValue<String>>(){                    
-	            public ObservableValue<String> call(CellDataFeatures<ObservableList, String> param) {                                                                                              
-	                return new SimpleStringProperty(param.getValue().get(5).toString());                        
-	            }                    
-			});
+	     	offsetcolumn.setCellValueFactory((Callback<CellDataFeatures<ObservableList, String>, ObservableValue<String>>) param -> new SimpleStringProperty(param.getValue().get(5).toString()));
 			offsetcolumn.setStyle( "-fx-text-fill: gray;-fx-alignment: TOP-RIGHT;");
-
 	     		
 	     	//[no,pll,hl,tabname,status,...]
 			table.getColumns().addAll(numbercolumn,statuscolumn,offsetcolumn,pllcolumn,hlcolumn);
@@ -1338,34 +1148,31 @@ public class GUI extends Application {
 		datacounter = 0;
 		
 		
-	   /**********************************
-        * ADD TABLE COLUMNS DYNAMICALLY *
-        **********************************/
+	   /*
+        * ADD TABLE COLUMNS DYNAMICALLY
+        */
 		
 		
 		for (int i = 0; i < columns.size(); i++) {
             String colname = columns.get(i);
-            final int j = walnode ? i + 6 : i + 6;                
+            final int j = i + 6;
 			TableColumn col = new TableColumn(colname);		
 			col.setCellFactory(TooltippedTableCell.forTableColumn(tablename,job,this.stage));
 			col.setComparator(new CustomComparator());
 			
 		
-			col.setCellValueFactory(new Callback<CellDataFeatures<ObservableList,String>,ObservableValue<String>>(){                    
-	  
-			public ObservableValue<String> call(CellDataFeatures<ObservableList, String> param) {                                                                                              
-            	
+			col.setCellValueFactory((Callback<CellDataFeatures<ObservableList, String>, ObservableValue<String>>) param -> {
+
 				if (param.getValue().size() <= j)
             		return new SimpleStringProperty("");
-            	Object o = param.getValue().get(j);
-            	if (null != o)
-            		return new SimpleStringProperty(o.toString());                        
+            	Object o1 = param.getValue().get(j);
+            	if (null != o1)
+            		return new SimpleStringProperty(o1.toString());
             	else
-            		return new SimpleStringProperty("");                        
-                
-            	
-            }      
-			});
+            		return new SimpleStringProperty("");
+
+
+            });
 			
 		
 			if (columntypes.size()>i && !columntypes.get(i).equals("BLOB") && !columntypes.get(i).equals("TEXT")) {				
@@ -1381,7 +1188,7 @@ public class GUI extends Application {
 			{
 				if(PK.contains(colname))
 				{
-					img = new Image(GUI.class.getResource("/key-icon.png").toExternalForm());
+					img = new Image(Objects.requireNonNull(GUI.class.getResource("/key-icon.png")).toExternalForm());
 				    view = new ImageView(img);
 				    col.setGraphic(view);
 				}	
@@ -1402,7 +1209,7 @@ public class GUI extends Application {
 	    VBox tablePane = new VBox();
 	    
 	    
-		Image img2 = new Image(GUI.class.getResource("/closeDB_gray.png").toExternalForm());
+		Image img2 = new Image(Objects.requireNonNull(GUI.class.getResource("/green_cancel24.png")).toExternalForm());
 	  
 		ImageView view2 = new ImageView(img2);
 	    
@@ -1414,7 +1221,7 @@ public class GUI extends Application {
 	    clearFilter.setGraphic(view2);
 	    clearFilter.setTooltip(new Tooltip("set back filter"));
 		   
-	    ComboBox<String> columnselection = new ComboBox<String>();
+	    ComboBox<String> columnselection = new ComboBox<>();
 
 	    columnselection.getItems().add("All Columns (Filter) -> ");
 	    columnselection.getItems().add("No.");
@@ -1422,15 +1229,12 @@ public class GUI extends Application {
 	    columnselection.getItems().add("Offset");
 	    columnselection.getItems().add("PLL|HL");
 	    columnselection.getItems().add("ROWID");
-		    
-	    
-	    Iterator<String> cli = columns.iterator();
-	    
-	    while(cli.hasNext()) {
-	        String choice = cli.next();
-	    	if(choice != null)
-	        	columnselection.getItems().add(choice);
-	    }
+
+
+        for (String choice: columns) {
+            if (choice != null)
+                columnselection.getItems().add(choice);
+        }
 	    
 	    // Select All Columns as default 
 	    columnselection.getSelectionModel().select(0);
@@ -1452,34 +1256,27 @@ public class GUI extends Application {
 	    tablePane.getChildren().add(l);
 	
 		if (walnode)
-      		o = new NodeObject(tablename, tablePane, columns.size(), FileTypes.WriteAheadLog, db_object); // wal file
+      		o = new NodeObject(tablename, tablePane, columns.size(), FileTypes.WriteAheadLog, db_object, true); // wal file
 		if (rjnode)
-			o = new NodeObject(tablename, tablePane, columns.size(), FileTypes.RollbackJournalLog, db_object); // rollback																									// journal file
+			o = new NodeObject(tablename, tablePane, columns.size(), FileTypes.RollbackJournalLog, db_object, true); // rollback																									// journal file
 		if (!walnode && !rjnode)
-			o = new NodeObject(tablename, tablePane, columns.size(), FileTypes.SQLiteDB, db_object); // normal db
+			o = new NodeObject(tablename, tablePane, columns.size(), FileTypes.SQLiteDB, db_object, true); // normal db
 
 		o.job = job;
-		TreeItem<NodeObject> dmtn = new TreeItem<NodeObject>(o);    
+		TreeItem<NodeObject> dmtn = new TreeItem<>(o);
 	    dmtn.setExpanded(true);
 	    
 		
-		String s = null;
-		
-		switch(o.tabletype)
-		{
-			case 0   :	s = GUI.class.getResource("/table_icon_empty.png").toExternalForm(); // /.png
-						break;
-			case 1   : 	s = GUI.class.getResource("/table-key-icon-reddot.png").toExternalForm();
-						break;
-			case 99  :  s = GUI.class.getResource("/database-small-icon.png").toExternalForm();
-						break;						
-			case 100 :  s = GUI.class.getResource("/journal-icon.png").toExternalForm();  
-						break; 			
-			case 101 :  s = GUI.class.getResource("/wal-icon.png").toExternalForm();
-						break;
-		}
-		
-	    ImageView iv = new ImageView(s);
+		String s = switch (o.tabletype) {
+            case 0 -> Objects.requireNonNull(GUI.class.getResource("/table_icon_empty.png")).toExternalForm(); // /.png
+            case 1 -> Objects.requireNonNull(GUI.class.getResource("/table-key-icon-reddot.png")).toExternalForm();
+            case 99 -> Objects.requireNonNull(GUI.class.getResource("/gray_database24.png")).toExternalForm();
+            case 100 -> Objects.requireNonNull(GUI.class.getResource("/journal-icon.png")).toExternalForm();
+            case 101 -> Objects.requireNonNull(GUI.class.getResource("/gray_archive24.png")).toExternalForm();
+            default -> null;
+        };
+
+        ImageView iv = new ImageView(s);
 		dmtn.setGraphic(iv);
  		
 		String tp = null;
@@ -1491,7 +1288,7 @@ public class GUI extends Application {
 		
 			tp = getPath(dmtn);
 			
-			// save assignment between tree item's path an a tree item
+			// save assignment between the tree item's path and a tree item
 			treeitems.put(tp, dmtn);
 	
 			
@@ -1501,7 +1298,7 @@ public class GUI extends Application {
 			rjNode.getChildren().add(dmtn);
 			tp = getPath(dmtn);
 			
-			// save assignment between tree item's path an a tree item
+			// save assignment between the tree item's path and a tree item
 			treeitems.put(tp, dmtn);
 			
 		}
@@ -1510,7 +1307,7 @@ public class GUI extends Application {
 		    job.getTreeItem().getChildren().add(dmtn);
 			tp = getPath(dmtn);
 
-			// save assignment between tree item's path an a tree item
+			// save assignment between the tree item's path and a tree item
 			treeitems.put(tp, dmtn);
 			
 		}
@@ -1518,195 +1315,181 @@ public class GUI extends Application {
 		ContextMenu tcm = createContextMenu(CtxTypes.TABLE,tablename,table,job); 
 	
 
-		table.setOnKeyPressed(new EventHandler<KeyEvent>(){
-			
-		    @Override
-		    public void handle(KeyEvent event) {
-			    if (!table.getSelectionModel().isEmpty())
-			    {   	
-			    	KeyCodeCombination copylineCombination = new KeyCodeCombination(KeyCode.L, KeyCombination.SHORTCUT_DOWN);
-			    	KeyCodeCombination copycellCombination = new KeyCodeCombination(KeyCode.C, KeyCombination.SHORTCUT_DOWN);
-					 
-			    	if(copylineCombination.match(event))
-			    	{	
-				    	copyLineAction(table);
-				    	event.consume();
-				    }
-			    	else if(copycellCombination.match(event))
-			    	{
-			    		copyCellAction(table);
-			    		event.consume();
-			    	}
-			    	
-			    }
-		    }
-		});
+		table.setOnKeyPressed(event -> {
+            if (!table.getSelectionModel().isEmpty())
+            {
+                KeyCodeCombination copylineCombination = new KeyCodeCombination(KeyCode.L, KeyCombination.SHORTCUT_DOWN);
+                KeyCodeCombination copycellCombination = new KeyCodeCombination(KeyCode.C, KeyCombination.SHORTCUT_DOWN);
+
+                if(copylineCombination.match(event))
+                {
+                    copyLineAction(table);
+                    event.consume();
+                }
+                else if(copycellCombination.match(event))
+                {
+                    copyCellAction(table);
+                    event.consume();
+                }
+
+            }
+        });
 		
-		table.setOnMouseClicked(new EventHandler<javafx.scene.input.MouseEvent>() {
-			@Override
-			   public void handle(javafx.scene.input.MouseEvent event) {
+		table.setOnMouseClicked(event -> {
 
-				   //System.out.println("Quelle : " + event.getTarget());
-				   if(event.getTarget().toString().startsWith("TableColumnHeader"))
-					   return;
-				   
-				   int row = -1;
-				   TablePosition pos = null;
-				   try 
-				   {
-				     pos = (TablePosition) table.getSelectionModel().getSelectedCells().get(0);
-			         row = pos.getRow();
+               //System.out.println("Quelle : " + event.getTarget());
+               if(event.getTarget().toString().startsWith("TableColumnHeader"))
+                   return;
 
-				   }catch(Exception err) {
-					   return;
-				   }
-				      
-				   
-				   // Item here is the table view type:
-				   Object item = table.getItems().get(row);
-				   
-				
-				   if(event.getButton() == MouseButton.SECONDARY) {
-						  
-					   //ContextMenu tcm = createContextMenu(CtxTypes.TABLE,table); 
-					   tcm.show(table.getScene().getWindow(), event.getScreenX(), event.getScreenY());
-					   return;
-				   }
-				   
-				   
-				   TableColumn col = pos.getTableColumn();
+               int row = -1;
+               TablePosition pos = null;
+               try
+               {
+                 pos = table.getSelectionModel().getSelectedCells().get(0);
+                 row = pos.getRow();
 
-				   if(col == null)
-					   	return;
-				   
-				   // this gives the value in the selected cell:
-				   Object data = col.getCellObservableValue(item).getValue();
+               }catch(Exception err) {
+                   return;
+               }
 
-				   // get the relative virtual address (offset) from the table
-			       TableColumn toff = (TableColumn) table.getColumns().get(2);
-			       
-				   // get the actual value of the currently selected cell
-			       ObservableValue off =  toff.getCellObservableValue(row);
-			      
-				   
-				   if (col.getText().equals("Offset"))
-				   {
-					   if(row >= 0)
-					   {   
-						   // get currently selected database
-						   NodeObject no = getSelectedNode();
-						   						   
-						   String model = null;
-						   
-						   if (no.type == FileTypes.SQLiteDB)
-							model = no.job.path;
-						   else if (no.type == FileTypes.WriteAheadLog)
-							model = no.job.wal.path;
-					       else if (no.type == FileTypes.RollbackJournalLog)
-					    	model = no.job.rol.path;
-						   
-										   
-						   long position = -1;
-						   try {
-							   position = Long.parseLong((String)data);
 
-							   HEXVIEW.go2(model, position);
-							   
-						   }catch(Exception err) {
-							   
-						   }
-						   
-					       
-					   	}
-				   }
-				   else  //another column was clicked
-				   {
-					   boolean doubleclicked = false;
-					   
-					   if(event.getButton().equals(MouseButton.PRIMARY)){
-				            if(event.getClickCount() == 2){
-				                doubleclicked = true;
-				            }
-				        }	  
-					   
-					   if(data != null && doubleclicked){
-					   	
-					   		   String cellvalue = (String)data;
-				    		   /* Has the user double-clicked on a BLOB column ? */ 
-					   		   if (cellvalue.startsWith("[BLOB-"))
-				   			   {
-					   			    int from = cellvalue.indexOf("BLOB-");
-					   	        	int to = cellvalue.indexOf("]");
-					   	        	String number = cellvalue.substring(from+5, to);			
-					   				int start = cellvalue.indexOf("<");
-					   				int end   = cellvalue.indexOf(">");
-					   				
-					   				/* extract the BLOB type information from cell value */
-					   				String type;
-					   				if (end > 0) {
-					   					type = cellvalue.substring(start+1,end);
-					   				}
-					   				else 
-					   					type = "";
-					   				
-					   				/* note: there are only a few supported file formats in the moment */
-					   				
-					   				/* Is the BLOB a PDF ? */
-					   				if(type.equals("pdf"))
-					   				{
-					   					
-					   					Platform.runLater(new Runnable() {
-											 
-											   public void run() {     
-												   
-													String path = GUI.baseDir + Global.separator + table.dbname + "_" + off.getValue() + "-" + number + "." + type;
-											    	BLOBElement e = job.bincache.get(path);
-											    	try {
-											    		BufferedOutputStream buffer = new BufferedOutputStream(new FileOutputStream(path));
-														buffer.write(e.binary);
-														buffer.close();
-														/* open the pdf-file by using our internal viewer */
-														new PDFPreviewer(path).start(new Stage());									   	
-													}
-													catch(Exception err){
-														// simply do nothing, if opening the viewer fails
-													}
-													
-											   }  
-										});
-					   					
-					   					
-					   				}
-					   				/* Is it a common picture format ? */
-					   				if(type.equals("gif") || type.equals("bmp") || type.equals("png") || type.equals("jpg")|| type.equals("heic") || type.equals("tiff"))
-					   				{		
-					   					String uri = "file:" + Global.separator + Global.separator + GUI.baseDir + Global.separator + table.dbname + "_" + off.getValue() + "-" + number + "." + type;
-										String path = GUI.baseDir + Global.separator + table.dbname + "_" + off.getValue() + "-" + number + "." + type;
-					   					BLOBElement e = job.bincache.get(path);
-								    	try {
-								    		/* before we can open it, we need to create a file on the file system for the BLOB */
-								    		BufferedOutputStream buffer = new BufferedOutputStream(new FileOutputStream(path));
-											buffer.write(e.binary);
-											buffer.close();
-											/* open picture with the default viewer from the operating system associated with this file extension*/
-						   					getHostServices().showDocument(uri);
-										}
-										catch(Exception err){
-											
-										}
-					   				}
-				   			   }
-						   
-					   	   }
-				   	  
-				   }
-				   
-				   
-				   
-				  
-				   
-			   }
-			});
+               // Item here is the table view type:
+               Object item = table.getItems().get(row);
+
+
+               if(event.getButton() == MouseButton.SECONDARY) {
+
+                   tcm.show(table.getScene().getWindow(), event.getScreenX(), event.getScreenY());
+                   return;
+               }
+
+
+               TableColumn col = pos.getTableColumn();
+
+               if(col == null)
+                       return;
+
+               // this gives the value in the selected cell:
+               Object data = col.getCellObservableValue(item).getValue();
+
+               // get the relative virtual address (offset) from the table
+               TableColumn toff = table.getColumns().get(2);
+
+               // get the actual value of the currently selected cell
+               ObservableValue off =  toff.getCellObservableValue(row);
+
+
+               if (col.getText().equals("Offset"))
+               {
+                   // get currently selected database
+                   NodeObject no = getSelectedNode();
+
+                   String model = null;
+
+                   if (no.type == FileTypes.SQLiteDB)
+                    model = no.job.path;
+                   else if (no.type == FileTypes.WriteAheadLog)
+                    model = no.job.wal.path;
+                   else if (no.type == FileTypes.RollbackJournalLog)
+                    model = no.job.rol.path;
+
+
+                   long position = -1;
+                   try {
+                       position = Long.parseLong((String)data);
+
+                       HEXVIEW.go2(model, position);
+
+                   }catch(Exception err) {
+                       AppLog.error(err.getMessage());
+                   }
+
+
+               }
+               else  //another column was clicked
+               {
+                   boolean doubleclicked = false;
+
+                   if(event.getButton().equals(MouseButton.PRIMARY)){
+                        if(event.getClickCount() == 2){
+                            doubleclicked = true;
+                        }
+                    }
+
+                   if(data != null && doubleclicked){
+
+                              String cellvalue = (String)data;
+                              /* Has the user double-clicked on a BLOB column? */
+                              if (cellvalue.startsWith("[BLOB-"))
+                              {
+                                   int from = cellvalue.indexOf("BLOB-");
+                                   int to = cellvalue.indexOf("]");
+                                   String number = cellvalue.substring(from+5, to);
+                                   int start = cellvalue.indexOf("<");
+                                   int end   = cellvalue.indexOf(">");
+
+                                   /* extract the BLOB type information from cell value */
+                                   String type;
+                                   if (end > 0) {
+                                       type = cellvalue.substring(start+1,end);
+                                   }
+                                   else
+                                       type = "";
+
+                                   /* note: there are only a few supported file formats at the moment */
+
+                                   /* Is the BLOB a PDF? */
+                                   if(type.equals("pdf"))
+                                   {
+
+                                       Platform.runLater(() -> {
+
+                                            String path = GUI.baseDir + Global.separator + table.dbname + "_" + off.getValue() + "-" + number + "." + type;
+                                            BLOBElement e = job.bincache.get(path);
+                                            try {
+                                                BufferedOutputStream buffer = new BufferedOutputStream(new FileOutputStream(path));
+                                                buffer.write(e.binary);
+                                                buffer.close();
+                                                /* open the PDF-file by using our internal viewer */
+                                                new PDFPreviewer(path).start(new Stage());
+                                            }
+                                            catch(Exception err){
+                                                // simply do nothing, if opening the viewer fails
+                                            }
+
+                                       });
+
+
+                                   }
+                                   /* Is it a common picture format? */
+                                   if(type.equals("gif") || type.equals("bmp") || type.equals("png") || type.equals("jpg")|| type.equals("heic") || type.equals("tiff"))
+                                   {
+                                       String uri = "file:" + Global.separator + Global.separator + GUI.baseDir + Global.separator + table.dbname + "_" + off.getValue() + "-" + number + "." + type;
+                                    String path = GUI.baseDir + Global.separator + table.dbname + "_" + off.getValue() + "-" + number + "." + type;
+                                       BLOBElement e = job.bincache.get(path);
+                                    try {
+                                        /* before we can open it, we need to create a file on the file system for the BLOB */
+                                        BufferedOutputStream buffer = new BufferedOutputStream(new FileOutputStream(path));
+                                        buffer.write(e.binary);
+                                        buffer.close();
+                                        /* open picture with the default viewer from the operating system associated with this file extension*/
+                                           getHostServices().showDocument(uri);
+                                    }
+                                    catch(Exception err){
+                                        AppLog.error(err.getMessage());
+                                    }
+                                   }
+                              }
+
+                          }
+
+               }
+
+
+
+
+
+           });
 		
 		
 	
@@ -1722,7 +1505,7 @@ public class GUI extends Application {
 		
 		// copy a single table line
 		MenuItem mntcopyline = new MenuItem("Copy Line(s)");
-		String s = GUI.class.getResource("/edit-copy.png").toExternalForm();
+		String s = Objects.requireNonNull(GUI.class.getResource("/edit-copy.png")).toExternalForm();
 	    ImageView iv = new ImageView(s); 
 
     	KeyCodeCombination copylineCombination = new KeyCodeCombination(KeyCode.L, KeyCombination.SHORTCUT_DOWN);
@@ -1741,7 +1524,7 @@ public class GUI extends Application {
 		
 		// copy the complete table line (with all cells)
 		MenuItem mntcopycell= new MenuItem("Copy Cell");
-	    s = GUI.class.getResource("/edit-copy.png").toExternalForm();
+	    s = Objects.requireNonNull(GUI.class.getResource("/edit-copy.png")).toExternalForm();
 		iv = new ImageView(s);
 		mntcopycell.setGraphic(iv);
 	    mntcopycell.setAccelerator(copycellCombination);
@@ -1754,7 +1537,7 @@ public class GUI extends Application {
 		
 		// copy the complete table line (with all cells)
 		MenuItem mntcopytt = new MenuItem("Copy Tooltip");
-		s = GUI.class.getResource("/edit-copy.png").toExternalForm();
+		s = Objects.requireNonNull(GUI.class.getResource("/edit-copy.png")).toExternalForm();
 		iv = new ImageView(s);
 		mntcopytt.setGraphic(iv);
 	    mntcopytt.setAccelerator(copyttCombination);
@@ -1768,7 +1551,7 @@ public class GUI extends Application {
 		
         SeparatorMenuItem sepA = new SeparatorMenuItem();
     
-        s = GUI.class.getResource("/edit-find.png").toExternalForm();
+        s = Objects.requireNonNull(GUI.class.getResource("/edit-find.png")).toExternalForm();
         iv = new ImageView(s);
      	
         Menu analyze = new Menu("Convert...");
@@ -1783,7 +1566,7 @@ public class GUI extends Application {
     		
             ObservableList<TablePosition> selection = mytable.getSelectionModel().getSelectedCells();
             // nothing selected -> leave copy action
-            if (selection.size() == 0)
+            if (selection.isEmpty())
             	return;
            
             // where am I?
@@ -1803,8 +1586,8 @@ public class GUI extends Application {
       	
 				cellvalue1 = cellvalue1.replace(",",".");
 				cellvalue2 = cellvalue2.replace(",",".");
-				double latitude = Double.valueOf(cellvalue1);
-				double longitude = Double.valueOf(cellvalue2);
+				double latitude = Double.parseDouble(cellvalue1);
+				double longitude = Double.parseDouble(cellvalue2);
 				System.out.println(" Coordinates: " + latitude + " " + longitude);
 				showLocation(latitude,longitude);
 				
@@ -1812,9 +1595,8 @@ public class GUI extends Application {
 				Alert alert = new Alert(AlertType.ERROR);
 				alert.setTitle("Error");
 				alert.setContentText("No valid gps coordinates.");
-				alert.showAndWait();		
-				return;
-			}
+				alert.showAndWait();
+            }
         		
         });
         
@@ -1822,53 +1604,49 @@ public class GUI extends Application {
         analyze.getItems().add(blob);
         
         
-        EventHandler<ActionEvent> event = new EventHandler<ActionEvent>() { 
-            public void handle(ActionEvent e) 
-            { 
-            	CheckMenuItem selected = ((CheckMenuItem)e.getSource());
-            	String text = selected.getText();
-            	
-            	List<MenuItem> items = blob.getItems();
-            	for(int i=0; i < items.size();i++){
-            		CheckMenuItem cmi = (CheckMenuItem)items.get(i);
-            		if(cmi.isSelected() && !cmi.getText().equals(selected.getText()))
-            		{
-            			cmi.setSelected(false);
-            		}
-            
-            	}
-            	
-            	switch(text) 
-            	{
-            	    case Names.DEFAULT:
-            	    	 job.convertto.remove(tablename);
-            	    	break;
-            		case Names.BSON: 
-            			job.convertto.put(tablename,Names.BSON);
-            			break;
-            		case Names.Fleece: 
-        				job.convertto.put(tablename,Names.Fleece);
-        			break;
-            		case Names.MessagePack: 
-        				job.convertto.put(tablename,Names.MessagePack);
-        			break;
-            		case Names.ThriftBinary: 
-        				job.convertto.put(tablename,Names.ThriftBinary);
-        			break;
-            		case Names.ThriftCompact: 
-        				job.convertto.put(tablename,Names.ThriftCompact);
-        			break;
-            		case Names.ProtoBuffer: 
-            			job.convertto.put(tablename,Names.ProtoBuffer);
-        			break;
-        			
-        				
-            	}
-            	table.refresh();
-    			
-            	
-            } 
-        }; 
+        EventHandler<ActionEvent> event = e -> {
+            CheckMenuItem selected = ((CheckMenuItem)e.getSource());
+            String text = selected.getText();
+
+            List<MenuItem> items = blob.getItems();
+            for (MenuItem item: items) {
+                CheckMenuItem cmi = (CheckMenuItem) item;
+                if (cmi.isSelected() && !cmi.getText().equals(selected.getText())) {
+                    cmi.setSelected(false);
+                }
+
+            }
+
+            switch(text)
+            {
+                case Names.DEFAULT:
+                     job.convertto.remove(tablename);
+                    break;
+                case Names.BSON:
+                    job.convertto.put(tablename,Names.BSON);
+                    break;
+                case Names.Fleece:
+                    job.convertto.put(tablename,Names.Fleece);
+                break;
+                case Names.MessagePack:
+                    job.convertto.put(tablename,Names.MessagePack);
+                break;
+                case Names.ThriftBinary:
+                    job.convertto.put(tablename,Names.ThriftBinary);
+                break;
+                case Names.ThriftCompact:
+                    job.convertto.put(tablename,Names.ThriftCompact);
+                break;
+                case Names.ProtoBuffer:
+                    job.convertto.put(tablename,Names.ProtoBuffer);
+                break;
+
+
+            }
+            table.refresh();
+
+
+        };
         
         CheckMenuItem defaults = new CheckMenuItem(Names.DEFAULT);
         defaults.setOnAction(event);
@@ -1906,25 +1684,19 @@ public class GUI extends Application {
         
         /* This section is used to create a check item to BASE64 support for table cells (experimental)*/
         
-        EventHandler<ActionEvent> eventBASE64 = new EventHandler<ActionEvent>() { 
-            public void handle(ActionEvent e) 
-            { 
-                if (((CheckMenuItem)e.getSource()).isSelected()) 
-                {
-                	/* enable BASE64 for this table */
-                	System.out.println("BASE64 support enabled." + tablename);
-                	job.inspectBASE64.add(tablename);
-                	table.refresh();
-                }
-                else
-                {
-                	/* disable protobuffer inspection for this table */
-                	System.out.println("Off.");
-                	job.inspectBASE64.remove(tablename);
-                	table.refresh();
-                }
-            } 
-        }; 
+        EventHandler<ActionEvent> eventBASE64 = e -> {
+            if (((CheckMenuItem) e.getSource()).isSelected()) {
+                /* enable BASE64 for this table */
+                System.out.println("BASE64 support enabled." + tablename);
+                job.inspectBASE64.add(tablename);
+                table.refresh();
+            } else {
+                /* disable protobuf inspection for this table */
+                System.out.println("Off.");
+                job.inspectBASE64.remove(tablename);
+                table.refresh();
+            }
+        };
         
         CheckMenuItem base64 = new CheckMenuItem("BASE64 to..");
         base64.setOnAction(eventBASE64);
@@ -1940,12 +1712,12 @@ public class GUI extends Application {
 	
 	/**
 	 * This method is an action handler. It provides a copy of
-	 * the tool tip content to clip board. Note: The tool tip content
+	 * the tool tip content to the clipboard. Note: The tool tip content
 	 * can significantly differ from the cell value. BLOB values
-	 * like property lists or protobuffers are decoded and displayed
+	 * like property lists or protobufs are decoded and displayed
 	 * within the tool tip info. 
 	 *  
-	 * @param table
+	 * @param table table for action
 	 */
 	@SuppressWarnings({ "rawtypes", "unchecked" })
 	private void copyToolTipAction(FQTableView table){
@@ -1956,7 +1728,7 @@ public class GUI extends Application {
 		
         ObservableList<TablePosition> selection = table.getSelectionModel().getSelectedCells();
         // nothing selected -> leave copy action
-        if (selection.size() == 0)
+        if (selection.isEmpty())
         	return;
        
         // where am I?
@@ -1976,17 +1748,14 @@ public class GUI extends Application {
         String off = (String)ov.getValue();
         
         String cellvalue = "";
-       
-        Iterator<TableDescriptor> tbls = table.job.headers.iterator();
-    	while(tbls.hasNext()){
-    		TableDescriptor td = tbls.next();
-    		
-    		// What is the SQLType of the selected cell?
-    		if(td.tblname.equals(table.tablename)) {
-        		coltype = td.getSqlTypeForColumn(columnname);
-            	
-    		}	
-    	}    	
+
+        for (TableDescriptor td: table.job.headers) {
+            // What is the SQLType of the selected cell?
+            if (td.tblname.equals(table.tablename)) {
+                coltype = td.getSqlTypeForColumn(columnname);
+
+            }
+        }
     
     	if (null != coltype)
     		coltype = coltype.toUpperCase();
@@ -1997,13 +1766,14 @@ public class GUI extends Application {
 			
 			cellvalue = (String)observableValue.getValue();
 			
-			/**
-			 *  Logic is exactly the same as in  CustomToolTip.setToolTipText():
+			/*
+			 *  Logic is the same as in  CustomToolTip.setToolTipText():
 			 */
-		
-	    	if(coltype.equals("REAL") || coltype.equals("DOUBLE") || coltype.equals("FLOAT")) {
 
-	        	int point = -1;
+            assert coltype != null;
+            if(coltype.equals("REAL") || coltype.equals("DOUBLE") || coltype.equals("FLOAT")) {
+
+	        	int point;
 	        	
 	        	point = cellvalue.indexOf(",");
 	        	
@@ -2058,7 +1828,7 @@ public class GUI extends Application {
 	    	    boolean thriftc  = false;
 	    	    boolean protobuf = false;
 	    	    
-	    	    /* check, wether the user has activated a converter for binary 
+	    	    /* check, whether the user has activated a converter for binary
 	    	     * columns for this table 
 	    	     */
 	    	    if (job.convertto.containsKey(tablename)){
@@ -2209,7 +1979,7 @@ public class GUI extends Application {
 	    	        	}
 			    	  
 	    	       }
-	    	    	/* this binary formats cannot be viewed inside a ToolTip. We need to call the viewer from
+	    	    	/* This binary format cannot be viewed inside a ToolTip. We need to call the viewer from
 	    	    	 * the operating system.
 	    	    	 */
 	    	        else if(s.contains("pdf") || s.contains("heic") || s.contains("tiff")) {
@@ -2241,8 +2011,6 @@ public class GUI extends Application {
 	    	            	fext = ".png";
 	    	            else if(s.contains("<gif>"))
 	    	            	fext = ".gif"; 
-	    	            else if(s.contains("<gzip>"))
-	    	            	fext = ".gzip"; 
 	    	            else if(s.contains("<plist>"))
 	    	            	fext = ".plist"; 
 	    	       
@@ -2266,7 +2034,6 @@ public class GUI extends Application {
 	}
 	
 	private void setContent(String data){
-		//System.out.println(" Data::" + data);
 	 	content.putString(data);
 		clipboard.setContent(content);
 	}
@@ -2274,7 +2041,7 @@ public class GUI extends Application {
 	
 	/**
 	 * Action handler method.   
-	 * @param table
+	 * @param table table object
 	 */
 	@SuppressWarnings({ "rawtypes", "unchecked" })
 	private void copyCellAction(FQTableView table){
@@ -2283,7 +2050,7 @@ public class GUI extends Application {
         final ClipboardContent content = new ClipboardContent();
                  
         ObservableList<TablePosition> selection = table.getSelectionModel().getSelectedCells();
-        if (selection.size() == 0)
+        if (selection.isEmpty())
         	return;
         TablePosition tp = selection.get(0); 
         int row = tp.getRow();
@@ -2299,7 +2066,7 @@ public class GUI extends Application {
 		if (observableValue != null) {			
 			cellvalue = (String)observableValue.getValue();
 			
-			// handle binary values like protocol buffers, java serials or property lists
+			// handle binary values like protocol buffers, Java serials or property lists
 			if (cellvalue.startsWith("[BLOB-"))
 			{
 			    int from = cellvalue.indexOf("BLOB-");
@@ -2344,46 +2111,11 @@ public class GUI extends Application {
     final ClipboardContent content = new ClipboardContent();
 
 	
-	@SuppressWarnings("rawtypes")
-	public void cellvalue2clipboard(String cellvalue, FQTableView table, int row){
-		
-	    
-		int from = cellvalue.indexOf("BLOB-");
-      	int to = cellvalue.indexOf("]");
-      	String number = cellvalue.substring(from+5, to);
-      	 
-			
-			int start = cellvalue.indexOf("<");
-			int end   = cellvalue.indexOf(">");
-			
-			String type;
-			if (end > 0) {
-				type = cellvalue.substring(start+1,end);
-			}
-			else 
-				type = "bin";
-			
-			if(type.equals("java"))
-				type = "bin";
-		
-		    TableColumn tc = (TableColumn) table.getColumns().get(2);
-			ObservableValue off =  tc.getCellObservableValue(row);
-				
-			String path = GUI.baseDir + Global.separator + table.dbname + "_" + off.getValue() + "-" + number + "." + type;
-			System.out.println("Clipboard-Path<2>:: " + path);
-			String data = table.job.bincache.getHexString(path);
-			System.out.println(" Data" + data);				
-			content.putString(data.toUpperCase());
-			clipboard.setContent(content);
-			return;
-	}
-	
-	
 	/**
 	 * This method handles the "copy lines" action. All data of all selected lines
 	 * is copied to the system clipboard. BLOBs will be completely extracted from
 	 * the file cache.   
-	 * @param table
+	 * @param table the table the action belongs to
 	 */
 	@SuppressWarnings({ "rawtypes", "unchecked" })
 	private void copyLineAction(FQTableView table){
@@ -2413,7 +2145,7 @@ public class GUI extends Application {
         	// BLOB handling
         	while (s.hasNext()){ 
         	
-        		/* column for offset found ? */
+        		/* column for offset found? */
         		if(current == 5)
         		{
         			offset = s.next();
@@ -2426,7 +2158,7 @@ public class GUI extends Application {
         		
         		String cellvalue = s.next();
 
-    		    /* BLOB-value found ? */     		
+    		    /* BLOB-value found? */
         		if(cellvalue.length()>7) {
         			
 	        		
@@ -2472,25 +2204,6 @@ public class GUI extends Application {
 	
 
 	/**
-	 * Returns the Path object of for a given treeNode.
-	 * @param treeNode
-	 * @return TreePath 
-	 */
-	public static TreePath getPath(TreeNode treeNode) {
-		List<Object> nodes = new ArrayList<Object>();
-		if (treeNode != null) {
-			nodes.add(treeNode);
-			treeNode = treeNode.getParent();
-			while (treeNode != null) {
-				nodes.add(0, treeNode);
-				treeNode = treeNode.getParent();
-			}
-		}
-
-		return nodes.isEmpty() ? null : new TreePath(nodes.toArray());
-	}
-
-	/**
 	 * Returns the tree-path for a given node item. 
 	 * @param item
 	 * @return path as string
@@ -2503,18 +2216,6 @@ public class GUI extends Application {
         String path = item.getValue().name;
         TreeItem<NodeObject> tmp = item.getParent();
 
-        
-        if(tmp == null)
-        {	
-            try {
-            	int i = 1/0;
-            	System.out.println("" + i);
-            }catch(Exception err) {
-            	err.printStackTrace();
-            }
-            
-        }	
-        	
         while (tmp != null) {
            path = tmp.getValue().name + "/" + path;
            tmp = tmp.getParent();
@@ -2526,7 +2227,7 @@ public class GUI extends Application {
 	
 	/**
 	 * Returns the currently selected tree node.
-	 * @return
+	 * @return node object selected
 	 */
 	public NodeObject getSelectedNode()
 	{
@@ -2534,92 +2235,107 @@ public class GUI extends Application {
 	}
 	
 	/**
-	 * Sometimes we need an empty table as placeholder.
+	 * Sometimes we need an empty table as a placeholder.
 	 * 
 	 */
 	@SuppressWarnings("rawtypes")
 	protected void prepare_tree() {
 
 		if (tree == null) {
-			tree = new TreeView<NodeObject>(root);
+			tree = new TreeView<>(root);
 		 	tree.getSelectionModel().setSelectionMode(SelectionMode.SINGLE);
 			//tree.setCellRenderer(new CustomTreeCellRenderer());
 		}
 		
 		rightSide.getChildren().add(rootPane);
 
-		tree.getSelectionModel().selectedItemProperty().addListener( new ChangeListener<TreeItem>() {
-
-		        @SuppressWarnings({ "unchecked" })
-				@Override
-		        public void changed(ObservableValue observable, TreeItem oldValue, TreeItem newValue) {
-
-		       
-		            TreeItem<NodeObject> selectedItem = (TreeItem<NodeObject>) newValue;
-		            if (null == selectedItem)
-		            {
-		            	// after closeAll() we have to set back everything
-		            	Platform.runLater(new Runnable() {
-		            	    @Override
-		            	    public void run() {
-		            	    	rightSide.getChildren().clear();
-				            	rightSide.getChildren().add(rootPane);      	
-		            	    }
-		            	});
-		            	return;
-		            }	
-		          
-		            NodeObject node = selectedItem.getValue();
-		            if (null != node.tablePane)
-		            {
-		            	Platform.runLater(new Runnable() {
-		    	            @Override public void run() {
-		    	    
-		            	
-		    	            		rightSide.getChildren().clear();
-		    	            		rightSide.getChildren().add(node.tablePane);
-		    	            		
-		    	            		VBox.setVgrow(node.tablePane,Priority.ALWAYS);
-
-		    	            }
-		            	});
-		            }
-		            else // no table -> show db pane
-		            {
-		            	
-		            	if(node.isRoot){
-		            		rightSide.getChildren().clear();
-			            	rightSide.getChildren().add(rootPane);
-			            }
-		            	else{
+		tree.getSelectionModel().selectedItemProperty().addListener((ChangeListener<TreeItem>) (observable, oldValue, newValue) -> {
 
 
-							    //Platform.runLater(() -> {
-								String tp = getPath(selectedItem);
-							 	StackPane dbpanel  = (StackPane)tables.get(tp);
-							 
-							 	rightSide.getChildren().clear();
-							 	if(null != dbpanel)
-							 	{
-							 		rightSide.getChildren().add(dbpanel);		
-							 		dbpanel.setPrefHeight(4000);
-							 		VBox.setVgrow(dbpanel,Priority.ALWAYS);
-							 	}
-							
-							 
-							 	//});
-			            }
-		            }
-		        }
+            TreeItem<NodeObject> selectedItem = (TreeItem<NodeObject>) newValue;
+            if (null == selectedItem)
+            {
+                // after closeAll(), we have to set everything back
+                Platform.runLater(() -> {
+                    rightSide.getChildren().clear();
+                    rightSide.getChildren().add(rootPane);
+                });
+                return;
+            }
 
-		});
+            NodeObject node = selectedItem.getValue();
+            if (null != node.tablePane)
+            {
+                Platform.runLater(() -> {
+
+
+                        rightSide.getChildren().clear();
+                        rightSide.getChildren().add(node.tablePane);
+
+                        VBox.setVgrow(node.tablePane,Priority.ALWAYS);
+
+                        disableButtons(true);
+
+                });
+            }
+            else // no table -> show db pane
+            {
+
+                if(node.isRoot){
+                    rightSide.getChildren().clear();
+                    rightSide.getChildren().add(rootPane);
+
+                    disableButtons(true);
+
+                }
+                else{
+                        disableButtons(false);
+
+                        Platform.runLater(() -> {
+                             String tp = getPath(selectedItem);
+                             StackPane dbpanel  = (StackPane)tables.get(tp);
+
+                             rightSide.getChildren().clear();
+                             if(null != dbpanel)
+                             {
+                                 rightSide.getChildren().add(dbpanel);
+                                 dbpanel.setPrefHeight(4000);
+                                 VBox.setVgrow(dbpanel,Priority.ALWAYS);
+                             }
+
+
+                        });
+                }
+            }
+        });
 		
 	}
+
+    /**
+     * Depending on what is selected in the tree (db node or something else), we need to deactivate some of the
+     * menu items and buttons in the toolbar.
+     * @param active
+     */
+    private void disableButtons(boolean active){
+
+        Platform.runLater(() -> {
+
+            btnSQL.setDisable(active);
+            btnExport.setDisable(active);
+            btnExportDB.setDisable(active);
+            hexViewBtn.setDisable(active);
+            cmExport.setDisable(active);
+            mntmExportDB.setDisable(active);
+            mntmHex.setDisable(active);
+            mntmSQL.setDisable(active);
+
+            });
+    }
 	
 
 	/**
 	 * Show an open dialog and import <code>sqlite</code>-file.
-	 * After selecting a file the import will be automatically
+	 * After selecting a file, the import will be automatically
 	 * started.
 	 *  
 	 */
@@ -2669,7 +2385,7 @@ public class GUI extends Application {
 		try 
 		{
 			raf = new RandomAccessFile(file,"r");
-			byte h[] = new byte[16];
+			byte[] h = new byte[16];
 			raf.read(h);
 			if (!Auxiliary.bytesToHex3(h).equals(Job.MAGIC_HEADER_STRING)) 
 			{
@@ -2682,31 +2398,31 @@ public class GUI extends Application {
 			}
 			
 
-			/**
+			/*
 			 * Compute the entropy for the first bytes of the database.
 			 * This is where the schema definition normally resides. If
-			 * the entropy is higher than 7.5 is is definitely encrypted. 
+			 * The entropy is higher than 7.5; it is definitely encrypted.
 			 */
 			
 			
-			byte begin[];
+			byte[] begin;
 			if (raf.length()>= 4096)
 				begin = new byte[4000];
 			else
 				begin = new byte[400];
-					
-				raf.read(begin);
-				double entropy = Auxiliary.entropy(begin);
-				System.out.println("Entropy ::" + entropy);
-				if (entropy > 7.5){
-					abort = true;
-					Alert alert = new Alert(AlertType.ERROR);
-					alert.setTitle("Error");
-					alert.setContentText("The database file seems to be encrypted! \n Entropy value : " + entropy + " \n Import stopped.");
-					alert.showAndWait();
-			
-				}
-			
+
+            raf.read(begin);
+            double entropy = Auxiliary.entropy(begin);
+            System.out.println("Entropy::" + entropy);
+            if (entropy > 7.5){
+                abort = true;
+                Alert alert = new Alert(AlertType.ERROR);
+                alert.setTitle("Error");
+                alert.setContentText("The database file seems to be encrypted! \n Entropy value : " + entropy + " \n Import stopped.");
+                alert.showAndWait();
+
+            }
+
 			
 		}
 		catch(Exception err)
@@ -2719,7 +2435,9 @@ public class GUI extends Application {
 		}
 		finally		
 		{
-			try { raf.close(); } catch(IOException err){}
+			try { raf.close(); } catch(IOException err){
+                AppLog.error(err.getMessage());
+            }
 		}
 	    /* no valid file or no permissions -> cancel import */
 		if (abort)
@@ -2732,8 +2450,8 @@ public class GUI extends Application {
 		VBox.setVgrow(panel,Priority.ALWAYS);
 		
 			
-		NodeObject o = new NodeObject(file.getName(), null, -1, FileTypes.SQLiteDB, 99);
-		TreeItem<NodeObject> dbNode = new TreeItem<NodeObject>(o); 
+		NodeObject o = new NodeObject(file.getName(), null, -1, FileTypes.SQLiteDB, 99, false);
+		TreeItem<NodeObject> dbNode = new TreeItem<>(o);
 		dbNode.setGraphic(createFadeTransition("loading..."));	
 		root.getChildren().add(dbNode);
 		
@@ -2745,11 +2463,11 @@ public class GUI extends Application {
 		dbnames.add(file.getName());
 			
 			
-		/* Does a companion RollbackJournal exist ? */
+		/* Does a companion RollbackJournal exist? */
 		if (doesRollbackJournalExist(file.getAbsolutePath()) > 0) {
 				NodeObject ro = new NodeObject(file.getName() + "-journal", null, -1,
-						FileTypes.RollbackJournalLog, 100);
-				rjNode = new TreeItem<NodeObject>(ro);
+						FileTypes.RollbackJournalLog, 100, false);
+				rjNode = new TreeItem<>(ro);
 				dbnames.add(file.getName()+ "-journal");
 
 				rjNode.setGraphic(createFadeTransition("loading..."));
@@ -2770,11 +2488,11 @@ public class GUI extends Application {
 
 		}
 
-		/* Does a companion WAL-archive exist ? */
+		/* Does a companion WAL-archive exist? */
 		else if (doesWALFileExist(file.getAbsolutePath()) > 0) {
 
-			NodeObject wo = new NodeObject(file.getName() + "-wal", null, -1, FileTypes.WriteAheadLog, 101);
-			walNode = new TreeItem<NodeObject>(wo);
+			NodeObject wo = new NodeObject(file.getName() + "-wal", null, -1, FileTypes.WriteAheadLog, 101, false);
+			walNode = new TreeItem<>(wo);
 			walNode.setGraphic(createFadeTransition("loading..."));
 			dbnames.add(file.getName()+ "-wal");
 
@@ -2811,9 +2529,9 @@ public class GUI extends Application {
 	}
 	
 	/**
-	 * During import a fading "loading.." message is shown. This method 
-	 * creates an label for this purpose.
-	 * @param msg
+	 * During import, a fading "loading..." message is shown. This method
+	 * creates a label for this purpose.
+	 * @param msg labeltext
 	 * @return
 	 */
 	private Label createFadeTransition(String msg) 
@@ -2828,13 +2546,13 @@ public class GUI extends Application {
 	}
 
 	/**
-	 * Try to find out, if there is a companion WAL-Archive. This file can be found
-	 * in the same directory as the database file and also has the same name as the
-	 * database, but with 4 character added to the end – “-wal”
+	 * Try to find out if there is a companion WAL-Archive. This file can be found
+	 * in the same directory as the database file, and also has the same name as the
+	 * database, but with 4 characters added to the end – “-wal”
 	 * 
 	 * 
-	 * @param dbfile
-	 * @return
+	 * @param dbfile database filename
+	 * @return true, if file exists.
 	 */
 	public static long doesWALFileExist(String dbfile) {
 		
@@ -2842,7 +2560,7 @@ public class GUI extends Application {
 		String walpath = dbfile + "-wal";
 		Path path = Paths.get(walpath);
 
-		if (Files.exists(path, new LinkOption[] { LinkOption.NOFOLLOW_LINKS }))
+		if (Files.exists(path, LinkOption.NOFOLLOW_LINKS))
 			try {
 				return Files.size(path);
 			} catch (IOException e) {
@@ -2854,19 +2572,19 @@ public class GUI extends Application {
 	}
 
 	/**
-	 * Try to find out, if there is a companion RollbackJournal-File. This file can
-	 * be found in the same directory as the database file and also has the same
-	 * name as the database, but with 8 character added to the end – “-journal”
+	 * Try to find out if there is a companion RollbackJournal-File. This file can
+	 * be found in the same directory as the database file, and also has the same
+	 * name as the database, but with 8 characters added to the end – “-journal”
 	 * 
 	 * 
-	 * @param dbfile
-	 * @return file size of the rollback-journal archive or -1 if no -journal files exists. 
+	 * @param dbfile database filename
+	 * @return file size of the rollback-journal archive or -1 if no journal files exist.
 	 */
 	public static long doesRollbackJournalExist(String dbfile) {
 		String rolpath = dbfile + "-journal";
 		Path path = Paths.get(rolpath);
 
-		if (Files.exists(path, new LinkOption[] { LinkOption.NOFOLLOW_LINKS }))
+		if (Files.exists(path, LinkOption.NOFOLLOW_LINKS))
 			try {
 				return Files.size(path);
 			} catch (IOException e) {
@@ -2878,18 +2596,47 @@ public class GUI extends Application {
 	}
 
 	/**
-	 * Print a new message to the trace window on the bottom of the screen. 
-	 * @param message
+	 * Print a new message to the trace window at the bottom of the screen.
+	 * @param message the log message
 	 */
 	protected void doLog(String message) {
 		AppLog.info(message);
 	}
 
-	/**
-	 * This method is called to write the contents of a database to a CSV file. 
-	 * 
-	 * @param no Database node for export
-	 */
+
+    /**
+     * This method is called to transfer the recovered data of a database to a new database.
+     *
+     * @param no Database node for export
+     */
+    private void export_db(NodeObject no) {
+
+        boolean success;
+
+        FileChooser fileChooser = new FileChooser();
+        fileChooser.setTitle("Export recovered data to a new Database");
+        fileChooser.setInitialFileName(prepareDefaultDBName(no.name));
+        File f = fileChooser.showSaveDialog(stage);
+
+        if(null == f)
+            return;
+
+        ExportType etype = switch (no.tabletype) {
+            case 99 -> ExportType.SQLITEDB;
+            case 100 -> ExportType.ROLLBACKJOURNAL;
+            case 101 -> ExportType.WALARCHIVE;
+            default -> null;
+        };
+
+        success = no.job.exportDB(no.job.filename, f.getAbsolutePath(), etype);
+
+    }
+
+        /**
+         * This method is called to write the contents of a database to a CSV file.
+         *
+         * @param no Database node for export
+         */
 	private void export_table(NodeObject no) {
 
 		if (null == no)
@@ -2945,7 +2692,7 @@ public class GUI extends Application {
 	/**
 	 * Returns a filename with a time stamp in ISO_DATE_TIME format.
 	 * @param nameofnode
-	 * @return
+	 * @return filename with timestamp included.
 	 */
 	private String prepareDefaultFileName(String nameofnode){
 		LocalDateTime now = LocalDateTime.now();
@@ -2955,55 +2702,49 @@ public class GUI extends Application {
 		date = date.replace(":","_");
 		return nameofnode + date + ".csv";
 	}
+
+    /**
+     * Returns a filename with a time stamp in ISO_DATE_TIME format.
+     * @param nameofnode
+     * @return dbname with timestamp included.
+     */
+    private String prepareDefaultDBName(String nameofnode){
+        LocalDateTime now = LocalDateTime.now();
+        DateTimeFormatter df;
+        df = DateTimeFormatter.ISO_DATE_TIME; // 2020-01-31T20:07:07.095
+        String date = df.format(now);
+        date = date.replace(":","_");
+        return nameofnode + date + ".sqlite";
+    }
 	
-	
+
 	/**
-	 * Prepares the table row - with all columns - for a TableView.  
-	 * @param tp 
-	 * @param linenumber the current line number (we put this number in front of the datarecord).
-	 * @param data the actual line of data to fill in
-	 * @param isWALTable whether or not the table to built is a WAL-Table 
-	 * @return
-	 */
-	@SuppressWarnings("unused")
-	private ObservableList<String> prepareRow(int linenumber, LinkedList<String> row,boolean isWALTable)
-	{
-				
-		ObservableList<String> list = FXCollections.observableArrayList(row);
-		list.add(0,String.valueOf(++linenumber));	
-		return list;
-	}
-	
-	
-	/**
-	 * This method is used to insert new records into a output table. 
+	 * This method is used to insert new records into an output table.
 	 * 
-	 * @param tp  the table name
-	 * @param data  String array with data rows
-	 * @param isWALTable whether or not this table to fill is a WAL-Table
+	 * @param treepath  the table name
+	 * @param rows  String array with data rows
+	 * @param isWALTable this table to fill is a WAL-Table
 	 */
 	@SuppressWarnings({ "unchecked", "rawtypes" })
 	public void update_table(String treepath, ObservableList<ObservableList<String>> rows, boolean isWALTable) {
 		
-		System.out.println("Treepath ::: " + treepath);
 		datasets.put(treepath, rows);
 		
 		int linenumber = 0;
-		Iterator<ObservableList<String>> rt = rows.iterator();
-		while(rt.hasNext()) {
-			rt.next().add(0,String.valueOf(++linenumber));	
-		}
+        for (ObservableList<String> row : rows) {
+            row.add(0, String.valueOf(++linenumber));
+        }
 
 		
-		// define array list for all table rows 
+		// define an array list for all table rows
 		ObservableList<ObservableList> obdata = FXCollections.observableArrayList();
 		//ObservableList<ObservableList> obdata = FXCollections.observableList(rows);
-		for (int i = 0; i < rows.size(); i++){
-			obdata.add(rows.get(i));				
-		}
+        for (ObservableList<String> row : rows) {
+            obdata.add(row);
+        }
 		// first get the right table
-	    FQTableView tb = null;
-		TextField filterField = null;
+	    FQTableView tb;
+		TextField filterField;
 		ComboBox columnselector;
 		Button clearFilter;
 		
@@ -3020,57 +2761,45 @@ public class GUI extends Application {
 		    String text = statusline.getText();
 		    statusline.setText(text + " | rows: " + rows.size());
 		} catch (Exception err) {
-			System.err.println(err);
-			return ;
+            AppLog.error(err.getMessage());
+            return ;
 		}
 		
 		/* Just in case ;-) */
 		if (tb == null) {
-			doLog(">>>> Unkown tablename" + treepath);
+            AppLog.info(">>>> Unkown tablename" + treepath);
 			return;
 		}
 			
-		// determine the right treeitem for a given treepath from hashtable
+		// determine the right tree item for a given treepath from the hashtable
 		TreeItem<NodeObject> node = treeitems.get(treepath);
 		
 		if (null != node && rows.size()>0 )
 		{
-
 			node.getValue().hasData = true;
 			
-			Platform.runLater(new Runnable() {
-	            @Override public void run() {
-	            	String s = null;
-	            	if (node.getValue().tabletype == 0) // normal table with rows
-	            		s = GUI.class.getResource("/table-icon.png").toExternalForm();  
-	            	if (node.getValue().tabletype == 1) // index table with rows
-	            		s = GUI.class.getResource("/table-key-icon.png").toExternalForm();  	            	
-	            	if (null == s)
-	            		return;
-	            	ImageView iv = new ImageView(s);
-	    			node.setGraphic(null);
-	    			node.setGraphic(iv); 
-	    			TreeItem.graphicChangedEvent();
-	    			TreeItem.valueChangedEvent();
-	    			tree.refresh();
-	    		}
-	        });
+			Platform.runLater(() -> {
+                String s = "";
+                if (node.getValue().tabletype == 0) // normal table with rows
+                    s = Objects.requireNonNull(GUI.class.getResource("/table-icon.png")).toExternalForm();
+                if (node.getValue().tabletype == 1) // index table with rows
+                    s = Objects.requireNonNull(GUI.class.getResource("/table-key-icon.png")).toExternalForm();
+                if (null == s)
+                    return;
+                ImageView iv = new ImageView(s);
+
+                node.setGraphic(null);
+                node.setGraphic(iv);
+                TreeItem.graphicChangedEvent();
+                TreeItem.valueChangedEvent();
+                tree.refresh();
+            });
 		
 		}
 		
 		final TextField ff = filterField;
 		final ComboBox cs = columnselector;
 		clearFilter.setOnAction(e ->{ ff.clear(); cs.getSelectionModel().select(0); });
-		
-		
-	    // iterate over row array to create table rows  
-		//for(int i = 0; i < rows.size(); i++)
-		//{
-		//	LinkedList<String> data = rows.get(i);
-			// rearrange the row cell values for table view
-		//	obdata.add(FXCollections.observableList(prepareRow(i,data,isWALTable)));
-			
-		//}
 		
 		Iterator it = tb.getColumns().iterator();
 		ArrayList<String> cnames = new ArrayList<String>();
@@ -3128,17 +2857,17 @@ public class GUI extends Application {
 	}
 
 	
-	private int filter(String treepath, List<String> fnames, ComboBox<String> columnselector, @SuppressWarnings("rawtypes") FilteredList<ObservableList> filteredData, String oldValue, String newValue){		
+	private void filter(String treepath, List<String> fnames, ComboBox<String> columnselector, @SuppressWarnings("rawtypes") FilteredList<ObservableList> filteredData, String oldValue, String newValue){
 		
 		filteredData.setPredicate(r -> {
 		
 			// Compare the column values of all row columns with filter text.
 			String lowerCaseFilter = newValue.toLowerCase();
 			
-			String clvalue = (String)columnselector.getSelectionModel().getSelectedItem();
+			String clvalue = columnselector.getSelectionModel().getSelectedItem();
 			
-			String searchfor = "";
-			String cname = "";
+			String searchfor;
+			String cname;
 			
 			if((clvalue != null && !clvalue.startsWith("All Columns")))
 			{
@@ -3146,56 +2875,42 @@ public class GUI extends Application {
 				
 				if (clvalue.equals("Status"))
 					clvalue = "";
-				
-				if (clvalue != null) {
-					cname = clvalue.toLowerCase();
-					searchfor = lowerCaseFilter;
-				}
-				
-				searchfor = searchfor.trim();
+
+                cname = clvalue.toLowerCase();
+                searchfor = lowerCaseFilter;
+
+                searchfor = searchfor.trim();
 				System.out.println("searchfor " + searchfor);
 				System.out.println("cname "+ cname);
 				int cnumber = fnames.indexOf(cname);
 				cnumber++;		
 				
 				if (r.size()>cnumber) {
-				
-					switch(cname) {
-						
-						case "pll|hl"  : cnumber = 2;
-						break;
-						
-						case "rowid"   : cnumber = 3;
-						break;
-					
-						case ""     : cnumber = 4;
-						break;
-						
-						case "offset"   : cnumber = 5;
-						break;
-					
-					}
+
+                    cnumber = switch (cname) {
+                        case "pll|hl" -> 2;
+                        case "rowid" -> 3;
+                        case "" -> 4;
+                        case "offset" -> 5;
+                        default -> cnumber;
+                    };
 					
 					String value = (String)r.get(cnumber);
 					System.out.println("Value " + value + "Search for " + searchfor);
-					if (StringUtils.containsIgnoreCase(value, searchfor))		
-					{	
-						return true;
-					}
+                    return StringUtils.containsIgnoreCase(value, searchfor);
 				}
 			}
 			else {
 				// case: search all columns in a row
-				for (int cc = 0; cc < r.size(); cc++) {
-					// get next row
-					String value = (String)r.get(cc);
-					{
-						if (StringUtils.containsIgnoreCase(value, newValue))	
-						{
-							return true; // Filter matches name
-						}
-					}
-				}
+                for (Object o: r) {
+                    // get next row
+                    String value = (String) o;
+                    {
+                        if (StringUtils.containsIgnoreCase(value, newValue)) {
+                            return true; // Filter matches name
+                        }
+                    }
+                }
 	
 			}
 			
@@ -3203,7 +2918,6 @@ public class GUI extends Application {
 			
 		}); // end of setPredicate()
 		
-		return filteredData.size();
 	} // end of filter()
 
 	private void updatestatusline(String treepath,int number, int total){
@@ -3226,13 +2940,8 @@ public class GUI extends Application {
 		return rowcolors;
 	}
 
-	public void setRowcolors(Hashtable<Object, String> rowcolors) {
-		this.rowcolors = rowcolors;
-	}
 
-	
-
-	private class CustomComparator implements Comparator<String>{
+	private static class CustomComparator implements Comparator<String>{
 
 	    @Override
 	    public int compare(String o1, String o2) {
@@ -3244,12 +2953,12 @@ public class GUI extends Application {
 	        if (o2 == null) 
 	        	return 1;
 
-	        if (o1.length() == 0)
+	        if (o1.isEmpty())
 	        	return -1;
 	        
 	        char ch = o1.charAt(0);
 	       
-	        // only if o1 start with a number or a sign
+	        // only if o1 starts with a number or a sign
 	        if((ch >= '0' && ch <= '9') || ch =='-' || ch =='+')
 	        {
 	        	Integer i1=null;

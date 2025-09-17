@@ -57,12 +57,12 @@ public class IndexDescriptor extends AbstractDescriptor implements Comparable{
 			byte[] bcol = Auxiliary.decode(match);
 	
 			/* interpret all byte values as a list of varints */
-			/* each varint represents a columntype */
+			/* each varint represents a column type */
 			VIntIter values = VIntIter.wrap(bcol,4);
 			
 			
 			/*
-			 * normally, the first byte of the match holds total length of header bytes
+			 * Normally, the first byte of the match holds the total length of header bytes
 			 * including this byte
 			 */
 			//int headerlength = values.next().length;
@@ -71,7 +71,7 @@ public class IndexDescriptor extends AbstractDescriptor implements Comparable{
 			
 			boolean valid = true;
 	        int i = 1;
-			// check serialtypes, only if all serialtypes are valid the match is valid too
+			// check serialtypes, only if all serialtypes are valid, the match is valid too
 			while (values.hasNext()) {
 				
 				int value = values.next();
@@ -81,7 +81,7 @@ public class IndexDescriptor extends AbstractDescriptor implements Comparable{
 	
 				switch (type) {
 				case "INT":
-					/* an INT column has always a value between 0..6 */
+					/* an INT column always has a value between 0..6 */
 					valid = value >= 0 && value <= 6;
 					break;
 				case "REAL":
@@ -89,7 +89,7 @@ public class IndexDescriptor extends AbstractDescriptor implements Comparable{
 					valid = value == 7;
 					break;
 				case "TEXT":
-					/* a TEXT COLUMN has always an odd value bigger 13 or is zero */
+					/* a TEXT COLUMN has always an odd value bigger than 13 or is zero */
 					if (value == 0)
 						valid = true;
 					else if (value % 2 != 0)
@@ -98,7 +98,7 @@ public class IndexDescriptor extends AbstractDescriptor implements Comparable{
 						valid = false;
 					break;
 				case "BLOB":
-					/* a BLOB COLUMN has always an even value bigger 13 or is zero */
+					/* a BLOB COLUMN always has an even value bigger than 13 or is zero */
 					if (value == 0)
 						valid = true;
 					else if (value % 2 == 0)
@@ -130,11 +130,11 @@ public class IndexDescriptor extends AbstractDescriptor implements Comparable{
 
 
 	 /**
-	  * Use this method to initialize a new index table description object. 
+	  * Use this method to initialise a new index table description object.
 	  * @param job	The job/database it belongs to
 	  * @param idxname name of the index (from the schema)
 	  * @param tablename name of the table the index belongs to
-	  * @param stmt the concrete sql statement used to create the index
+	  * @param stmt the concrete SQL statement used to create the index
 	  * @param names list of column names 
 	  */
 	public IndexDescriptor(Job job, String idxname, String tablename, String stmt, ArrayList<String> names) {
@@ -161,7 +161,7 @@ public class IndexDescriptor extends AbstractDescriptor implements Comparable{
 	
 
 	/**
-	 * Returns a regex for only some serialtypes of the indices.
+	 * Returns a regex for only some serial types of the indices.
 	 * 
 	 * @param startcolumn
 	 * @param endcolumn
@@ -204,9 +204,9 @@ public class IndexDescriptor extends AbstractDescriptor implements Comparable{
 	
 	/**
 	 * Returns the indices header length.
-	 * The header begins with a single varint which determines 
+	 * The header begins with a single varint, which determines
 	 * the total number of bytes in the header. 
-	 * The varint value is the size of the header in bytes including 
+	 * The varint value is the size of the header in bytes, including
 	 * the size varint itself.
 	 * @return
 	 */
@@ -231,9 +231,9 @@ public class IndexDescriptor extends AbstractDescriptor implements Comparable{
 	 * a particular serial type.
 	 * 
 	 * The header size varint and serial type varints will usually 
-	 * consist of a single byte. The serial type varints for large 
-	 * strings and BLOBs might extend to two or three byte varints,
-	 * but that is the exception rather than the rule.
+	 * consists of a single byte. The serial type varints for large
+	 * strings and BLOBs might extend to two or three-byte varints,
+	 * But that is the exception rather than the rule.
 	 * 
 	 * @param serialtype
 	 * @param multicol
