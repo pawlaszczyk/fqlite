@@ -14,10 +14,10 @@ def protocversion = "27.4"
 
 def currentOs = org.gradle.internal.os.OperatingSystem.current()
 
-apply plugin: "application"
-
-mainClassName = "fqlite.base.JARStarter"
-
+application {
+   mainClass.set("fqlite.base.JARStarter")
+}
+ 
 
 repositories {
     mavenCentral()
