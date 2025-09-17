@@ -10,7 +10,7 @@ plugins {
 apply plugin: 'eclipse'
 
 group 'hswm.fqlite'
-version '3.21'
+version '3.3'
 
 def protocversion = "27.4"
 
