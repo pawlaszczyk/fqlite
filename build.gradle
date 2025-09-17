@@ -7,8 +7,6 @@ plugins {
     id "de.undercouch.download" version "5.6.0"
 }
 
-apply plugin: 'eclipse'
-
 group 'hswm.fqlite'
 version '3.3'
 
@@ -16,9 +14,10 @@ def protocversion = "27.4"
 
 def currentOs = org.gradle.internal.os.OperatingSystem.current()
 
-application {
-    mainClassName.set("fqlite.base.JARStarter")
-}
+apply plugin: "application"
+
+mainClassName = "fqlite.base.JARStarter"
+
 
 repositories {
     mavenCentral()
