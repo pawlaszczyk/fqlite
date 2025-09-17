@@ -17,7 +17,7 @@ def protocversion = "27.4"
 def currentOs = org.gradle.internal.os.OperatingSystem.current()
 
 application {
-    mainClassName = "fqlite.base.JARStarter"
+    mainClassName.set("fqlite.base.JARStarter")
 }
 
 repositories {
