@@ -8,7 +8,7 @@ FQLite is a tool to find and restore deleted records in SQLite databases. It the
 
 
 <p align="center">
-  <img width="95%" height="95%" src="img/fqlite_screenshot.png?raw=true" alt="FQLite Screenshot"/>
+  <img width="95%" height="95%" src="img/fqlite_mainscreen.jpg?raw=true" alt="FQLite Screenshot"/>
 </p>
 
 
@@ -29,6 +29,7 @@ FQLite allows you to:
 * analysing BLOB formats like Google protobuf, AVRO, Apple plist, Thrift,... 
 * integrated SQL-Analyser 
 * Displaying database PRAGMA values
+* Export recovered data into a new SQLite database 
 
 Some features:
 
@@ -37,6 +38,7 @@ Some features:
 * open-source
 * free of charge
 * runs out of the box
+* multi platform support
 
 <p align="center">
   <img width="95%" height="95%" src="img/fqlite_sqlanalyzer.png?raw=true" alt="SQL Analyzer"/>
