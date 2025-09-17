@@ -92,10 +92,10 @@ jobs:
         #####
         # Windows - Chocolatey package
         #####
-      # - name: Prepare chocolatey package installer
-      #  if: startsWith(matrix.os, 'windows')
-      #  env:
-      #    VERSION: ${{ needs.get-version.outputs.version }}
+      - name: Prepare chocolatey package installer
+        if: startsWith(matrix.os, 'windows')
+        env:
+          VERSION: ${{ needs.get-version.outputs.version }}
       #  run: |
       #    cd packaging\choco\
       #    ./replace_config.ps1
@@ -139,7 +139,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           body_path: CHANGELOG.md
-          tag_name: ${{ needs.get-version.outputs.version }}
+          tag_name: ${{ steps.get-version.outputs.version }}
           make_latest: true
           files: |
             artifacts/*
