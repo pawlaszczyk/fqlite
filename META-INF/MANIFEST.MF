@@ -1,7 +1,0 @@
-Manifest-Version: 1.0
-Main-Class: org.eclipse.jdt.internal.jarinjarloader.JarRsrcLoader
-Rsrc-Class-Path: ./ antlr-4.8-complete.jar
-Rsrc-Main-Class: fqlite.base.GUI
-SplashScreen-Image: fqlite_logo_256.png
-Class-Path: .
-
