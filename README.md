@@ -54,9 +54,7 @@ https://www.staff.hs-mittweida.de/~pawlaszc/fqlite/
 ### Official User Guide
 
 You can find the current version of the user manual under the following link: 
-
-https://github.com/pawlaszczyk/fqlite/blob/master/resources/FQLite_UserGuide.pdf
-
+http://dx.doi.org/10.13140/RG.2.2.20276.92800
 
 ### Technical Background
 
