@@ -1,10 +1,9 @@
 package fqlite.ui;
 
-import java.util.Comparator;
-import java.util.Iterator;
-import java.util.LinkedHashMap;
-import java.util.Map;
+import java.util.*;
+
 import fqlite.base.GUI;
+import fqlite.log.AppLog;
 import fqlite.types.FileTypes;
 import javafx.application.Platform;
 import javafx.beans.property.SimpleStringProperty;
@@ -40,18 +39,9 @@ import javafx.util.Callback;
 @SuppressWarnings("rawtypes")
 public class DBPropertyPanel extends StackPane{
 
-	
-	public Label ldbpath;
-    public Label lpagesize;
-    public Label lencoding;
-    public Label ltotalsize;   
-    public Label lpagesizeout;
-    public Label lencodingout;
-    public Label ltotalsizeout;
-    private FileInfo info;
-    public Button columnBtn;
+    private final FileInfo info;
     public String  columnStr = "";
-    private GUI gui;
+    private final GUI gui;
     
     TabPane tabpane = new TabPane();
     
@@ -61,7 +51,7 @@ public class DBPropertyPanel extends StackPane{
 		this.gui = gui;
 		VBox base = new VBox();
 		
-		String s = GUI.class.getResource("/gray_schema32.png").toExternalForm();
+		String s = Objects.requireNonNull(GUI.class.getResource("/gray_schema32.png")).toExternalForm();
 		Button btnSchema = new Button("Show Schema Info");
 		ImageView iv = new ImageView(s);
 		btnSchema.setGraphic(iv);
@@ -92,7 +82,7 @@ public class DBPropertyPanel extends StackPane{
         tabpane.getTabs().add(headerinfotab);
 	
         
-        String[] column ={"Offset","Property","Value"};
+        String[] column ={"Offset", "Property", "Value"};
 		
 		TableView table = new TableView<>();
 		table.getSelectionModel().setSelectionMode(
@@ -289,8 +279,6 @@ public class DBPropertyPanel extends StackPane{
          str += "</body></html>";
         
          columnStr = str;
-         
-         //System.out.println(columnStr);
 	}
 	
 	public void showColumnInfo()
@@ -307,9 +295,8 @@ public class DBPropertyPanel extends StackPane{
 	@SuppressWarnings("unchecked")
 	public void initPagesTable(String[][] data)
 	{
-		
-		
-		String[] column ={"page","offset","type of page","table","signature"};
+
+		String[] column ={"page", "offset", "type of page", "table", "signature"};
 		
 		TableView table = new TableView<>();
 		table.getSelectionModel().setSelectionMode(
@@ -334,8 +321,8 @@ public class DBPropertyPanel extends StackPane{
 			            @Override
 			            public int compare(Object o1, Object o2) {
 			            
-			            	Long i1 = Long.parseLong((String)o1);
-			                Long i2 = Long.parseLong((String)o2);
+			            	long i1 = Long.parseLong((String)o1);
+			                long i2 = Long.parseLong((String)o2);
 			                return (i1 < i2) ? -1 : +1 ;
 			            }
 			        });
@@ -381,7 +368,7 @@ public class DBPropertyPanel extends StackPane{
 	{
 		
 		
-		String column[]={"No.","Type","Tablename","Root","SQL-Statement","Virtual","ROWID"};         
+		String[] column ={"No.", "Type", "Tablename", "Root", "SQL-Statement", "Virtual", "ROWID"};
 		
 		TableView table = new TableView<>();
 		table.getSelectionModel().setSelectionMode(
@@ -406,9 +393,9 @@ public class DBPropertyPanel extends StackPane{
 			            @Override
 			            public int compare(Object o1, Object o2) {
 			            
-			            	Long i1 = Long.parseLong((String)o1);
-			                Long i2 = Long.parseLong((String)o2);
-			                return (i1 < i2) ? -1 : +1 ;
+			            	long i1 = Long.parseLong((String)o1);
+			                long i2 = Long.parseLong((String)o2);
+			                return (i1 < i2) ? -1: +1 ;
 			            }
 			        });
 				}
@@ -499,7 +486,7 @@ private ContextMenu createContextMenu(TableView<String> table){
 		
 		// copy a single table line
 		MenuItem mntcopyline = new MenuItem("Copy Line(s)");
-		String s = GUI.class.getResource("/edit-copy.png").toExternalForm();
+		String s = Objects.requireNonNull(GUI.class.getResource("/edit-copy.png")).toExternalForm();
 	    ImageView iv = new ImageView(s); 
 
 		
@@ -534,7 +521,7 @@ private ContextMenu createContextMenu(TableView<String> table){
 		
 		// copy the complete table line (with all cells)
 		MenuItem mntcopycell= new MenuItem("Copy Cell");
-	    s = GUI.class.getResource("/edit-copy.png").toExternalForm();
+	    s = Objects.requireNonNull(GUI.class.getResource("/edit-copy.png")).toExternalForm();
 		iv = new ImageView(s);
 		mntcopycell.setGraphic(iv);
 	    mntcopycell.setAccelerator(copycellCombination);
@@ -567,18 +554,16 @@ private ContextMenu createContextMenu(TableView<String> table){
 	@SuppressWarnings("unchecked")
 	private void copyLineAction(TableView table){
 		
-		StringBuffer sb = new StringBuffer();			
+		StringBuilder sb = new StringBuilder();
 	 	final javafx.scene.input.Clipboard clipboard = javafx.scene.input.Clipboard.getSystemClipboard();
 	    final ClipboardContent content = new ClipboardContent();
-		ObservableList<TablePosition> selection = table.getSelectionModel().getSelectedCells();	        
-	    Iterator<TablePosition> iter = selection.iterator();
-	    
-	    while(iter.hasNext()) {
-	    	
-	    	TablePosition pos = iter.next();	        	
-	    	ObservableList<String> hl = (ObservableList<String>)table.getItems().get(pos.getRow());
-	    	  sb.append(hl.toString() + "\n");
-	    }
+		ObservableList<TablePosition> selection = table.getSelectionModel().getSelectedCells();
+
+        for (TablePosition pos: selection) {
+
+            ObservableList<String> hl = (ObservableList<String>) table.getItems().get(pos.getRow());
+            sb.append(hl.toString() + "\n");
+        }
 	    System.out.println("Write value to clipboard " + sb.toString());
 	    content.putString(sb.toString());
 	    clipboard.setContent(content);
@@ -596,7 +581,7 @@ private ContextMenu createContextMenu(TableView<String> table){
     final ClipboardContent content = new ClipboardContent();
              
     ObservableList<TablePosition> selection = table.getSelectionModel().getSelectedCells();
-    if (selection.size() == 0)
+    if (selection.isEmpty())
     	return;
     TablePosition tp = selection.get(0); 
     int row = tp.getRow();
@@ -688,7 +673,7 @@ private ContextMenu createContextMenu(TableView<String> table){
 								   GUI.HEXVIEW.go2(model, position);
 								   
 							   }catch(Exception err) {
-								   
+                                   AppLog.error(err.getMessage());
 							   }
 							   
 						       

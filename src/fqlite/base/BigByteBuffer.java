@@ -18,7 +18,7 @@ import java.util.List;
 public class BigByteBuffer {
 
 	
-	private static int OVERLAP = Integer.MAX_VALUE / 2;
+	private static final int OVERLAP = Integer.MAX_VALUE / 2;
 	private final List<ByteBuffer> buffers;
 	private long pos = 0;
 	private long limit = 0;
@@ -35,16 +35,13 @@ public class BigByteBuffer {
 	}
 
 	/**
-	 * Clears the buffer.
-	 *
-	 * @return this buffer
-	 */
-	public final BigByteBuffer clear() {
+     * Clears the buffer.
+     */
+	public final void clear() {
 		limit = cap;
 		pos = 0;
 		mark = -1;
-		return this;
-	}
+    }
 
 	/**
 	 * Flips the buffer.
@@ -95,7 +92,7 @@ public class BigByteBuffer {
 	 *
 	 * @return this buffer
 	 */
-	public final BigByteBuffer mark() {
+	private final BigByteBuffer mark() {
 		mark = pos;
 		return this;
 	}
@@ -134,16 +131,7 @@ public class BigByteBuffer {
 		return this;
 	}
 
-	/**
-	 * mmap the file and return a BigByteBuffer for it.
-	 * 
-	 * @param file the file to mmap
-	 * @throws java.io.IOException if there is an error reading the file
-	 */
-	public BigByteBuffer(File file) throws IOException {
-		this(new RandomAccessFile(file, "r"));
-	}
-	
+
 	/**
 	 * mmap the file and return a BigByteBuffer for it.
 	 * 
@@ -183,7 +171,7 @@ public class BigByteBuffer {
 		pos=0;
 		limit = cap = length;
 		ByteBuffer bb = ByteBuffer.wrap(array, offset, length);
-		buffers = new ArrayList<ByteBuffer>();
+		buffers = new ArrayList<>();
 		buffers.add(bb);
 	}
 
@@ -291,12 +279,12 @@ public class BigByteBuffer {
       * @exception IndexOutOfBoundsException If the preconditions on the offset
       * and length parameters do not hold
       */
-    public static final BigByteBuffer wrap(byte[] array, int offset, int length)
+    public static BigByteBuffer wrap(byte[] array, int offset, int length)
     {
     	return new BigByteBuffer(array,offset,length);
     }
     
-    public static final BigByteBuffer wrap(byte[] array)
+    public static BigByteBuffer wrap(byte[] array)
     {
     	return new BigByteBuffer(array);
     }

@@ -3,10 +3,12 @@ package fqlite.ui;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
+import java.util.Objects;
 import java.util.Properties;
 import java.util.function.Predicate;
 import fqlite.base.GUI;
 import fqlite.base.Global;
+import fqlite.log.AppLog;
 import javafx.application.Platform;
 import javafx.beans.binding.DoubleBinding;
 import javafx.beans.value.ChangeListener;
@@ -40,16 +42,14 @@ import javafx.stage.Stage;
 import javafx.util.Callback;
 
 /**
- * This class realizes a font-selection dialog window.
- * 
+ * This class realises a font-selection dialogue window.
  * You can change the application font with this class.
- * 
  */
 public class FontDialog extends javafx.scene.control.Dialog<Font> {
     
-    private FontPanel fontPanel;
-    static  Font defaultFont;
-    static  javafx.scene.Node root;
+    private final FontPanel fontPanel;
+    private static Font defaultFont;
+    private static javafx.scene.Node root;
      
     public FontDialog(Font defaultFont, javafx.scene.Node rootelement) {
         
@@ -62,7 +62,7 @@ public class FontDialog extends javafx.scene.control.Dialog<Font> {
         setTitle("Select font");
         dialogPane.setHeaderText("Select font");
 
-        String s = GUI.class.getResource("/icon_checked.png").toExternalForm();		
+        String s = Objects.requireNonNull(GUI.class.getResource("/icon_checked.png")).toExternalForm();
         dialogPane.setGraphic(new ImageView(new Image(s)));
        
         ButtonBar buttonBar = new ButtonBar();
@@ -108,9 +108,7 @@ public class FontDialog extends javafx.scene.control.Dialog<Font> {
 
     
     /**************************************************************************
-     * 
      * Support classes
-     * 
      **************************************************************************/
 
   
@@ -254,7 +252,7 @@ public class FontDialog extends javafx.scene.control.Dialog<Font> {
     			alert.showAndWait();		
 
     		} catch (Exception err) {
-    		
+                AppLog.error(err.getMessage());
     		}
     		
     		

@@ -32,7 +32,7 @@ public class DatetimeConverter{
 	 * 
 	 * 
 	 * @param timestamp the timestamp to check
-	 * @return true if MAC Absoulte Time
+	 * @return true if MAC Absolute Time
 	 */
 	
 	public static String isMacAbsoluteTime(double timestamp)
@@ -76,7 +76,7 @@ public class DatetimeConverter{
   	/**     
   	 * Convert the given Julian Day to Gregorian Date (in UT time zone).
      * Based on the formula given in the Explanatory Supplement to the
-     * Astronomical Almanac, pg 604.
+     * Astronomical Almanack, pg 604.
      */
     private static Date calculateGregorianDate(double jd) {
         int l = (int) jd + 68569;

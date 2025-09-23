@@ -17,6 +17,8 @@ import javafx.scene.image.Image;
 import javafx.scene.image.ImageView;
 import javafx.util.StringConverter;
 
+import java.util.Objects;
+
 /**
  * Custom tooltip implementation.
  */
@@ -81,7 +83,7 @@ class CustomTooltip extends Tooltip {
     	  	
     	String colname = tc.getTableColumn().getText();
     	
-    	if(colname.equals("")){		
+    	if(colname.isEmpty()){
             String s = "state (D: deleted, F: freelist)"; //getItemText(cell, converter);
         	setText(s);     
             return;
@@ -163,7 +165,7 @@ class CustomTooltip extends Tooltip {
     	    boolean thriftc  = false;
     	    boolean protobuf = false;
     	    
-    	    /* check, wether the user has activated a converter for binary 
+    	    /* check whether the user has activated a converter for binary
     	     * columns for this table 
     	     */
     	    if (job.convertto.containsKey(tablename)){
@@ -423,9 +425,7 @@ class CustomTooltip extends Tooltip {
     	            else if(s.contains("<png>"))
     	            	fext = ".png";
     	            else if(s.contains("<gif>"))
-    	            	fext = ".gif"; 
-    	            else if(s.contains("<gzip>"))
-    	            	fext = ".gzip"; 
+    	            	fext = ".gif";
     	            else if(s.contains("<plist>"))
     	            	fext = ".plist"; 
     	       
@@ -438,12 +438,12 @@ class CustomTooltip extends Tooltip {
     	    			text = text.substring(0,2000);
     	    	
     	    		
-    	    		//Add text as "tooltip" so that user can read text without editing it.
+    	    		//Add text as "tooltip" so that the user can read text without editing it.
     	    		setText(text);
      	           	setWrapText(true);
  	    	        prefWidthProperty().bind(cell.widthProperty());
     	     	            
-    	            s = GUI.class.getResource("/hex-32.png").toExternalForm();
+    	            s = Objects.requireNonNull(GUI.class.getResource("/hex-32.png")).toExternalForm();
     	    		ImageView iv = new ImageView(s);
     	    		setGraphic(iv);   
     	    		return;
@@ -452,7 +452,7 @@ class CustomTooltip extends Tooltip {
     	    }
 
     	}
-    	if (coltype != null && coltype.length()>0)
+    	if (coltype != null && !coltype.isEmpty())
     		setText("[" +coltype + "] " + tc.getText());
     	else
     		setText(tc.getText());

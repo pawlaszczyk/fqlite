@@ -1,9 +1,7 @@
 package fqlite.pattern;
 
-public class FloatingConstrain implements Constraint {
+public class FloatingConstraint implements Constraint {
 
-   
-	
 	@Override
 	public boolean match(int value) {
 	

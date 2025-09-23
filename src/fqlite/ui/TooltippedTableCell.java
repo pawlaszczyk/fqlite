@@ -19,7 +19,7 @@ import javafx.util.converter.DefaultStringConverter;
  * Just like a normal table cell, but each table cell has a tooltip that will display its contents. This makes
  * it easier for the user: they can read the contents without having to expand the table cell.
  * <p>
- * Look it's easy:
+ * Look, it's easy:
  * <code>
  * someColumn.setCellFactory(TooltippedTableCell.forTableColumn());
  * </code>
@@ -67,13 +67,6 @@ public class TooltippedTableCell<S, T> extends TableCell<S, T> {
     @SuppressWarnings("unchecked")
 	private void updateItem(final Cell<T> cell, final StringConverter<T> converter) {
 
-    	
-//    	if (super.getIndex() % 2 == 0)
-//	    	   this.setStyle("-fx-font-style: italic; -fx-alignment: TOP-RIGHT; -fx-background-color: honeydew;");
-//	       else
-//	    	   this.setStyle("-fx-font-style: italic; -fx-alignment: TOP-RIGHT; -fx-background-color: lavender;");
-//  
-
  	   this.setStyle(this.getStyle() + "-fx-font-style: italic;");
 
     	
@@ -86,7 +79,7 @@ public class TooltippedTableCell<S, T> extends TableCell<S, T> {
         } 
         else{
             
-        	/* determine column data type (INT,BLOB,VARCHAR...) */
+        	/* determine column data type (INT, BLOB, VARCHAR...) */
         	if(null == coltype) {
 	           	
 	        	Iterator<TableDescriptor> tbls = job.headers.iterator();
@@ -100,7 +93,7 @@ public class TooltippedTableCell<S, T> extends TableCell<S, T> {
 	        	}
         	}
         	
-        	/* not a table ? -> check the index table list */
+        	/* not a table? -> check the index table list */
         	if(coltype == null){
         		
         		Iterator<IndexDescriptor> idxs = job.indices.iterator();
@@ -135,7 +128,7 @@ public class TooltippedTableCell<S, T> extends TableCell<S, T> {
             	
         		}
         		catch(Exception err){
-        		   // There is a bug actually under windows -> no idea why	
+        		   // There is a bug actually under Windows -> no idea why
         		   return;
         		}
         		

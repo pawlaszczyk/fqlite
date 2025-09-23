@@ -91,11 +91,6 @@ public class MemoryTable extends AbstractTable implements ScannableTable {
 
         // https://github.com/apache/calcite/blob/fa8349069d141d3c75bafa06d5fb8800711ec8d6/example/csv/src/main/java/org/apache/calcite/adapter/csv/CsvEnumerator.java#L111
         List<RelDataType> types = fieldTypes.stream().map(typeFactory::createSqlType).collect(Collectors.toList());
-       // System.out.println("$$$$ types" + types.toString());
-       // System.out.println("$$$$ size" + types.size());
-       // System.out.println("$$$$ fieldNames" + fieldNames.toString());
-       // System.out.println("$$$$ size" + fieldNames.size());
-           
         return typeFactory.createStructType(types, fieldNames);
     }
 
@@ -120,8 +115,6 @@ public class MemoryTable extends AbstractTable implements ScannableTable {
     			res[i] = v.textValue();
     		else
     			res[i] = "test";
-    		
-            
 
         }
 

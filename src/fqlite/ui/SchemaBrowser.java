@@ -6,6 +6,7 @@ import java.io.OutputStream;
 import java.io.PrintStream;
 import java.nio.file.FileSystems;
 
+import fqlite.log.AppLog;
 import javafx.geometry.HPos;
 import javafx.geometry.VPos;
 import javafx.scene.image.ImageView;
@@ -44,8 +45,8 @@ public class SchemaBrowser extends Region {
 	        getChildren().add(browser); 
 	        }
 	        catch(Exception err)
-	        { 
-	        	System.out.println(err);
+	        {
+                AppLog.error(err.getMessage());
 	        }
 	        
 	    }

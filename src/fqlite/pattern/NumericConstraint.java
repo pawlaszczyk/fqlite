@@ -1,13 +1,13 @@
 package fqlite.pattern;
 
 /**
- * An numeric Type could be anything.
- * Accordingly this type always returns true.
+ * A numeric Type could be anything.
+ * Accordingly, this type always returns true.
  * 
  * @author pawlaszc
  *
  */
-public class NumericConstrain implements Constraint{
+public class NumericConstraint implements Constraint{
 
 	@Override
 	public boolean match(int value) {

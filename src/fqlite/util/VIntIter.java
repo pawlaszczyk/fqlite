@@ -2,9 +2,8 @@ package fqlite.util;
 
 
 /**
- * This class is a wrapper class. 
- * 
- * 
+ * This class is a wrapper class.
+ * It implements a simple iterator for variable integer values.
  */
 public class VIntIter {
 
@@ -35,7 +34,6 @@ public class VIntIter {
 	public static VIntIter wrap(byte[] values, int channel){
 		channels[channel].put(values);
 		return channels[channel];
-	    //return new VIntIter(values);
 	}
 	
 	public void put(byte[] values){

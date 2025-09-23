@@ -21,23 +21,22 @@ public class MemTableSchema extends AbstractSchema{
    
     /**
      * Creates a new MemoryTable with the given name, columns and SQL types.
-     * @param tablename
-     * @param columnnames
-     * @param sqltypes
-     * @return
+     *
+     * @param tablename   name of the table to create
+     * @param columnnames names of all table columns
+     * @param sqltypes    names of the sql types for each column to create
      */
-    public MemoryTable createTable(String tablename, List<String> columnnames, List<String> sqltypes){
+    public void createTable(String tablename, List<String> columnnames, List<String> sqltypes){
     	
     	MemoryTable mt = new MemoryTable(tablename,columnnames,sqltypes);
     	tables.put(tablename, mt);
-    	return mt;
     }
     
     /**
      * Fill a table with a given table name with data.
      *  
-     * @param tablename
-     * @param data
+     * @param tablename name of the table to fill
+     * @param data actual data rows
      */
     public void fill(String tablename, ObservableList<ObservableList<String>> data){
     	
@@ -55,7 +54,7 @@ public class MemTableSchema extends AbstractSchema{
     	  
     		//System.out.println(" Fieldnames number " + fieldnames.size());
     		for (int i = 0; i < fieldnames.size(); i++){
-    	    	// put column name as key and cell value as for each element in a row 
+    	    	// put column name as key and cell value for each element in a row
     	        if (values.size() < i)
     	        {
     	        	row.put(fieldnames.get(i),"");
@@ -64,15 +63,11 @@ public class MemTableSchema extends AbstractSchema{
     	    		row.put(fieldnames.get(i),"");
     	    	}
     	    	else {
-    	    		//System.out.println("cell:: " + i +  " " + values.get(i));      
     	    		row.put(fieldnames.get(i),values.get(i).toString());
     	    	}
     		
     		}
-    	    //System.out.println(" added row " + rowid);
-    	    // save complete row to table map with the "rowid" as key
-    	    //System.out.println("ROW:: " + row);
-    		tmap.put(rowid, row);	
+    		tmap.put(rowid, row);
     	    rowid++;
     	}
     }
@@ -95,8 +90,7 @@ public class MemTableSchema extends AbstractSchema{
     	        
     	    	row.put(fieldnames.get(i),values.get(i).toString());
     	    }
-    	    // System.out.println(" added row " + rowid);
-    	    // save complete row to table map with the "rowid" as key
+     	    // save complete row to table map with the "rowid" as key
     	    tmap.put(rowid, row);	
     	    rowid++;
     	}
@@ -106,10 +100,7 @@ public class MemTableSchema extends AbstractSchema{
 
     @Override
     protected Map<String,Table> getTableMap() {
-    
     	return tables;
-    	//return Collections.singletonMap(tablename, new MemoryTable(table));
-    	 
     }
 
 

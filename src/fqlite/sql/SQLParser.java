@@ -42,9 +42,9 @@ import net.sf.jsqlparser.statement.select.Select;
 
 
 /**
- * This class is used to evaluate the sql-statements. After checking the syntax
- * of the SELECT statement, the Parser loads the in-memory tables. Finally the
- * query is executed using the JDBC-interface. The resultset are automatically  
+ * This class is used to evaluate the SQL statements. After checking the syntax
+ * of the SELECT statement, the Parser loads the in-memory tables. Finally, the
+ * query is executed using the JDBC interface. The result set is automatically
  * written to a table view. 
  * 
  * @author Dirk Pawlaszczyk
@@ -61,10 +61,10 @@ public class SQLParser {
 	/**
 	 * Parse and execute the user-defined SQL statement.
 	 * 
-	 * @param command
-	 * @param dbname
-	 * @param gui
-	 * @param stage
+	 * @param command the SQL SELECT statement to parse
+	 * @param dbname the database name
+	 * @param gui reference to the main window of the application
+	 * @param stage the current stage object (where changes should take place)
 	 * @return
 	 */
 	@SuppressWarnings("rawtypes")
@@ -98,28 +98,21 @@ public class SQLParser {
 		/* the table name should be the first element in the name parts list */
 		String kk = parts.get(0);
 
-		/*  check the combo box to determine the currently selected database */
-		//List<SelectItem<?>> selectlist = ps.getSelectItems();
-
 		// build table path (the same as in the tree)
 		String tablekey = "Databases/" + dbname + "/" + kk; // table;
-		//System.out.println("SQLParser -> tablekey " + tablekey);
-
-		// get table rows from the already existing dataset
-		//Enumeration<String> keys = gui.datasets.keys();
 
 		/* the table data are already in memory -> we just have to use it */
 		ObservableList<ObservableList<String>> tb = gui.datasets.get(tablekey);
 
-		
 		String schemaid = null;
-		// Is there already a table schema for the given database?
+
+        // Is there already a table schema for the given database?
 		if (!dbname2schema.containsKey(dbname)) {
 			
 			// for internal managing, we need a unique schema ID for each database
 			schemaid = "schema" + (subschemas.size() + 1);
 
-			// remember the connection between the database and chosen
+			// remember the connection between the database and the chosen
 			dbname2schema.put(dbname, schemaid);
 		} else {
 			// use the already existing schema
@@ -131,10 +124,9 @@ public class SQLParser {
 
 			Node nd = gui.tables.get(tablekey);
 
-			if (nd instanceof VBox) {
+			if (nd instanceof VBox vb) {
 
-				VBox vb = (VBox) nd;
-				FQTableView tbl = (FQTableView) vb.getChildren().get(1);
+                FQTableView tbl = (FQTableView) vb.getChildren().get(1);
 
 				try {
 
@@ -142,7 +134,7 @@ public class SQLParser {
 
 					if (null == subschemas.get(schemaid)) {
 
-						/**
+						/*
 						 * Check if the table has been added to the analyser already.
 						 */
 						schema = new MemTableSchema();
@@ -158,15 +150,9 @@ public class SQLParser {
 
 					String tbname = parts.get(0); 
 
-					// now we are ready to create the missing table
+					//Now we are ready to create the missing table
 					if (schema.getTable(tbname) == null) {
-						//System.out.println(" create new table::" + tbname);
-						//System.out.println(" number of columns:: " + tbl.columns.size());
-						//System.out.println(" number of types:: " + tbl.columntypes.size());
-
-						prepareTable(tbl, schema, tbname);
-
-						//System.out.println(" Fill table :: " + tbname);
+                        prepareTable(tbl, schema, tbname);
 						// fill the table of our calcite schema with the references of our memory table
 						try {
 							schema.fill(tbname, tb);
@@ -183,64 +169,58 @@ public class SQLParser {
 					 */
 					if (null != joins) {
 
-						Iterator<Join> itj = joins.iterator();
-						while (itj.hasNext()) {
+                        for (Join j: joins) {
 
-							Join j = itj.next();
-							Table jtable = (Table) j.getFromItem();
-							//System.out.println("join table:: " + jtable);
+                            Table jtable = (Table) j.getFromItem();
+                            //System.out.println("join table:: " + jtable);
 
-							List<String> jparts = jtable.getNameParts();
+                            List<String> jparts = jtable.getNameParts();
 
-							// only the table name
-							String jkk = jparts.get(0);
+                            // only the table name
+                            String jkk = jparts.get(0);
 
-							// build table path (the same as in the tree)
-							String jtablekey = "Databases/" + dbname + "/" + jkk;
+                            // build table path (the same as in the tree)
+                            String jtablekey = "Databases/" + dbname + "/" + jkk;
 
-							Node jnd = gui.tables.get(jtablekey);
+                            Node jnd = gui.tables.get(jtablekey);
 
-							if (jnd instanceof VBox) {
+                            if (jnd instanceof VBox jvb) {
 
-								VBox jvb = (VBox) jnd;
-								FQTableView jtbl = (FQTableView) jvb.getChildren().get(1);
+                                FQTableView jtbl = (FQTableView) jvb.getChildren().get(1);
 
-								MemTableSchema jschema;
+                                MemTableSchema jschema;
 
-								if (null == subschemas.get(schemaid)) {
+                                if (null == subschemas.get(schemaid)) {
 
-									/**
-									 * Check, if the table has been added to the analyser already.
-									 */
-									jschema = new MemTableSchema();
-									// register the newly defined schema to the root schema
-									// the database name is used as the schema name
-									rootSchema.add(schemaid, jschema);
-								} else {
-									jschema = subschemas.get(schemaid);
-								}
+                                    /*
+                                     * Check if the table has been added to the analyser already.
+                                     */
+                                    jschema = new MemTableSchema();
+                                    // register the newly defined schema to the root schema
+                                    // the database name is used as the schema name
+                                    rootSchema.add(schemaid, jschema);
+                                } else {
+                                    jschema = subschemas.get(schemaid);
+                                }
 
-								jtbname = jtable.getName();
+                                jtbname = jtable.getName();
 
-								// now we are ready to create the missing table
-								if (jschema.getTable(jtbname) == null) {
-								//	System.out.println(" create new table::" + jtbname);
-								//	System.out.println(" number of columns:: " + jtbl.columns.size());
-								//	System.out.println(" number of types:: " + jtbl.columntypes.size());
-									prepareTable(jtbl, jschema, jtbname);
+                                //Now we are ready to create the missing table
+                                if (jschema.getTable(jtbname) == null) {
+                                    prepareTable(jtbl, jschema, jtbname);
 
-									// fill the table of our calcite schema with the references of our memory table
-									try {
-										ObservableList<ObservableList<String>> jtb = gui.datasets.get(jtablekey);
-										if (null != jtb)
-											jschema.fill(jtbname, jtb);
-									} catch (Exception err) {
-										showErrorFillTable(stage); 
-										err.printStackTrace();
-									}
-								}
-							}
-						}
+                                    // fill the table of our calcite schema with the references of our memory table
+                                    try {
+                                        ObservableList<ObservableList<String>> jtb = gui.datasets.get(jtablekey);
+                                        if (null != jtb)
+                                            jschema.fill(jtbname, jtb);
+                                    } catch (Exception err) {
+                                        showErrorFillTable(stage);
+                                        err.printStackTrace();
+                                    }
+                                }
+                            }
+                        }
 					}
 
 					/* get a statement object */
@@ -249,11 +229,6 @@ public class SQLParser {
 					// calcite does not accept semicolons inside the SELECT statement
 					command = command.replaceAll(";", "");
 					// important: tbname will be expanded to schemaid.tbname
-
-					System.out.println("§§§ tablename " + tbname);
-					System.out.println("§§§ jtablename " + jtbname);
-					
-					System.out.println("For replace " + command);
 					command = command.replaceFirst(" " + tbname, " " + schemaid + "." + tbname);
 
 					if (jtbname != null)
@@ -286,15 +261,9 @@ public class SQLParser {
 
 						LinkedList<String> lrow = new LinkedList<String>();
 						for (int i = 1; i <= cols; i++) {
-
 							lrow.add(rs.getString(i));
-							//lrow.add(0, rs.getString(i));
 						}
-						//rlist.add(lrow);
-						//lrow.remove(1);
 						obdata.add(FXCollections.observableList(lrow));
-						//if (counter % 10000 == 0)
-						//	System.out.println("processed" + counter + " of " + rs.getFetchSize());
 						counter++;
 					}
 
@@ -328,11 +297,12 @@ public class SQLParser {
 	}
 
 	/**
-	 * This method is used to add column types and column names.
-	 * @param tbl
-	 * @param schema
-	 * @param tbname
-	 */
+     * This method is used to add column types and column names.
+     *
+     * @param tbl the tableview object to prepare
+     * @param schema schema information
+     * @param tbname the name of the table
+     */
 	@SuppressWarnings({ "rawtypes", "unchecked" })
 	private static void prepareTable(FQTableView tbl, MemTableSchema schema, String tbname) {
 
@@ -432,13 +402,13 @@ public class SQLParser {
 	}
 
 	/**
-	 * This method is used to update the table view in the SQL analyzer window with
+	 * This method is used to update the table view in the SQL analyser window with
 	 * the latest result set.
 	 * 
-	 * @param table
-	 * @param columns
-	 * @param data
-	 * @param rowno
+	 * @param table the TableView object to fill
+	 * @param columns a list of columns for this table
+	 * @param data the actual data rows as a list
+	 * @param rowno true if there is a rowno column included
 	 */
 
 	@SuppressWarnings({ "rawtypes", "unchecked" })
@@ -486,8 +456,8 @@ public class SQLParser {
 	}
 
 	/**
-	 * The CALCITE "database" can be accessed with a normal jdbc-driver. Remember:
-	 * This database is only managing java in-memory data structures.
+	 * The CALCITE "database" can be accessed with a normal JDBC driver. Remember:
+	 * This database only manages Java in-memory data structures.
 	 */
 	public void connectToInMemoryDatabase() {
 		try {
@@ -497,12 +467,12 @@ public class SQLParser {
 			Properties info = new Properties();
 			info.setProperty("lex", "JAVA");
 
-			// establish connection the calcite framework
+			// establish connection to the calcite framework
 			Connection connection = DriverManager.getConnection("jdbc:calcite:", info);
 
 			this.calciteConnection = connection.unwrap(CalciteConnection.class);
 
-			// we need add a self defined schema to the root schema
+			//We need to add a self-defined schema to the root schema
 			this.rootSchema = calciteConnection.getRootSchema();
 
 		} catch (Exception err) {

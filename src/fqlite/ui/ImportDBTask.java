@@ -35,13 +35,11 @@ public class ImportDBTask {
           System.out.println("DB Import Done!");
           Platform.runLater(new Runnable() {
                 public void run() {
-                  // database-small-icon.png
                   String s = Objects.requireNonNull(GUI.class.getResource("/green_database24.png")).toExternalForm();
                   ImageView iv = new ImageView(s);
                   job.dbNode.setGraphic(iv);
                   job.updatePropertyPanel();
-           //     }
-           //   });
+
           if (GUI.doesRollbackJournalExist(ImportDBTask.this.job.path) > 0L) {
             String rjpath = String.valueOf(ImportDBTask.this.job.path) + "-journal";
             RollbackJournalReader rol = new RollbackJournalReader(rjpath, ImportDBTask.this.job);
@@ -61,7 +59,7 @@ public class ImportDBTask {
             ImportDBTask.this.job.wal = wal;
             wal.parse();
             wal.output();
-            String s3 = GUI.class.getResource("/green_archive24.png").toExternalForm();
+            String s3 = Objects.requireNonNull(GUI.class.getResource("/green_archive24.png")).toExternalForm();
             ImageView iv3 = new ImageView(s3);
             if (ImportDBTask.this.job.walNode != null)
               ImportDBTask.this.job.walNode.setGraphic(iv3); 
@@ -71,7 +69,6 @@ public class ImportDBTask {
                }
           });
          
-          //Toolkit.getDefaultToolkit().beep();
         }
         
         public void cancelled() {

@@ -17,18 +17,12 @@ public class ADComparator implements Comparator<AbstractDescriptor> {
 		List<String> l2 = o2.serialtypes;
 		int first = 0;
 		int second = 0;
-		
-		//System.out.println("Vergleiche " + l1 + " mit " + l2);
-		
+
 		if(l1 == null || l2 == null) {
 			System.out.println("NULL values");
 			return 0;
 		}	
-		
-		//System.out.println(" l1 " + o1.getName()); 
-		//System.out.println(" l2 " + o1.getName()); 
-		
-		
+
 		if (l1.isEmpty() || l2.isEmpty())
 			return 0;
 		
@@ -38,13 +32,11 @@ public class ADComparator implements Comparator<AbstractDescriptor> {
 		if(l2.get(0).equals("BLOB") || l1.get(0).equals("TEXT"))
 			first -= 20;
 		
-		/* compare number of columns -> highest column number wins*/
+		/* compare number of columns -> the highest column number wins*/
 		if(l1.size() < l2.size())
 			first +=1;
 		if(l1.size() > l2.size())
 			second +=1;
-
-		//System.out.println("first:: " + first + " second:: " + second);
 
         return Integer.compare(first, second);
 

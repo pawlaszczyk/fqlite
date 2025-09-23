@@ -7,7 +7,7 @@ package fqlite.pattern;
  * @author pawlaszc
  *
  */
-public class ZeroConstrain implements Constraint{
+public class ZeroConstraint implements Constraint{
 
 	@Override
 	public boolean match(int value) {

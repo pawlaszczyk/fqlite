@@ -186,7 +186,7 @@ public class SQLiteDatabaseCreator {
             colNames = desc.columnnames.subList(5,desc.columnnames.size()-1);
         }
         else {
-            // first we have to find the correct TablDescription object from the list
+            // first we have to find the correct TableDescriptor object from the list
             for (TableDescriptor d: tables) {
                 if (d.tblname.equals(tableName)) {
                     desc = d;

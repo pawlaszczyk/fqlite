@@ -17,14 +17,9 @@ import javafx.util.Callback;
 public class RollbackPropertyPanel extends StackPane{
 
 	
-   private FileInfo info;
-
-    
-    
+    private final FileInfo info;
     TabPane tabpane = new TabPane();
-    
 
-    
 	public RollbackPropertyPanel(FileInfo info)
 	{
 		this.info = info;
@@ -47,7 +42,7 @@ public class RollbackPropertyPanel extends StackPane{
 	        tabpane.getTabs().add(headerinfotab);
 		
 		
-	        String column[]={"Offset","Property","Value"};         
+	        String[] column ={"Offset", "Property", "Value"};
 			
 			TableView table = new TableView<>();
 			
@@ -77,7 +72,7 @@ public class RollbackPropertyPanel extends StackPane{
 	@SuppressWarnings({ "unchecked", "rawtypes" })
 	private void fillTable(TableView table, String[][] data)
 	{
-		// define array list for all table rows 
+		// define an array list for all table rows
 	    ObservableList<ObservableList> obdata = FXCollections.observableArrayList();
 		
 	    // iterate over row array to create a data row 

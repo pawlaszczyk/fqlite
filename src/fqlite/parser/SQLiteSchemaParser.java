@@ -43,7 +43,7 @@ public class SQLiteSchemaParser {
 
 		roots.add(root);
 
-		/***** start with extraction of component definitions *****/
+		/* start with extraction of component definitions */
 
 		/* the component name and columns are extracted here */
 		TableParser p = new TableParser();
@@ -70,7 +70,7 @@ public class SQLiteSchemaParser {
 			if(tds.isVirtual())
 				job.virtualTables.put(tds.tblname,tds);
 				
-			if (null != tds && tds.tblname != null) {
+			if (tds.tblname != null) {
 				AppLog.debug(tds.getStandardPattern().toString());
 				tds.tblname = tablename;
 				tds.ROWID = rowid;  // this flag indicates whether there is a ROWID or not
@@ -91,7 +91,7 @@ public class SQLiteSchemaParser {
 					 *  
 					 *  In some cases, there exist several versions of the same table.
 					 *  Those different table versions can have different columns. 
-					 *  To solve those issue, we always take the table with the highest
+					 *  To solve those issues, we always take the table with the highest
 					 *  number of columns. 
 					 */
 				

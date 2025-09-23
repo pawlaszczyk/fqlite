@@ -8,8 +8,7 @@ import java.util.List;
  * This class is used for matching a byte sequence 
  * against a list of constraints.
  * 
- * Every serial type of a record header including 
- * the header length byte is represented
+ * Every serial type of record header, including the header length byte, is represented
  * with a Constraint object. 
  * 
  * @author pawlaszc
@@ -35,7 +34,7 @@ public class HeaderPattern {
 	
 	public void change2RowID(int idx)
 	{
-		pattern.set(idx, new ZeroConstrain());
+		pattern.set(idx, new ZeroConstraint());
 	}
 	
 	public void add(Constraint c)
@@ -49,24 +48,24 @@ public class HeaderPattern {
 	}
 	
 	/**
-	 *  add a "00" zero column constrain to the constrain list.
+	 *  add a "00" zero column constraint to the constraint list.
 	 */
 	public void addZeroConstraint() 
 	{
-		pattern.add(new ZeroConstrain());
+		pattern.add(new ZeroConstraint());
 	}
 
 	/**
-	 *  add a "mix..max" header constrain to the constrain list.
+	 *  add a "mix...max" header constraint to the constraint list.
 	 */
 	public void addHeaderConstraint(int min, int max) 
 	{
-		pattern.add(new HeaderConstrain(min,max));
+		pattern.add(new HeaderConstraint(min,max));
 		
 	}
 	
 	/**
-	 *  add a integer column constrain to the constrain list.
+	 *  add an integer column constraint to the constraint list.
 	 *  A value between 00..06.
 	 */
 	public void addIntegerConstraint() 
@@ -76,44 +75,44 @@ public class HeaderPattern {
 	
 	
 	/**
-	 *  add a string column constrain to the constrain list.
+	 *  add a string column constraint to the constraint list.
 	 *  A value >= 13;  
 	 **/
 	public void addStringConstraint() 
 	{
-		pattern.add(new StringConstrain());
+		pattern.add(new StringConstraint());
 	}
 	
 	
 	/**
-	 *  add a string column constrain to the constrain list
+	 *  add a string column constraint to the constraint list
 	 *  with a max-value (i.e. varchar(32) -> max-value = 32*2+13)
 	 **/
 	public void addStringConstraint(int maxlength) 
 	{
-		pattern.add(new StringConstrain(maxlength));
+		pattern.add(new StringConstraint(maxlength));
 	}
 	
 	
 	public void addNumericConstraint() 
 	{
-		pattern.add(new NumericConstrain());
+		pattern.add(new NumericConstraint());
 	}
 	
 	/**
-	 *  add a BLOB constrain for a BLOB column.
+	 *  add a BLOB constraint for a BLOB column.
 	 */
 	public void addBLOBConstraint() 
 	{
-		pattern.add(new BLOBConstrain());
+		pattern.add(new BLOBConstraint());
 	}
 	
 	/**
-	 *  add a floating point constrain.
+	 *  add a floating-point constraint.
 	 */
 	public void addFloatingConstraint()
 	{
-		pattern.add(new FloatingConstrain());
+		pattern.add(new FloatingConstraint());
 	}
 	
 	
@@ -124,7 +123,7 @@ public class HeaderPattern {
 	{
 		String result = "[";
 		
-		for (Constraint c : pattern)
+		for (Constraint c: pattern)
 		{
 			result += c.toString() + "|";
 		}

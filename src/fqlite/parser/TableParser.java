@@ -7,11 +7,8 @@ import fqlite.descriptor.TableDescriptor;
 
 /**
  * This class is just a wrapper class.
- * 
  * For the actual parser functionality, see SimpleSQLiteParser.
- * 
  * The Backus-Naur form for this statement looks like this:
- * 
  * BNF: sql-command ::= CREATE [TEMP | TEMPORARY] TABLE component-name 
  *      				( column-def [, column-def]* [, constraint]* )
  *
@@ -25,25 +22,22 @@ public class TableParser {
 	/**
 	 * Call this method to parse the SQL statement CREATE TABLE.
 	 * The result will be a TableDescriptor object that contains the component name, column names
-	 * an types. This information is necessary for matching the data records.
-	 * 
-	 * Example statement would look like this:
-	 * 	
+	 * a type. This information is necessary for matching the data records.
+	 * An Example statement would look like this:
 	 * CREATE TABLE 'users' (
 	 *		'name' TEXT,
 	 *		'surname' TEXT,
      *		'lastUpdate' TEXT
 	 *	);
 	 * 
-	 * @param stmt
+	 * @param stmt the SQL statement to parse
 	 * @return a TableDescriptor Object with all the information about the component. 
 	 */
 	public TableDescriptor parseCREATETABLEStatement(String stmt)
 	{
 		
 		SimpleSQLiteParser parser = new SimpleSQLiteParser();
-        TableDescriptor tds = parser.parseTable(stmt);
-		return tds;
+        return parser.parseTable(stmt);
 	}
 	
 	/**
@@ -52,23 +46,22 @@ public class TableParser {
 	 * The result will be an IndexDescriptor object that contains the component name, column names
 	 * and types. This information is necessary for matching the data records.
 	 
-	 * @param stmt
+	 * @param stmt the SQL statement string
 	 * @return an IndexDescriptor Object with all information about the component.
 	 */
 	public IndexDescriptor parseCREATEIndexStatement(Job job, String stmt)
 	{
 		
 		SimpleSQLiteParser parser = new SimpleSQLiteParser();
-		IndexDescriptor idx = parser.parseIndex(job, stmt);
-		
-		return idx;
+
+        return parser.parseIndex(job, stmt);
 	}
 	
 	
 	
 	/**
 	 * Use this main() method only for testing purposes. 
-	 * @param args
+	 * @param args the parameter list
 	 */
 	public static void main(String [] args)
 	{

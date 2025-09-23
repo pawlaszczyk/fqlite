@@ -18,7 +18,7 @@ FQLite allows you to:
 * browse and recover the content of freelist pages
 * recover records in all database pages, including unallocated space and free blocks!
 * support of UTF-8,UTF-16BE,UTF-16LE encoded databases
-* support for multi-byte columns as well as overflow pages
+* support for multibyte columns as well as overflow pages
 * recover dropped tables
 * create CSV/TSV-format data export
 * support for Rollback-Journals and WAL-Archives
@@ -38,7 +38,7 @@ Some features:
 * open-source
 * free of charge
 * runs out of the box
-* multi platform support
+* multi-platform support
 
 <p align="center">
   <img width="95%" height="95%" src="img/fqlite_sqlanalyzer.png?raw=true" alt="SQL Analyzer"/>
@@ -71,7 +71,7 @@ International Journal of Cyber Forensics and Advanced Threat Investigations,
 
 In the latest version, the FQLite is bundled with a Java Runtime Environment (JRE) and all required libraries.
 
-> **Important note:** With version 2.0 the support for the command line mode was cancelled.
+> **Important note:** With version 2.0, the support for the command line mode was cancelled.
 
 
 

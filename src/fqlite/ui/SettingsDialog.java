@@ -7,6 +7,7 @@ import java.util.Properties;
 import java.util.logging.Level;
 
 import fqlite.base.Global;
+import fqlite.log.AppLog;
 import javafx.application.Application;
 import javafx.event.ActionEvent;
 import javafx.event.EventHandler;
@@ -106,7 +107,6 @@ public class SettingsDialog extends Application{
 	        Label text = new Label("Separator: ");
 	        
 	        //Adding the choice box to the group
-	        //Group newgrp = new Group(choiceBox,text);
 	        HBox newgrp = new HBox(text, choiceBox);
 	        newgrp.setPadding(new Insets(5, 5, 5, 0));
 	        newgrp.setSpacing(10);
@@ -129,16 +129,7 @@ public class SettingsDialog extends Application{
             loggrp.setPadding(new Insets(5, 5, 5, 0));
             loggrp.setSpacing(10);
             loggrp.setStyle(cssLayout);
-
-
-            //exportBox.getChildren().add(loggrp);
             rootGroup.getChildren().addAll(heading3, loggrp);
-
-	        /**
-	         * button bar definition.
-	         * 
-	         */
-	        
 	        ButtonBar buttonBar = new ButtonBar();
 	        buttonBar.setPadding( new Insets(10) );
 
@@ -184,7 +175,7 @@ public class SettingsDialog extends Application{
 		            	        appProps.store(new FileOutputStream(path), null);
 
 		            		} catch (Exception err) {
-		            		
+                                AppLog.error(err.getMessage());
 		            		}
 		                		
 		                	// get a handle on the stage
@@ -209,8 +200,6 @@ public class SettingsDialog extends Application{
 	        ButtonBar.setButtonData(applyButton, ButtonBar.ButtonData.APPLY);
 	        ButtonBar.setButtonData(cancelButton, ButtonBar.ButtonData.CANCEL_CLOSE);
 	        buttonBar.getButtons().addAll(applyButton, cancelButton);
-
-	        
 	  
 	        rootGroup.getChildren().add(buttonBar);
 	        

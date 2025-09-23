@@ -1,6 +1,6 @@
 package fqlite.pattern;
 
-public class BLOBConstrain implements Constraint {
+public class BLOBConstraint implements Constraint {
 
 	@Override
 	public boolean match(int value) {

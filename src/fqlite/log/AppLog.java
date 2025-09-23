@@ -65,7 +65,7 @@ public class AppLog extends Application {
 
             Button copyButton = new Button("Copy");
 
-            String s = GUI.class.getResource("/edit-copy_small.png").toExternalForm();
+            String s = Objects.requireNonNull(GUI.class.getResource("/edit-copy_small.png")).toExternalForm();
             ImageView iv = new ImageView(s);
             copyButton.setGraphic(iv);
             copyButton.setTooltip(new Tooltip("copy log to clipboard"));
@@ -115,7 +115,6 @@ public class AppLog extends Application {
 
     public static void debug(String log){
     	LOGGER.finest(log);
-    	//System.out.println(log);
     }
     
     public static void info(String log){

@@ -23,18 +23,15 @@ public class FileInfo {
 	
 	
 	/**
-	 * Constructs a StringBuilder object informations about 
+	 * Constructs a StringBuilder object with information about
 	 * a file on the file system. 
 	 *  
-	 * @param path
+	 * @param path  the file path
 	 */
 	public FileInfo(String path) 
 	{
 		sb = new StringBuilder();
-		
-		//if (true)
-		//return;
-		
+
 		Path p = Paths.get(path);
 		try {
 			computeHashes(path);

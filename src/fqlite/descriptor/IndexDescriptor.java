@@ -65,8 +65,6 @@ public class IndexDescriptor extends AbstractDescriptor implements Comparable{
 			 * Normally, the first byte of the match holds the total length of header bytes
 			 * including this byte
 			 */
-			//int headerlength = values.next().length;
-			//System.out.println(headerlength);
 			values.next();
 			
 			boolean valid = true;
@@ -186,7 +184,7 @@ public class IndexDescriptor extends AbstractDescriptor implements Comparable{
 	
 	/**
 	 * Returns the number of the root data page. 
-	 * @return
+	 * @return offset value
 	 */
 	public int getRootOffset() {
 		return this.root;
@@ -208,7 +206,7 @@ public class IndexDescriptor extends AbstractDescriptor implements Comparable{
 	 * the total number of bytes in the header. 
 	 * The varint value is the size of the header in bytes, including
 	 * the size varint itself.
-	 * @return
+	 * @return the length in bytes
 	 */
 	public int getLength() {
 		return 1 + size;
@@ -216,7 +214,7 @@ public class IndexDescriptor extends AbstractDescriptor implements Comparable{
 
 	/**
 	 * Return the number of columns (startRegion the component header). 
-	 * @return
+	 * @return the number of columns
 	 */
 	public int numberofColumns() {
 		return columntypes.size();
@@ -235,9 +233,9 @@ public class IndexDescriptor extends AbstractDescriptor implements Comparable{
 	 * strings and BLOBs might extend to two or three-byte varints,
 	 * But that is the exception rather than the rule.
 	 * 
-	 * @param serialtype
-	 * @param multicol
-	 * @return
+	 * @param serialtype SQLite serial type (INT, FLOAT...)
+	 * @param multicol is it a multi-column?
+	 * @return column string
 	 */
 	private String getColumn(String serialtype, boolean multicol) {
 

@@ -215,7 +215,7 @@ public class SimpleSQLiteParser {
         			}
         			else
         			{
-        				// name TEXT - skip the type argument -> for FTS we always uses strings
+        				// name TEXT - skip the type argument -> for FTS we always use strings
         				String[] tokens = modulargument.split(" ");	
         			    clname = tokens[0];
         			}
@@ -423,7 +423,6 @@ public class SimpleSQLiteParser {
         		/* the CONSTRAINT keyword is mistakenly identified as a type */
         		if (tblconstraint)
         		{
-        			//System.out.println("Table Constraint: " + value);
         			tableconstraint.add(value);
         			tblconstraint = false;
         		}
@@ -433,13 +432,10 @@ public class SimpleSQLiteParser {
 	        		if(value.equalsIgnoreCase("PRIMARYKEY"))
 	        			value = "BLOB";
 	        		
-	        		//System.out.println("SQLType::" + value);
 	        		String type = getType(value);
 	        		if (!type.isEmpty())
 	        		{
 	        			coltypes.add(type);
-	        			//System.out.println("Typename " + trim(type));
-	            		
 	        		}
         		}
         		
@@ -471,12 +467,6 @@ public class SimpleSQLiteParser {
         	@Override public void exitColumn_constraint(SQLiteParser.Column_constraintContext ctx)
         	{ 
         		String constraint = ctx.getText();
-        		
-        		//System.out.println("Columnconstraint " + constraint);
-        		
-        		if(constraint.contains("UNIQUE"))
-        			System.out.println(" UNIQUE CONSTRAINT gefunden.");
-        		
         		cons += constraint.toUpperCase() + " ";
         	}
         	
@@ -549,38 +539,36 @@ public class SimpleSQLiteParser {
     		    
         		
         		int cc = 0;
-        		ListIterator<String> list = coltypes.listIterator();
-        		while(list.hasNext())
-        		{	
-        		
-	        		switch (list.next()) {
-					case "INT":
-						if (constraints.containsKey(cc))
-							pattern.add(new IntegerConstraint(true));
-						else
-							pattern.add(new IntegerConstraint(false));
-						
-						break;
-	
-					case "TEXT":
-						pattern.addStringConstraint();
-						break;
-	
-					case "BLOB":
-						pattern.addBLOBConstraint();
-						break;
-	
-					case "REAL":
-						
-						pattern.addFloatingConstraint();
-						break;
-	
-					case "NUMERIC":
-						pattern.addNumericConstraint();
-						break;
-					}
-	        		cc++;
-        		}
+                for (String coltype: coltypes) {
+
+                    switch (coltype) {
+                        case "INT":
+                            if (constraints.containsKey(cc))
+                                pattern.add(new IntegerConstraint(true));
+                            else
+                                pattern.add(new IntegerConstraint(false));
+
+                            break;
+
+                        case "TEXT":
+                            pattern.addStringConstraint();
+                            break;
+
+                        case "BLOB":
+                            pattern.addBLOBConstraint();
+                            break;
+
+                        case "REAL":
+
+                            pattern.addFloatingConstraint();
+                            break;
+
+                        case "NUMERIC":
+                            pattern.addNumericConstraint();
+                            break;
+                    }
+                    cc++;
+                }
 	        		
   
         		tds = new TableDescriptor(tablename,stmt,sqltypes,coltypes,colnames,colconstraints,tableconstraint,pattern,stmt.contains("WITHOUT ROWID"));

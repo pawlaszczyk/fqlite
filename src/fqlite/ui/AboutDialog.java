@@ -4,6 +4,7 @@ package fqlite.ui;
 import java.awt.Desktop;
 import java.io.IOException;
 import java.net.URI;
+import java.util.Objects;
 
 import fqlite.base.GUI;
 import fqlite.base.Global;
@@ -59,7 +60,7 @@ public class AboutDialog extends javafx.scene.control.Dialog<Object>{
 		
 		root = rootelement;
       
-		Image img = new Image(GUI.class.getResource("/fqlite_logo_small.png").toExternalForm());
+		Image img = new Image(Objects.requireNonNull(GUI.class.getResource("/fqlite_logo_small.png")).toExternalForm());
 	    ImageView view = new ImageView(img);
 		
 		dialogPane.setGraphic(view);
@@ -319,8 +320,6 @@ public class AboutDialog extends javafx.scene.control.Dialog<Object>{
 		textArea.setEditable(false);
 		textArea.setWrapText(true);
 
-		//textArea.setMaxWidth(Double.MAX_VALUE);
-		//textArea.setMaxHeight(Double.MAX_VALUE);
 		GridPane.setVgrow(textArea, Priority.ALWAYS);
 		GridPane.setHgrow(textArea, Priority.ALWAYS);
 
@@ -329,10 +328,6 @@ public class AboutDialog extends javafx.scene.control.Dialog<Object>{
 		expContent.add(label, 0, 0);
 		expContent.add(textArea, 0, 1);
 
-		
-		
-		
-		//content.getChildren().add(dialogPane);
 		TextArea ta = new TextArea();
 		ta.setText("FQLite Retrieval Tool, Version " + Global.FQLITE_VERSION + "\n" 
         		+ "Author: Dirk Pawlaszczyk \n\n"
@@ -361,12 +356,10 @@ public class AboutDialog extends javafx.scene.control.Dialog<Object>{
 		content.getChildren().add(fl);
 		
 		getDialogPane().contentProperty().set(content);
-		
-		
-		// Set expandable Exception into the dialog pane.
+
+		// Set expandable Exception into the dialogue pane.
 		getDialogPane().setExpandableContent(expContent);
     
-		//final Window window = getDialogPane().getScene().getWindow();
 	}
 	
 }

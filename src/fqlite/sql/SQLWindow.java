@@ -250,7 +250,7 @@ public class SQLWindow extends Application {
         // run: `cleanupWhenNoLongerNeedIt.unsubscribe();`
         
         // recompute syntax highlighting only for visible paragraph changes
-        // Note that this shows how it can be done but is not recommended for production where multi-
+        // Note that this shows how it can be done, but is not recommended for production where multi-
         // line syntax requirements are needed, like comment blocks without a leading * on each line. 
         codeArea.getVisibleParagraphs().addModificationObserver
         (
@@ -339,18 +339,13 @@ public class SQLWindow extends Application {
     	
     	final ContextMenu contextMenu = new ContextMenu();
 
-    	
-    	
-    	
     	table.setOnMouseClicked(new EventHandler<javafx.scene.input.MouseEvent>() {
     		
     		@Override
     		public void handle(javafx.scene.input.MouseEvent event) {
 
     			if(event.getButton() == MouseButton.SECONDARY) {
-    				  
-    				   //ContextMenu tcm = createContextMenu(CtxTypes.TABLE,table); 
-    				   contextMenu.show(table.getScene().getWindow(), event.getScreenX(), event.getScreenY());
+                        contextMenu.show(table.getScene().getWindow(), event.getScreenX(), event.getScreenY());
     			   }
     			
     		}	
@@ -358,7 +353,7 @@ public class SQLWindow extends Application {
     	
     	// copy a single table line
     	MenuItem mntcopyline = new MenuItem("Copy Line(s)");
-    	String s = GUI.class.getResource("/edit-copy.png").toExternalForm();
+    	String s = Objects.requireNonNull(GUI.class.getResource("/edit-copy.png")).toExternalForm();
         ImageView iv = new ImageView(s); 
 
     	
@@ -393,7 +388,7 @@ public class SQLWindow extends Application {
     	
     	// copy the complete table line (with all cells)
     	MenuItem mntcopycell= new MenuItem("Copy Cell");
-        s = GUI.class.getResource("/edit-copy.png").toExternalForm();
+        s = Objects.requireNonNull(GUI.class.getResource("/edit-copy.png")).toExternalForm();
     	iv = new ImageView(s);
     	mntcopycell.setGraphic(iv);
         mntcopycell.setAccelerator(copycellCombination);
@@ -421,22 +416,20 @@ public class SQLWindow extends Application {
 
     /**
      * Action handler method.   
-     * @param table
+     * @param table the TableView object where the action takes place.
      */
     @SuppressWarnings({ "rawtypes", "unchecked" })
     private void copyLineAction(TableView table){
     	
-    	StringBuffer sb = new StringBuffer();			
+    	StringBuilder sb = new StringBuilder();
      	final javafx.scene.input.Clipboard clipboard = javafx.scene.input.Clipboard.getSystemClipboard();
         final ClipboardContent content = new ClipboardContent();
-        ObservableList<TablePosition> selection = table.getSelectionModel().getSelectedCells();	        
-        Iterator<TablePosition> iter = selection.iterator();
-        
-        while(iter.hasNext()) {
-        	
-        	TablePosition pos = iter.next();	        	
-        	ObservableList<String> hl = (ObservableList<String>)table.getItems().get(pos.getRow());
-        	  sb.append(hl.toString() + "\n");
+        ObservableList<TablePosition> selection = table.getSelectionModel().getSelectedCells();
+
+        for (TablePosition pos: selection) {
+
+            ObservableList<String> hl = (ObservableList<String>) table.getItems().get(pos.getRow());
+            sb.append(hl.toString() + "\n");
         }
         content.putString(sb.toString());
         clipboard.setContent(content);
@@ -445,7 +438,7 @@ public class SQLWindow extends Application {
 
     /**
      * Action handler method.   
-     * @param table
+     * @param table the TableView object where the action takes place.
      */
     @SuppressWarnings({ "rawtypes", "unchecked" })
     private void copyCellAction(TableView table){
@@ -454,7 +447,7 @@ public class SQLWindow extends Application {
     final ClipboardContent content = new ClipboardContent();
              
     ObservableList<TablePosition> selection = table.getSelectionModel().getSelectedCells();
-    if (selection.size() == 0)
+    if (selection.isEmpty())
     	return;
     TablePosition tp = selection.get(0); 
     int row = tp.getRow();

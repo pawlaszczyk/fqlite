@@ -1,16 +1,16 @@
 package fqlite.pattern;
 
-public class HeaderConstrain implements Constraint {
+public class HeaderConstraint implements Constraint {
 
 	int min = 1;
 	int max = Integer.MAX_VALUE;
 	
-	public HeaderConstrain(int length)
+	public HeaderConstraint(int length)
 	{
 		max = min = length;
 	}
 	
-	public HeaderConstrain(int min, int max)
+	public HeaderConstraint(int min, int max)
 	{
 		this.min = min;
 		this.max = max;

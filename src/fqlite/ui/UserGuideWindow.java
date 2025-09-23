@@ -1,7 +1,6 @@
 package fqlite.ui;
 
 import com.dlsc.pdfviewfx.PDFView;
-
 import fr.brouillard.oss.cssfx.CSSFX;
 import javafx.application.Application;
 import javafx.scene.Scene;
@@ -10,16 +9,18 @@ import javafx.scene.layout.VBox;
 import javafx.stage.Screen;
 import javafx.stage.Stage;
 
+import java.util.Objects;
+
 public class UserGuideWindow extends Application {
 
-	    private PDFView pdfView = new PDFView();
+	    private final PDFView pdfView = new PDFView();
 		
 	      
 	    @Override
 	    public void start(Stage primaryStage) {
 	   
 	    	try {
-	             pdfView.load(getClass().getResourceAsStream("/FQLite_UserGuide.pdf"));
+	             pdfView.load(Objects.requireNonNull(getClass().getResourceAsStream("/FQLite_UserGuide.pdf")));
 	        } catch (Exception e) {
 	            e.printStackTrace();
 	        }

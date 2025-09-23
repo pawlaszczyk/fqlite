@@ -1,13 +1,13 @@
 package fqlite.pattern;
 
-public class StringConstrain implements Constraint {
+public class StringConstraint implements Constraint {
 
 	int max = Integer.MAX_VALUE;
 	
-	public StringConstrain()
+	public StringConstraint()
 	{}
 	
-	public StringConstrain(int max)
+	public StringConstraint(int max)
 	{
 		this.max = max*2 + 13;
 	}
