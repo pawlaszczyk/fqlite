@@ -181,9 +181,29 @@ tasks.withType(JavaExec) {
 runtime {
     options = ['--strip-debug', '--compress', '2', '--no-header-files', '--no-man-pages']
 
+	// Module manuell definieren statt automatische Erkennung
+    modules = [
+        'java.base',
+        'java.desktop',
+        'java.logging',
+        'java.naming',
+        'java.sql',
+        'java.xml',
+        'jdk.unsupported',
+        // JavaFX Module
+        'javafx.base',
+        'javafx.controls',
+        'javafx.swing',
+        'javafx.web',
+        'javafx.fxml',
+        'javafx.graphics',
+        'javafx.media'
+    ]
+	
     launcher {
         noConsole = true
     }
+	
 
     jpackage {
         installerOptions += ['--resource-dir', "resources"]
