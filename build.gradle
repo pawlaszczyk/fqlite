@@ -189,16 +189,12 @@ runtime {
         'java.naming',
         'java.sql',
         'java.xml',
-        'jdk.unsupported',
-        // JavaFX Module
-        'javafx.base',
-        'javafx.controls',
-        'javafx.swing',
-        'javafx.web',
-        'javafx.fxml',
-        'javafx.graphics',
-        'javafx.media'
-    ]
+        'jdk.unsupported'  
+	]
+	
+	addOptions('--ignore-signing-information')
+    
+    javaHome = System.getProperty("java.home")
 	
     launcher {
         noConsole = true
