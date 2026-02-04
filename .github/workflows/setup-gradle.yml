@@ -50,18 +50,34 @@ jobs:
         if: startsWith(matrix.os, 'ubuntu')
         run: |
           echo "OUTPUT_FILE_NAME=fqlite-${{ needs.get-version.outputs.version }}-$(uname -m).deb" >> $GITHUB_ENV
+    
       - name: Create MacOS installer
         if: startsWith(matrix.os, 'mac')
         run: |
           ./gradlew --info --stacktrace jpackage
-          find build/jpackage -name "*.dmg" -exec sh -c 'x="{}"; mv "$x" "${{ env.OUTPUT_FILE_NAME }}"' \;
-          echo "OUTPUT_FILE=$(realpath ${{ env.OUTPUT_FILE_NAME }})" >> $GITHUB_ENV
+          
+          # Prüfe ob .app erstellt wurde
+          if [ -d "build/jpackage/fqlite.app" ]; then
+            # Erstelle DMG manuell ohne Code-Signing
+            hdiutil create -volname "FQLite" \
+              -srcfolder build/jpackage/fqlite.app \
+              -ov -format UDZO \
+              "${{ env.OUTPUT_FILE_NAME }}"
+            
+            echo "OUTPUT_FILE=$(pwd)/${{ env.OUTPUT_FILE_NAME }}" >> $GITHUB_ENV
+            echo "DMG created successfully: ${{ env.OUTPUT_FILE_NAME }}"
+          else
+            echo "Error: fqlite.app not found"
+            exit 1
+          fi
+          
       - name: Create Linux installer
         if: startsWith(matrix.os, 'ubuntu')
         run: |
           ./gradlew --info --stacktrace jpackage
           find build/jpackage -name "*.deb" -exec sh -c 'x="{}"; mv "$x" "${{ env.OUTPUT_FILE_NAME }}"' \;
           echo "OUTPUT_FILE=$(realpath ${{ env.OUTPUT_FILE_NAME }})" >> $GITHUB_ENV
+          
       - name: Create Windows installer
         if: startsWith(matrix.os, 'windows')
         run: |
@@ -73,13 +89,24 @@ jobs:
           echo "OUTPUT_FILE=$file" >> $env:GITHUB_ENV
           $hash = Get-FileHash $file
           echo "HASH=$($hash[0].hash)" >> $env:GITHUB_ENV
+          
         ##########
         # Generate artefact attestation
         ##########
+      - name: Verify output file exists
+        run: |
+          if [ ! -f "${{ env.OUTPUT_FILE }}" ]; then
+            echo "Error: Output file not found at ${{ env.OUTPUT_FILE }}"
+            exit 1
+          fi
+          ls -lh "${{ env.OUTPUT_FILE }}"
+        shell: bash
+        
       - name: Generate artifact attestation
         uses: actions/attest-build-provenance@v1
         with:
           subject-path: "${{ env.OUTPUT_FILE }}"
+          
       - uses: actions/upload-artifact@v4
         with:
           name: "${{ env.OUTPUT_FILE_NAME }}"
@@ -117,4 +144,3 @@ jobs:
           make_latest: true
           files: |
             artifacts/*
-     
