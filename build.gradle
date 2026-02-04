@@ -203,13 +203,15 @@ runtime {
 
     jpackage {
         installerOptions += ['--resource-dir', "resources"]
-
+		
         if (currentOs.windows) {
             installerOptions += ['--win-per-user-install', '--win-dir-chooser', '--win-menu', '--win-shortcut']
         } else if (currentOs.linux) {
             installerOptions += ['--linux-package-name', 'fqlite', '--linux-shortcut']
         } else if (currentOs.macOsX) {
             installerOptions += ['--mac-package-name', 'fqlite']
+			installerType = 'dmg'  // oder 'pkg'
+       		installerOptions = []  // Keine Signing-Optionen
         }
     }
 }
