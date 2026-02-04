@@ -51,15 +51,15 @@ public class DBPropertyPanel extends StackPane{
 		this.gui = gui;
 		VBox base = new VBox();
 		
-		String s = Objects.requireNonNull(GUI.class.getResource("/gray_schema32.png")).toExternalForm();
-		Button btnSchema = new Button("Show Schema Info");
-		ImageView iv = new ImageView(s);
-		btnSchema.setGraphic(iv);
-		btnSchema.setOnAction(e->showColumnInfo());
+		//String s = Objects.requireNonNull(GUI.class.getResource("/gray_schema32_old.png")).toExternalForm();
+		//Button btnSchema = new Button("Show Schema Info");
+		//ImageView iv = new ImageView(s);
+		//btnSchema.setGraphic(iv);
+		//btnSchema.setOnAction(e->showColumnInfo());
 		//this.columnBtn.setToolTipText("Show Schema Information with Standard Webbrowser");        
 		StackPane head = new StackPane();
-		head.getChildren().add(btnSchema);
-		base.getChildren().addAll(head,tabpane,new Label(fname));
+		//head.getChildren().add(btnSchema);
+		base.getChildren().addAll(tabpane,new Label(fname));
 	    tabpane.setPrefHeight(4000);
 		VBox.setVgrow(tabpane,Priority.ALWAYS);
 		this.getChildren().add(base);

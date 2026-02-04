@@ -125,7 +125,7 @@ public class RecoveryTask implements Runnable {
 					/* no overflow page -> carve for data records - we do our best! ;-)*/
 					carve(content,null);
 				}
-				/* otherwise it seems to be an overflow page - however, that is not 100% safe!!! */
+				/* Otherwise, it seems to be an overflow page; however, that is not 100% safe. */
 				
 				/* we have to leave in any case */
 				return 0;
@@ -155,10 +155,10 @@ public class RecoveryTask implements Runnable {
 			}
 
 			/* regular leaf page with data */
-
+            // hx8 or hxD
 			if (type == 8 || type == 13)
 			{
-				// offset 1-2 let us find the first free block offset for carving
+               	// offset 1-2 let us find the first free block offset for carving
 				byte[] fboffset = new byte[2];
 				buffer.position(1);
 				buffer.get(fboffset);
@@ -171,7 +171,10 @@ public class RecoveryTask implements Runnable {
 				ByteBuffer firstfb = ByteBuffer.wrap(fboffset);
 				fbstart = Auxiliary.TwoByteBuffertoInt(firstfb);
 			
-			}	
+			}
+
+            int columns = 1;
+            boolean firstColumnIsROWID = false;
 				
 			// found Data-Page - determine number of cell pointers at offset 3-4 of this page
 			byte[] cpn = new byte[2];
@@ -196,50 +199,145 @@ public class RecoveryTask implements Runnable {
 
 			int pageheaderend = 8 + (cp * 2);
 			visit.set(0, pageheaderend);
-			//System.out.println("headerend:" + headerend);
 
-			
-			/*
+            /* first, add component name if known */
+            if (null != job.pages[pagenumber]) {
+
+                AbstractDescriptor ad = job.pages[pagenumber];
+                if (ad instanceof TableDescriptor) {
+                    TableDescriptor td = (TableDescriptor) ad;
+                    columns = td.numberOfColumns();
+                    if (td.ROWID && td.rowidcolumn != null)
+                        if (td.rowidcolumn.equals(td.columnnames.get(0))){
+                            firstColumnIsROWID = true;
+                        }
+                }
+
+
+
+            }
+
+            //String rc;
+            LinkedList<String> record;
+
+            /*
 			 * scan of Freeblock list 
 			 */
 			if (fbstart > pageheaderend  && fbstart <  job.ps) {
 			
 		    	boolean goon = false;
-				do {
+
+                do {
 			    	// go to next free block
 					buffer.position(fbstart);
 
-					// read the next 2 bytes -> if they are 0000xh there is no further
-					// freeblock 
-					byte[] dword = new byte[2];
-					buffer.get(dword);
-			    	ByteBuffer nextblock = ByteBuffer.wrap(dword);
-					int next = Auxiliary.TwoByteBuffertoInt(nextblock);
+                    // read the next 2 bytes -> this value represents the length of the
+                    // freeblock. Remember: The maximum size of a database page is 64kb (2^16 bytes)
+                    int next = Auxiliary.TwoByteBuffertoInt(buffer);
 
-					// read the next 2 bytes -> this value represents the length of the
-					// freeblock. Remember: The maximum size of a database page is 64kb (2^16 bytes)
-					buffer.get(dword);
+                    // Note: The third and fourth bytes of each freeblock form a big-endian integer, which is the size of the freeblock in bytes.
+                    // including the 4-byte header
+                    int freeblocksize = Auxiliary.TwoByteBuffertoInt(buffer);
+                    freeblocksize-=2;
+                    int remaining = freeblocksize;
+                    int pos = 0;
 
-					
-					byte[] header = new byte[6];
-					try {
-					
-						buffer.get(header);
-				
-					}catch(Exception err){
-						goon = false;
-						continue;
-					}
+					if(freeblocksize <= 0)
+                    	break;
 
-					if(next > 0 && next < job.ps){
-						fbstart = next;
-						goon = true;
-					}
-					else
-						goon = false;
+					byte[] freeblock = new byte[freeblocksize];
+
+                    // [  PLL |  ROWID | HeadLength | serialtype col1  | serialtype col2 | serialtype col3 ... | Data
+                    // all values are varint-values
+                    // in some rare cases - when ROWID is 1 byte, PLL is one byte, headerlength is 1 byte -> the serialtype info for the first column is overwritten
+                    // during the removal of the record
+
+                    try {
+
+                        buffer.get(freeblock);
+
+                        boolean go = false;
+
+                        // slice from index 0 to index number of columns - 1 - since 1st column is probably overwritten
+                        byte[] slice = Arrays.copyOfRange(freeblock, 0, (columns - 1));
+                        int data_length = Auxiliary.computePayloadLengthByte(slice, 0);
+
+                        leave:
+                        do {
+                            boolean addfirstcolumn = true;
+
+                            if (!firstColumnIsROWID)
+                                break leave;
+
+                            // Github issue number #19:
+                            if (firstColumnIsROWID && freeblock[0] == 0){
+                                addfirstcolumn = false;
+                            }
+
+                                remaining = remaining - 4 - data_length;
+
+                                // reconstruct the original header with the missing 1st column
+                                ByteBuffer recover = ByteBuffer.allocate(freeblock.length + 6);
+
+
+                                recover.put(pos + 0, (byte) (data_length + 4)); // total length byte(s)
+                                recover.put(pos + 1, (byte) 00); // rowid
+                                recover.put(pos + 2, (byte) (columns + 1));  // header length
+                                // only add the serial type 00 for the first column if the table is a ROWID table in the
+                                // 1st column and the serial byte of colum 1 is wiped
+                                if (addfirstcolumn)
+                                    recover.put(pos + 3, (byte) 0);  // first column is 00
+                                recover.put(pos + 4, freeblock); // the freeblock
+
+
+                                record = ct.readRecord(pos, recover, pagenumber, null, Integer.MAX_VALUE, withoutROWID, Global.REGULAR_DB_FILE, -1);
+
+                                // update status column -> this is a dropped record
+                                record.set(3, Global.DELETED_RECORD_IN_PAGE);
+
+                                // compute the correct offset for this match
+                                long match_offset = +(pagenumber - 1) * pagesize + fbstart;
+                                record.set(4, "" + match_offset);
+
+                                /* add record to result set */
+                                if (!record.isEmpty()) {
+                                    visit.set(fbstart,fbstart + 4 + data_length);
+                                    updateResultSet(record);
+                                }
+
+                                /* only if there are at least 6 bytes remain -> go for an additional round */
+                                if (remaining > 5) {
+                                    // Is there another removed record in the remaining bytes?
+                                    go = true;
+                                    byte[] rm = new byte[remaining];
+                                    next = Auxiliary.TwoByteBuffertoInt(recover);
+                                    int sz = Auxiliary.TwoByteBuffertoInt(recover);
+                                    //recover.position(recover.position()+4);
+                                    recover.get(rm, 0, remaining - 4);
+                                    ByteBuffer rest = ByteBuffer.wrap(rm);
+                                    data_length = Auxiliary.computePayloadLengthByte(slice, 0);
+                                    freeblock = rm;
+                                } else
+                                    go = false;
+
+                        }
+                        while (go) ;
+
+                    }catch(Exception error){
+                        goon = false;
+                        continue;
+                    }
+
+                    if (next > 0 && next < job.ps) {
+                        fbstart = next;
+                        goon = true;
+                    } else
+                        goon = false;
+
 				}
-			    while(goon);
-			
+                while(goon);
+
+
 			}
 			
 				
@@ -280,10 +378,8 @@ public class RecoveryTask implements Runnable {
 				AppLog.debug(pagenumber + " -> " + celloff + " " + "0" + hls);
 				
 					
-				//String rc;
-				LinkedList<String> record;
-				
-				record = ct.readRecord(celloff, buffer, pagenumber, visit, type, Integer.MAX_VALUE, firstcol,withoutROWID,Global.REGULAR_DB_FILE,-1);
+
+				record = ct.readRecord(celloff, buffer, pagenumber, visit, Integer.MAX_VALUE, withoutROWID,Global.REGULAR_DB_FILE,-1);
 				
 				
 				// add new line to output
@@ -292,7 +388,7 @@ public class RecoveryTask implements Runnable {
 					int p;
 					
 					// check for fts3/4 tables
-					
+
 					if ((p = record.getFirst().indexOf("_content")) > 0)
 					{	
 						String rc = record.getFirst();
@@ -303,8 +399,6 @@ public class RecoveryTask implements Runnable {
 							if (tds.modulname.equals("fts4")|| tds.modulname.equals("fts3"))
 							{
 								// take the columns and create a record for the virtual table
-								System.out.println("Stopp");	 
-								
                             	LinkedList<String> ftsrecord = new LinkedList<>();
 
                             	ftsrecord.add(tbln + "");  // start a new row for the virtual component 
@@ -324,7 +418,7 @@ public class RecoveryTask implements Runnable {
                             	 */
 								for(int ii = 6; ii < record.size(); ii++) {
 									
-									ftsrecord.add(record.get(ii));		
+									ftsrecord.add(record.get(ii));
 								}
 								
 	                            updateResultSet(ftsrecord);
@@ -332,7 +426,8 @@ public class RecoveryTask implements Runnable {
 							}
 						}
 					}
-					
+
+					// rtree virtual table
 					if ((p = record.getFirst().indexOf("_node")) > 0)
 					{
 						String rc = record.getFirst();
@@ -343,8 +438,7 @@ public class RecoveryTask implements Runnable {
 							
 							/* we use the xxx_node shadow component to construct the 
 							 * virtual component
-							 */
-							/* skip the first information -> go directly to the 5th element
+							 * skip the first information -> go directly to the 5th element
 							 * of the data record line, i.e. go to the BLOB with the row data
 							 */
 							
@@ -358,7 +452,6 @@ public class RecoveryTask implements Runnable {
 							byte[] binary = Auxiliary.decode(data);
 							ByteBuffer bf = ByteBuffer.wrap(binary);
 							
-							//bf.position(0);
 							bf.rewind();
 							
 							/* skip the first two bytes */
@@ -391,8 +484,7 @@ public class RecoveryTask implements Runnable {
                             	//Each R*Tree index is a virtual component with an odd number of columns between 3 and 11
                             	//The other columns are pairs, one pair per dimension, containing the minimum and maximum values for that dimension, respectively.
                             	int number = tds.columnnames.size() - 1;
-                            	//entries-=;
-                            	
+
                             	while (number > 0)
                             	{	
                             		try {
@@ -422,9 +514,9 @@ public class RecoveryTask implements Runnable {
 					/* if record resides inside a free page -> add a flag char to document this */
 					if(freeList)
 					{  
-					   String secondcol = record.get(3);	
+					   String secondcol = record.get(3);
 					   secondcol = Global.FREELIST_ENTRY + secondcol;
-					   record.set(3, secondcol);		   
+					   record.set(3, secondcol);
 					}
 					updateResultSet(record);
 				}
@@ -458,7 +550,7 @@ public class RecoveryTask implements Runnable {
 	         */
 			
 			
-			if(job.pages[pagenumber]!=null && job.pages[pagenumber].getName().equals("__SQLiteMaster"))
+			if(job.pages[pagenumber]!=null && job.pages[pagenumber].getName().equals("sqlite_master"))
 				return 0;
 						
 			if(offset != 100)
@@ -660,7 +752,7 @@ public class RecoveryTask implements Runnable {
 							
 				/* access pattern for a particular component */
 				String tablename = tab.get(n).getName();
-				if (tablename.startsWith("__FREELIST"))
+				if (tablename.startsWith("fqlite_freelist"))
 					continue;
 				/* create matcher object for constraint check */
 				SerialTypeMatcher stm = new SerialTypeMatcher(buffer);

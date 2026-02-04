@@ -11,8 +11,6 @@ import java.math.BigDecimal;
 import java.sql.*;
 import java.util.List;
 
-import static com.ibm.icu.text.PluralRules.Operand.i;
-
 /// This class is used to export tables from a recovery run into
 /// a new SQLite database.
 ///
@@ -27,7 +25,7 @@ public class SQLiteDatabaseCreator {
      * Private Constructor. We use a Singleton pattern here.
      */
     private SQLiteDatabaseCreator(){
-        System.out.println("SQLiteDatabaseCreator has been started...");
+
     }
 
     /**
@@ -45,10 +43,10 @@ public class SQLiteDatabaseCreator {
     private static String createFREEList(TableDescriptor tdefault,boolean isWAL) {
 
         StringBuilder sql = new StringBuilder();
-        sql.append("CREATE TABLE __FREELIST (FQLITE_NUM INT, FQLITE_STATUS VARCHAR(5), FQLITE_OFFSET BIGINT, FQLITE_PLL VARCHAR(10), FQLITE_ROWID BIGINT, ");
+        sql.append("CREATE TABLE fqlite_freelist (" + Global.col_no +" INT, "+ Global.col_status +" VARCHAR(5), "+ Global.col_offset +" BIGINT, "+ Global.col_pll +" VARCHAR(10), "+ Global.col_rowid  + " BIGINT, ");
 
         if(isWAL)
-            sql.append(" FQLITE_COMMIT VARCHAR(5), FQLITE_DBPAGE INT, FQLITE_WALFRAME INT, FQLITE_SALT1 INT, FQLITE_SALT2 INT, ");
+            sql.append(" " + Global.col_commit + " VARCHAR(5)," + Global.col_dbpage  +" INT, "+ Global.col_walframe +" INT,"+ Global.col_salt1 +" INT, " + Global.col_salt2 +" INT, ");
 
         int cnt = tdefault.columnnames.size();
         int i = -1;
@@ -79,10 +77,10 @@ public class SQLiteDatabaseCreator {
         }
 
         StringBuilder sql = new StringBuilder();
-        sql.append("CREATE TABLE ").append(tableName).append(" (FQLITE_NUM INT, FQLITE_STATUS VARCHAR(5),  FQLITE_OFFSET BIGINT, FQLITE_PLL VARCHAR(10), FQLITE_ROWID BIGINT, ");
+        sql.append("CREATE TABLE ").append(tableName).append(" ("+ Global.col_no +" INT, "+ Global.col_status +" VARCHAR(5),  "+ Global.col_offset +" BIGINT, "+ Global.col_pll  +" VARCHAR(10), "+ Global.col_rowid +" BIGINT, ");
 
         if(isWAL)
-            sql.append(" FQLITE_COMMIT VARCHAR(5), FQLITE_DBPAGE INT, FQLITE_WALFRAME INT, FQLITE_SALT1 INT, FQLITE_SALT2 INT, ");
+            sql.append(" " + Global.col_commit + " VARCHAR(5)," + Global.col_dbpage  + " INT, " +  Global.col_walframe + " INT, " + Global.col_salt1  + " INT, "+ Global.col_salt2  +" INT, ");
 
         for (int i = 0; i < columnNames.size(); i++) {
             sql.append(" ")
@@ -118,8 +116,6 @@ public class SQLiteDatabaseCreator {
             // create db-connection
             connection = DriverManager.getConnection(DB_URL);
 
-            System.out.println("Connection to SQLite-database '" + path + "' successfully created.");
-
             // create statement object
             statement = connection.createStatement();
 
@@ -134,7 +130,7 @@ public class SQLiteDatabaseCreator {
                 int rowcnt = statement.executeUpdate(stm);
             }
 
-            // create table __FREELIST
+            // create table fqlite_freelist
             String freelist = createFREEList(tdefault,isWAL);
             statement.executeUpdate(freelist);
 
@@ -158,8 +154,8 @@ public class SQLiteDatabaseCreator {
             }
             if (connection != null) {
                 try {
-                    connection.close();
-                } catch (SQLException e) {
+                    //connection.close();
+                } catch (Exception e) {
                     AppLog.error(e.getMessage());
                     System.err.println("Error while closing the database connection: " + e.getMessage());
                 }
@@ -181,7 +177,7 @@ public class SQLiteDatabaseCreator {
         TableDescriptor desc = null;
         List<String> colNames = null;
 
-        if (tableName.startsWith("__FREELIST")) {
+        if (tableName.startsWith("fqlite_freelist")) {
             desc = tdefault;
             colNames = desc.columnnames.subList(5,desc.columnnames.size()-1);
         }
@@ -210,10 +206,10 @@ public class SQLiteDatabaseCreator {
             int columnCount = rows.size();
 
             // first put the standard FQLite columns in front of the statement
-            StringBuilder sql = new StringBuilder("INSERT INTO " + tableName + " ( FQLITE_NUM, FQLITE_PLL, FQLITE_ROWID, FQLITE_STATUS, FQLITE_OFFSET,");
+            StringBuilder sql = new StringBuilder("INSERT INTO " + tableName + " ( "+Global.col_no+", "+Global.col_pll+", "+Global.col_rowid+", "+Global.col_status+", "+Global.col_offset+",");
 
             if(isWAL)
-                sql.append(" FQLITE_COMMIT, FQLITE_DBPAGE, FQLITE_WALFRAME, FQLITE_SALT1, FQLITE_SALT2, ");
+                sql.append(" " + Global.col_commit + ", " + Global.col_dbpage + ", " + Global.col_walframe + ", " + Global.col_salt1 + " , " + Global.col_salt2 + ", ");
 
             for (int i = 0; i < colNames.size(); i++) {
                 sql.append(" ")
@@ -261,8 +257,10 @@ public class SQLiteDatabaseCreator {
                     if (record.get(pos).startsWith("[BLOB-")) {
                            String key = getBLOBKey(cvalue,dbname,record.get(5));
                            BLOBElement b = cache.get(key);
+                           if (b != null) {
                            // write byte-array to statement
                            preparedStatement.setBytes(j,b.binary);
+                           }
                     } else {
                         // for all remaining data types
                         switch (pos) {
@@ -327,8 +325,8 @@ public class SQLiteDatabaseCreator {
             }
             if (connection != null) {
                 try {
-                    connection.close();
-                } catch (SQLException e) {
+                    //connection.close();
+                } catch (Exception e) {
                     System.err.println("Error while closing connection to database: " + e.getMessage());
                 }
             }

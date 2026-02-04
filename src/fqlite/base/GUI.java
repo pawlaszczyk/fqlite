@@ -4,25 +4,27 @@ import java.awt.AWTException;
 import java.awt.SystemTray;
 import java.awt.Taskbar;
 import java.awt.TrayIcon;
-import java.io.BufferedOutputStream;
-import java.io.File;
-import java.io.FileInputStream;
-import java.io.FileOutputStream;
-import java.io.IOException;
-import java.io.RandomAccessFile;
+import java.io.*;
 import java.net.URL;
-import java.nio.file.Files;
-import java.nio.file.LinkOption;
-import java.nio.file.Path;
-import java.nio.file.Paths;
+import java.nio.file.*;
+import java.sql.SQLException;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.logging.Level;
 
 import javax.swing.*;
 
+import fqlite.erm.MermaidHTMLGenerator;
+import fqlite.erm.SchemaRetriever;
+import fqlite.erm.SchemaToMermaidConverter;
+import fqlite.rag.*;
+import fqlite.sql.DBManager;
+import fqlite.sql.InMemoryDatabase;
+import fqlite.ui.*;
+import javafx.application.HostServices;
 import javafx.scene.control.*;
 import org.apache.commons.lang3.StringUtils;
 
@@ -38,18 +40,6 @@ import fqlite.types.BLOBElement;
 import fqlite.types.CtxTypes;
 import fqlite.types.ExportType;
 import fqlite.types.FileTypes;
-import fqlite.ui.AboutDialog;
-import fqlite.ui.DBPropertyPanel;
-import fqlite.ui.FQTableView;
-import fqlite.ui.FileInfo;
-import fqlite.ui.FontDialog;
-import fqlite.ui.Importer;
-import fqlite.ui.NodeObject;
-import fqlite.ui.SettingsDialog;
-import fqlite.ui.RollbackPropertyPanel;
-import fqlite.ui.TooltippedTableCell;
-import fqlite.ui.UserGuideWindow;
-import fqlite.ui.WALPropertyPanel;
 import fqlite.ui.hexviewer.HexViewManager;
 import fqlite.util.Auxiliary;
 import javafx.animation.Animation;
@@ -143,33 +133,33 @@ import javafx.util.Duration;
 
 public class GUI extends Application {
 
-	
+
 	public static File baseDir;
-	
+
 	public static int pos = 0;
-	
+
    	public static GUI mainwindow;
 	public ConcurrentHashMap<String, javafx.scene.Node> tables = new ConcurrentHashMap<>();
 	private final Hashtable<Object, String> rowcolors = new Hashtable<>();
 
-	public Hashtable<String,ObservableList<ObservableList<String>>> datasets = new Hashtable<>(); 
-	
+	public Hashtable<String,ObservableList<ObservableList<String>>> datasets = new Hashtable<>();
+
 	protected ContextMenu cm = null;
 	protected MenuBar menuBar;
-	
+
 	public List<String> dbnames = new ArrayList<>();
-	
+
 	SplitPane splitPane;
 	final StackPane leftSide = new StackPane();
     final VBox rightSide = new VBox();
     public static HexViewManager HEXVIEW = HexViewManager.getInstance();
-    
+
     int datacounter = 0;
     static TreeView<NodeObject> tree;
 	TreeItem<NodeObject>  walNode;
 	TreeItem<NodeObject>  rjNode;
 	TreeItem<NodeObject>  root = new TreeItem<>(new NodeObject("Databases", true));
-    
+
 	ConcurrentHashMap<String, TreeItem<NodeObject>> treeitems  = new ConcurrentHashMap<>();
 
 	ImageIcon facewink;
@@ -181,48 +171,50 @@ public class GUI extends Application {
 
 	StackPane rootPane = new StackPane();
 
-	Stage stage;
+	public Stage stage;
 	Scene scene;
 	public static VBox  topContainer;
-	
-	SQLWindow sqlAnalyzer = null;
 
     /* Buttons for toolbar */
     Button btnSQL;
-    Button btnExport;
+    Button btnLLM;
+	Button btnExport;
     Button btnExportDB;
     Button hexViewBtn;
+	Button btnHTML;
+	Button btnSchema;
 
-    
     MenuItem cmExport;
     MenuItem mntmExportDB;
     MenuItem mntmHex;
     MenuItem mntmSQL;
+	MenuItem mntmHTML;
+	MenuItem mntmSchema;
 
   	/**
 	 * Launch the graphic front-end with this method.
 	 */
     public static void main(String[] args) {
-   	
+
 		/*
 		  * This is needed because only one main class can be called in an
-		  * executable jar archive. 
-		  * 
+		  * executable jar archive.
+		  *
 		  */
 		if (args.length > 0)
-		{			     
+		{
 			// There is a least one parameter -> check if nogui-option is set
             // take the first argument - if there is one - put to the global variables
             Global.WORKINGDIRECTORY = args[0];
-            
+
 		}
-		
-	
+
+
 		ImageIcon img = new ImageIcon(Objects.requireNonNull(GUI.class.getResource("/logo.png")));
-		
-		
+
+
 	 	SystemTray st = SystemTray.getSystemTray();
-		
+
 		if (Taskbar.isTaskbarSupported())
 	    {
 			try {
@@ -232,27 +224,25 @@ public class GUI extends Application {
 			}catch(Exception err) {
 				// do nothing 
 			}
-			
+
 	    }
 		else if(SystemTray.isSupported()){
 			try {
-				TrayIcon ti = new java.awt.TrayIcon(img.getImage());						
+				TrayIcon ti = new java.awt.TrayIcon(img.getImage());
 				st.add(ti);
 			} catch (AWTException e) {
 				// do nothing - no logo - no problem ;-)
 			}
 		}
-	
-	
+
+
 		Application.launch(args);
-		
+
     }
-    
 
 	/**
-	 * Constructor of the user interface class. 
-	 * @throws IOException
-	 */
+	 * Constructor of the user interface class.
+     */
 	@Override
 	public void start(Stage stage) throws Exception {
 
@@ -260,15 +250,15 @@ public class GUI extends Application {
 				Platform.exit(); System.exit(0);}
 		);
 
-		
+
 	    HexViewManager.setParent(stage);
-	
+
 		baseDir = new File(System.getProperty("user.home"), ".fqlite");
 
 		//Attach the icon to the stage/window
 	    stage.getIcons().add(new Image(Objects.requireNonNull(GUI.class.getResourceAsStream("/logo.png"))));
-	 	  
-		
+
+
 		/* create hidden directory inside the user's home */
 		Path pp = Path.of(baseDir.getAbsolutePath());
         System.out.println("FQlite home::" + baseDir.getAbsolutePath());
@@ -276,14 +266,14 @@ public class GUI extends Application {
 			// path does not exist at the moment -> create a new hidden folder
 			baseDir.mkdir();
 		}
-		
+
 		clearCacheFromPreviousRun();
-	
-		this.stage = stage;									
+
+		this.stage = stage;
 		mainwindow = this;
-		
+
 		stage.setTitle("FQLite Carving Tool");
-	
+
 		rootPane.setBackground(new Background(new BackgroundFill(Color.WHITE, CornerRadii.EMPTY, Insets.EMPTY)));
 
 		// /leaf.jpg
@@ -291,11 +281,11 @@ public class GUI extends Application {
 		ImageView iv = new ImageView(s);
 		root.setGraphic(iv);
         root.setExpanded(true);
-			
-		URL url = GUI.class.getResource("/gray_schema32.png");
+
+		URL url = GUI.class.getResource("/gray_schema32_old.png");
         assert url != null;
         findIcon = new ImageIcon(url);
-		
+
 		MenuItem mntopen = new MenuItem("Open Database...");
 		mntopen.setAccelerator(KeyCombination.keyCombination("Ctrl+O"));
 		mntopen.setOnAction(e -> open_db(null));
@@ -304,10 +294,18 @@ public class GUI extends Application {
 		cmExport.setAccelerator(KeyCombination.keyCombination("Ctrl+X"));
         cmExport.setDisable(true);
 		cmExport.setOnAction(e -> doExport());
-		
+
 		mntmExportDB= new MenuItem("Export to a new SQLite database");
 		mntmExportDB.setOnAction( e -> doExportDB());
 		mntmExportDB.setDisable(true);
+
+		mntmHTML = new MenuItem("HTML Export...");
+		mntmHTML.setOnAction( e -> doExportHTML());
+		mntmHTML.setDisable(true);
+
+		mntmSchema = new MenuItem("Schema Analyzer...");
+		mntmSchema.setOnAction( e -> doAnalyzeSchema());
+		mntmSchema.setDisable(true);
 
 		MenuItem mntclose = new MenuItem("Close All");
 		mntclose.setAccelerator(KeyCombination.keyCombination("Ctrl+D"));
@@ -319,12 +317,12 @@ public class GUI extends Application {
 
 		MenuItem mntAbout = new MenuItem("About...");
 		mntAbout.setOnAction(e -> new AboutDialog(topContainer));
-		
+
 		MenuItem mntFont= new MenuItem("Font...");
 		mntFont.setOnAction(e -> {
 				javafx.scene.text.Font fff = javafx.scene.text.Font.font(Global.font_name, FontPosture.findByName(Global.font_style),Double.parseDouble(Global.font_size));
 				System.out.println(fff.toString());
-				
+
 				FontDialog fdia = new FontDialog(fff,topContainer);
 				fdia.show();
 			}
@@ -332,23 +330,23 @@ public class GUI extends Application {
 
 		MenuItem mntmLog = new MenuItem("View Log...");
 		mntmLog.setOnAction( e -> showLog());
-		
+
 		MenuItem mntmProp = new MenuItem("Settings...");
 		mntmProp.setOnAction( e -> showPropertyWindow());
-		
+
 		mntmSQL = new MenuItem("SQL-Analyzer...");
 		mntmSQL.setDisable(true);
-        mntmSQL.setOnAction( e -> showSqlWindow());
+        mntmSQL.setOnAction( e -> showSqlWindow(null,tree.getSelectionModel().getSelectedItem()));
 
         mntmHex = new MenuItem("Hex-Viewer...");
         mntmHex.setDisable(true);
         mntmHex.setOnAction( e-> openHexViewer());
-		
+
 		MenuItem mntmHelp = new MenuItem("Help");
 		mntmHelp.setOnAction(e -> showHelp()
 		);
-		
-	
+
+
 		SeparatorMenuItem sep = new SeparatorMenuItem();
 		SeparatorMenuItem sep2 = new SeparatorMenuItem();
 
@@ -358,15 +356,14 @@ public class GUI extends Application {
         Menu mnInfo = new Menu("Info");
 
 		mnFiles.getItems().addAll(mntopen,sep,mntclose,sep2,mntmProp,mntmExit);
-        mnExport.getItems().addAll(cmExport,mntmExportDB);
-        mnAnalyze.getItems().addAll(mntmSQL,mntmHex);
+        mnExport.getItems().addAll(cmExport,mntmExportDB,mntmHTML);
+        mnAnalyze.getItems().addAll(mntmSQL,mntmHex,mntmSchema);
 		mnInfo.getItems().addAll(mntmHelp,mntmLog,mntFont,mntAbout);
-		
-		
+
 		/* MenuBar */
 		menuBar = new MenuBar();
 		menuBar.getMenus().addAll(mnFiles,mnExport,mnAnalyze,mnInfo);
-	    	
+
 		splitPane = new SplitPane();
 
 		s = Objects.requireNonNull(GUI.class.getResource("/blue_dragdrop.png")).toExternalForm();
@@ -383,7 +380,7 @@ public class GUI extends Application {
 
 		prepare_tree();
         leftSide.getChildren().add(tree);
-                
+
 		splitPane.getItems().add(leftSide);
 	    splitPane.getItems().add(rightSide);
 	    SplitPane.setResizableWithParent(leftSide, true);
@@ -400,7 +397,6 @@ public class GUI extends Application {
 		btnOeffne.setTooltip(new Tooltip("Open database file"));
 		toolBar.getItems().add(btnOeffne);
 
-        //closeDB_gray.png
         s = Objects.requireNonNull(GUI.class.getResource("/gray_closeall24.png")).toExternalForm();
         Button btnClose = new Button();
         iv = new ImageView(s);
@@ -411,7 +407,6 @@ public class GUI extends Application {
 
         toolBar.getItems().add(new Separator());
 
-        //hex-32.png
         s = Objects.requireNonNull(GUI.class.getResource("/gray_hex24.png")).toExternalForm();
         hexViewBtn = new Button();
         iv = new ImageView(s);
@@ -421,7 +416,6 @@ public class GUI extends Application {
         hexViewBtn.setOnAction(e-> openHexViewer());
         toolBar.getItems().add(hexViewBtn);
 
-        // sql.png
         s = Objects.requireNonNull(GUI.class.getResource("/gray_analyzer24.png")).toExternalForm();
         btnSQL = new Button();
         iv = new ImageView(s);
@@ -429,12 +423,24 @@ public class GUI extends Application {
         btnSQL.setDisable(true);
         btnSQL.setTooltip(new Tooltip("Open SQL-Analyzer"));
         toolBar.getItems().add(btnSQL);
-        btnSQL.setOnAction(e->showSqlWindow());
+        btnSQL.setOnAction(e->showSqlWindow(null,tree.getSelectionModel().getSelectedItem()));
 
         toolBar.getItems().add(new Separator());
 
-        //export_gray.png
-        s = Objects.requireNonNull(GUI.class.getResource("/gray_csv24.png")).toExternalForm();
+
+		s = Objects.requireNonNull(GUI.class.getResource("/gray_cognition24.png")).toExternalForm();
+		btnLLM = new Button();
+		iv = new ImageView(s);
+		btnLLM.setGraphic(iv);
+		btnLLM.setDisable(true);
+		btnLLM.setTooltip(new Tooltip("Open SQL-Agent"));
+		toolBar.getItems().add(btnLLM);
+		btnLLM.setOnAction(e->showLLMWindow());
+
+		toolBar.getItems().add(new Separator());
+
+
+		s = Objects.requireNonNull(GUI.class.getResource("/gray_csv24.png")).toExternalForm();
         btnExport = new Button();
         iv = new ImageView(s);
         btnExport.setGraphic(iv);
@@ -442,8 +448,29 @@ public class GUI extends Application {
         btnExport.setDisable(true);
         btnExport.setTooltip(new Tooltip("Export database to CSV"));
         toolBar.getItems().add(btnExport);
-        //   document-save-as.png
-        s = Objects.requireNonNull(GUI.class.getResource("/gray_export24.png")).toExternalForm();
+
+
+		s = Objects.requireNonNull(GUI.class.getResource("/gray_html24.png")).toExternalForm();
+		btnHTML = new Button();
+		iv = new ImageView(s);
+		btnHTML.setGraphic(iv);
+		btnHTML.setOnAction(e->doExportHTML());
+		btnHTML.setDisable(true);
+		btnHTML.setTooltip(new Tooltip("Export database to HTML"));
+		toolBar.getItems().add(btnHTML);
+
+		s = Objects.requireNonNull(GUI.class.getResource("/gray_schema24.png")).toExternalForm();
+		btnSchema = new Button();
+		iv = new ImageView(s);
+		btnSchema.setGraphic(iv);
+		btnSchema.setOnAction(e->doAnalyzeSchema());
+		btnSchema.setDisable(true);
+		btnSchema.setTooltip(new Tooltip("Analyze database schema"));
+		toolBar.getItems().add(btnSchema);
+
+
+
+		s = Objects.requireNonNull(GUI.class.getResource("/gray_export24.png")).toExternalForm();
         btnExportDB = new Button();
         iv = new ImageView(s);
         btnExportDB.setGraphic(iv);
@@ -472,6 +499,7 @@ public class GUI extends Application {
 		toolBar.getItems().add(btnProp);
 		btnProp.setOnAction(e->showPropertyWindow());
 
+
 		about.setTooltip(new Tooltip("Get help"));
 		toolBar.getItems().add(about);
 
@@ -485,7 +513,7 @@ public class GUI extends Application {
 		toolBar.getItems().add(btnexit);
 
 
-		
+
 		url = GUI.class.getResource("/facewink.png");
         assert url != null;
         facewink = new ImageIcon(url);
@@ -514,10 +542,10 @@ public class GUI extends Application {
 		topContainer.getChildren().add(menuBar);
 		topContainer.getChildren().add(toolBar);
 		topContainer.getChildren().add(splitPane);
-		scene = new Scene(topContainer,Screen.getPrimary().getVisualBounds().getWidth()*0.9,Screen.getPrimary().getVisualBounds().getHeight()*0.9);	
+		scene = new Scene(topContainer,Screen.getPrimary().getVisualBounds().getWidth()*0.9,Screen.getPrimary().getVisualBounds().getHeight()*0.9);
 	    VBox.setVgrow(splitPane, Priority.ALWAYS);
-        
-		
+
+
 		stage.showingProperty().addListener(new ChangeListener<>() {
 
             @Override
@@ -530,8 +558,8 @@ public class GUI extends Application {
                 }
             }
         });
-		
-		
+
+
 		tree.setOnContextMenuRequested(event -> {
             hideContextMenu();
 
@@ -556,7 +584,7 @@ public class GUI extends Application {
             cm.show(tree.getScene().getWindow(), event.getScreenX(), event.getScreenY());
 
         });
-		
+
 		// OnDrag a file Over
 		scene.setOnDragOver(event -> {
             Dragboard db = event.getDragboard();
@@ -566,7 +594,7 @@ public class GUI extends Application {
                 event.consume();
             }
         });
-        
+
         // Dropping over surface
         scene.setOnDragDropped(event -> {
             Dragboard db = event.getDragboard();
@@ -583,52 +611,184 @@ public class GUI extends Application {
             event.setDropCompleted(success);
             event.consume();
         });
-        
-       
-        tree.autosize(); 
+
+
+        tree.autosize();
 
 		stage.setScene(scene);
-		
+
 		loadConfiguration();
-		
+
         stage.centerOnScreen();
         stage.sizeToScene();
         stage.show();
         stage.toFront();
         stage.requestFocus();
-     
-      
+
+
 	}
-	
+
 	private void showPropertyWindow() {
-		
+
 		SettingsDialog pd = new SettingsDialog();
 		pd.start(new Stage());
 	}
 
-    private void showSqlWindow(){
-		
+	private void showLLMWindow() {
+
+		removeLLMDB();
+
+		List<TreeItem<NodeObject>> databases = TreeHelper.getFirstLevelTreeItems(tree);
+
+		if(databases.isEmpty()){ return; }
+
+		String dbname = null;
+		TreeItem<NodeObject> selected = null;
+
+		for (TreeItem<NodeObject> nd:databases) {
+
+			/* it is indeed a valid node (database, table, journal, WAL archive) -> begin with export */
+			assert nd != null;
+			dbname = nd.getValue().name;
+			selected = nd;
+		}
+
+		// the configuration file for the LLM is stored in $user.home$/.fqlite/fqlitellm-config.properties
+		if (Files.exists(Global.llmconfig)) {
+			// file exists
+			Properties props = new Properties();
+			try (InputStream input = new FileInputStream(Global.llmconfig.toFile())) {
+				props.load(input);
+				String model_path = props.getProperty("model_path", Global.llmconfig.toString());
+				//There is a config file with a path to the model inside
+				if (!model_path.isEmpty()) {
+
+					Path p = Paths.get(model_path);
+
+					// model path is valid since the file exists
+					if (Files.exists(p)) {
+
+						LLMWindow llmw = new LLMWindow(this,selected);
+						prepareLLM(llmw);
+						Platform.runLater(llmw::show);
+						return;
+
+
+					}
+				}
+			} catch (IOException | NumberFormatException e) {
+				System.err.println("Error loading configuration: " + e.getMessage());
+			}
+		}
+
+
+		Alert alert = new Alert(AlertType.INFORMATION);
+		alert.setTitle("Warning Dialog");
+		alert.setHeaderText("Couldn't find LLM");
+		alert.setContentText("To use this feature, you must first download an LLM model. \n Please check your configuration.");
+		alert.showAndWait();
+		showConfigDialog();
+
+	}
+
+	/**
+	 * Before each run of the LLM-Agent we first delete the selection from the last run.
+	 */
+	private void removeLLMDB() {
+		File file = new File("testtest.json");
+		if (file.exists()) {
+			Path path = Paths.get("testtest.json");
+			try {
+				Files.delete(path);
+				System.out.println("File deleted successfully");
+				Path newFilePath = Paths.get("testtest.json");
+				Files.createFile(newFilePath);
+			} catch (IOException e) {
+				System.out.println("Failed to delete the file: " + e.getMessage());
+			}
+		}
+	}
+
+	public void prepareLLM(LLMWindow llmw) {
+
+
+		// Popup anzeigen
+		LoadingPopup popup = new LoadingPopup();
+		popup.show(llmw.getPrimaryStage(), "Starting Agent...");
+
+		// Zeitintensive Aufgabe in separatem Thread
+		new Thread(() -> {
+			try {
+				llmw.prepareRAG();
+				// Deine zeitintensive Aufgabe hier
+				Platform.runLater(() -> {
+					try {
+						Stage configstage = new Stage();
+						llmw.start(configstage);
+					} catch (Exception e) {
+						e.printStackTrace();
+					}
+				});
+
+			} catch (Exception e) {
+				e.printStackTrace();
+			} finally {
+				// Popup schließen
+				popup.close();
+			}
+		}).start();
+	}
+
+	private void showConfigDialog(){
+		LLMConfigDialog dl = new LLMConfigDialog();
+		Stage configstage = new Stage();
+		configstage.initModality(Modality.APPLICATION_MODAL);
+		dl.start(configstage);
+	}
+
+	public InMemoryDatabase createInMemoryDB(NodeObject no) {
+
+		ExportType etype = switch (no.tabletype) {
+			case 99 -> ExportType.SQLITEDB;
+			case 100 -> ExportType.ROLLBACKJOURNAL;
+			case 101 -> ExportType.WALARCHIVE;
+			default -> null;
+		};
+
+		return no.job.createInMemoryDB(no.job.filename, no.name, etype);
+
+	}
+
+
+	public void showSqlWindow(String statement, TreeItem<NodeObject> node){
+
 		if(dbnames.isEmpty()){
-		
+
 			Alert alert = new Alert(AlertType.INFORMATION);
 			alert.setTitle("Information");
 			alert.setContentText("You must open at least one database before you can use the analyzer.");
-			alert.showAndWait();	
-			
+			alert.showAndWait();
 			return;
 		}
-		
-		//if (!Global.SQLWARNING_SEEN) {
-		//	showWarning(stage,"Important note: Please note that the SQL Analyzer is a beta version. Use the results with care. ");
-		//	Global.SQLWARNING_SEEN = true;
-		//}
-        TreeItem<NodeObject> node = tree.getSelectionModel().getSelectedItem();
 
-        SQLWindow sql = new SQLWindow(this, node.getValue().name);
-        Stage sqlstage = new Stage();
-        sqlstage.initModality(Modality.APPLICATION_MODAL);
-        sql.start(sqlstage);
-        sqlAnalyzer = sql;
+		String dbname = node.getValue().name;
+		InMemoryDatabase mdb;
+		if(DBManager.exists(dbname)) {
+			mdb = DBManager.get(dbname);
+		}
+		else{
+			// 1. load recovered data to Memory (SQLite in Memory DB)
+		    mdb = createInMemoryDB(node.getValue());
+		}
+
+
+		Platform.runLater(() -> {
+			// 2. now open SQL Analyzer
+			SQLWindow sql = new SQLWindow(this, dbname, mdb, statement);
+			Stage sqlstage = new Stage();
+			sql.start(sqlstage);
+			Platform.runLater(() -> { sql.show();});
+		});
 
 	}
 	
@@ -692,8 +852,8 @@ public class GUI extends Application {
 		
 			
 	}
-	
-	
+
+
 	private void showHelp()
 	{
 		Platform.runLater(() -> new UserGuideWindow().start(new Stage()));
@@ -784,7 +944,7 @@ public class GUI extends Application {
 
         MenuItem cmSQLAnalyser;
         cmSQLAnalyser = new MenuItem("Inspect with SQL-Analyzer...");
-        cmSQLAnalyser.setOnAction(e->showSqlWindow());
+        cmSQLAnalyser.setOnAction(e->showSqlWindow(null,tree.getSelectionModel().getSelectedItem()));
 
 		MenuItem cmHex = new MenuItem("Open HexViewer");
         cmHex.setAccelerator(KeyCombination.keyCombination("Ctrl+H"));
@@ -843,7 +1003,7 @@ public class GUI extends Application {
 					return;
 				
 				for(File file: Objects.requireNonNull(baseDir.listFiles()))
-				    if (!file.isDirectory() && !file.getName().endsWith(".conf")) {
+				    if (!file.isDirectory() && !file.getName().endsWith(".conf") && !file.getName().endsWith(".properties")) {
                         file.delete();
                     }
 			}
@@ -884,7 +1044,7 @@ public class GUI extends Application {
 					Object value = appProps.get("EXPORTMODE");
 					if (null != value)
 						Global.EXPORT_MODE = Global.EXPORT_MODES.valueOf((String)value);
-				
+
 					Object svalue = appProps.get("SEPARATOR");
 					if (null != svalue)
 						Global.CSV_SEPARATOR = (String)svalue;
@@ -1015,7 +1175,111 @@ public class GUI extends Application {
 		}
 
 		/* it is indeed a valid node (database, table, journal, WAL archive) -> begin with export */
-		export_table(no);
+		export2csv(no);
+	}
+
+	/**
+	 * The reworked new schema viewer.
+	 * The schema is extracted from the internal SQLite database and
+	 * a mermaid based html-page is created. The page is automatically
+	 * displayed inside the standard browser.
+	 *
+	 */
+	public void doAnalyzeSchema(){
+
+		NodeObject no = null;
+
+		/* Do we really have a database node currently selected? */
+		TreeItem<NodeObject> node = tree.getSelectionModel().getSelectedItem();
+		if (node == null || node.getValue().isRoot) {
+			return;
+		}
+		else if (null != node.getValue()) {
+			no = node.getValue();
+		}
+
+		/* it is indeed a valid node (database, table, journal, WAL archive) -> begin with export */
+		assert no != null;
+
+		File baseDir = new File(System.getProperty("user.home"), ".fqlite");
+		String pfad = baseDir.getAbsolutePath() + FileSystems.getDefault().getSeparator() + "schema.html";
+
+		String dbname = no.name;
+
+		/* Check, if InMemory DB already exists */
+		InMemoryDatabase mdb;
+		if(DBManager.exists(dbname)) {
+			mdb = DBManager.get(dbname);
+		}
+		else{
+			// 1. load recovered data to Memory (SQLite in Memory DB)
+			mdb = createInMemoryDB(node.getValue());
+		}
+
+		/* Now we need the SQLite-Schema */
+		SchemaRetriever schemaRetriever = new SchemaRetriever(mdb.getConnectionObject());
+
+        try {
+            String schema = schemaRetriever.extractFullSchema(mdb.getConnectionObject());
+
+			// 1st step: convert the SQL-Schema to Mermaid
+			String mermaidCode = SchemaToMermaidConverter.convertToMermaid(schema);
+
+			File base = new File(System.getProperty("user.home"), ".fqlite");
+			String mmpath = base.getAbsolutePath()+ File.separator + "mermaid.min.js";
+			String pzpath = base.getAbsolutePath()+ File.separator + "panzoom.min.js";
+
+			File f = new File(mmpath);
+			if(!f.exists()) {
+				InputStream is = getClass().getResourceAsStream("/mermaid.min.js");
+				Path target = Paths.get(mmpath);
+				// Simple copy
+				Files.copy(is, target, StandardCopyOption.REPLACE_EXISTING);
+
+				InputStream is2 = getClass().getResourceAsStream("/panzoom.min.js");
+				target = Paths.get(pzpath);
+
+				Files.copy(is2, target, StandardCopyOption.REPLACE_EXISTING);
+			}
+
+			// Set paths to your local library files
+			MermaidHTMLGenerator.setMermaidLibraryPath("./mermaid.min.js");
+			MermaidHTMLGenerator.setPanzoomLibraryPath("./panzoom.min.js");
+
+			// 2nd step: generate a local html-file
+			MermaidHTMLGenerator.generateHTMLFile(mermaidCode, pfad);
+
+			openInBrowser(pfad, gui.getHostServices());
+
+
+		} catch (SQLException e) {
+            throw new RuntimeException(e);
+        }
+		catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+
+
+    }
+
+	/**
+	 * Start a data export.
+	 */
+	public void doExportHTML() {
+		NodeObject no = null;
+
+		/* Do we really have a database node currently selected? */
+		TreeItem<NodeObject> node = tree.getSelectionModel().getSelectedItem();
+		if (node == null || node.getValue().isRoot) {
+			return;
+		}
+		else if (null != node.getValue()) {
+			no = node.getValue();
+		}
+
+		/* it is indeed a valid node (database, table, journal, WAL archive) -> begin with export */
+		assert no != null;
+		export_html(no);
 	}
 
 	
@@ -1030,10 +1294,11 @@ public class GUI extends Application {
 	 * @return tree path
 	 */
 	@SuppressWarnings({ "unchecked", "rawtypes" })
-	String add_table(Job job, String tablename, List<String> columns, List<String> columntypes, List<String> PK, List<String> BoolColumns, boolean walnode,
-			boolean rjnode, int db_object) {
+	CompletableFuture<String> add_table(Job job, String tablename, List<String> columns, List<String> columntypes, List<String> PK, List<String> BoolColumns, boolean walnode,
+										boolean rjnode, int db_object) {
 
-		
+		CompletableFuture<String> future = new CompletableFuture<>();
+
 		NodeObject o = null;
 		
 		Path p = Paths.get(job.path);
@@ -1054,20 +1319,20 @@ public class GUI extends Application {
 		if (!walnode) {
 	    //yes		
 		//add the standard columns (index 0 <>'line number', 2 <> 'status',3 <> 'offset' - '1' <>is the table name
-		TableColumn numbercolumn = new TableColumn<>("No.");
+		TableColumn numbercolumn = new TableColumn<>(Global.col_no);
 		numbercolumn.setCellValueFactory((Callback<CellDataFeatures<ObservableList, String>, ObservableValue<String>>) param -> {
                 return new SimpleStringProperty(param.getValue().get(0).toString());               //line number index
         });
 		
 		numbercolumn.setStyle( "-fx-text-fill: gray;-fx-alignment: TOP-RIGHT;");
 
-		TableColumn pllcolumn = new TableColumn<>("PLL|HL");
+		TableColumn pllcolumn = new TableColumn<>(Global.col_pll);
 		pllcolumn.setCellFactory(TooltippedTableCell.forTableColumn(tablename,job,this.stage));
      	pllcolumn.setCellValueFactory((Callback<CellDataFeatures<ObservableList, String>, ObservableValue<String>>) param -> new SimpleStringProperty(param.getValue().get(2).toString()));
      	
 		pllcolumn.setStyle( "-fx-text-fill: gray;-fx-alignment: TOP-RIGHT;");
 
-        TableColumn hlcolumn = new TableColumn<>("ROWID");
+        TableColumn hlcolumn = new TableColumn<>(Global.col_rowid);
 		hlcolumn.setCellFactory(TooltippedTableCell.forTableColumn(tablename,job,this.stage));
      	hlcolumn.setCellValueFactory((Callback<CellDataFeatures<ObservableList, String>, ObservableValue<String>>) param -> new SimpleStringProperty(param.getValue().get(3).toString()));
      	
@@ -1084,7 +1349,7 @@ public class GUI extends Application {
 		statuscolumn.setStyle( "-fx-text-fill: gray;-fx-alignment: TOP-RIGHT;");
 
 	  	
-     	TableColumn offsetcolumn = new TableColumn<>("Offset");
+     	TableColumn offsetcolumn = new TableColumn<>(Global.col_offset);
 		offsetcolumn.setCellFactory(TooltippedTableCell.forTableColumn(tablename,job,this.stage));
      	offsetcolumn.setCellValueFactory((Callback<CellDataFeatures<ObservableList, String>, ObservableValue<String>>) param -> new SimpleStringProperty(param.getValue().get(5).toString()));
      		
@@ -1100,7 +1365,7 @@ public class GUI extends Application {
 			 */
 		
 			//add the standard columns (index 0 <>'line number', 2 <> 'status',3 <> 'offset' - '1' <>is the table name 
-			TableColumn numbercolumn = new TableColumn<>("No.");
+			TableColumn numbercolumn = new TableColumn<>(Global.col_no);
 			numbercolumn.setComparator(new CustomComparator());
 			numbercolumn.setCellValueFactory((Callback<CellDataFeatures<ObservableList, String>, ObservableValue<String>>) param -> {
                     return new SimpleStringProperty(param.getValue().get(0).toString());               //line number index
@@ -1108,7 +1373,7 @@ public class GUI extends Application {
 			numbercolumn.setStyle( "-fx-text-fill: gray;-fx-alignment: TOP-RIGHT;");
 
 
-			TableColumn pllcolumn = new TableColumn<>("PLL|HL");
+			TableColumn pllcolumn = new TableColumn<>(Global.col_pll);
 			pllcolumn.setCellFactory(TooltippedTableCell.forTableColumn(tablename,job,this.stage));
 			pllcolumn.setComparator(new CustomComparator());
 	     	pllcolumn.setCellValueFactory((Callback<CellDataFeatures<ObservableList, String>, ObservableValue<String>>) param -> new SimpleStringProperty(param.getValue().get(2).toString()));
@@ -1116,11 +1381,11 @@ public class GUI extends Application {
 			
 		
 	     	
-            TableColumn hlcolumn = new TableColumn<>("ROWID");
-			hlcolumn.setCellFactory(TooltippedTableCell.forTableColumn(tablename,job,this.stage));
-			hlcolumn.setComparator(new CustomComparator());
-	     	hlcolumn.setCellValueFactory((Callback<CellDataFeatures<ObservableList, String>, ObservableValue<String>>) param -> new SimpleStringProperty(param.getValue().get(3).toString()));
-			hlcolumn.setStyle( "-fx-text-fill: gray;-fx-alignment: TOP-RIGHT;");
+            TableColumn rowidcolumn = new TableColumn<>(Global.col_rowid);
+			rowidcolumn.setCellFactory(TooltippedTableCell.forTableColumn(tablename,job,this.stage));
+			rowidcolumn.setComparator(new CustomComparator());
+	     	rowidcolumn.setCellValueFactory((Callback<CellDataFeatures<ObservableList, String>, ObservableValue<String>>) param -> new SimpleStringProperty(param.getValue().get(3).toString()));
+			rowidcolumn.setStyle( "-fx-text-fill: gray;-fx-alignment: TOP-RIGHT;");
 
 	     	
 	     	Label statusLabel = new Label(Global.STATUS_CLOMUN);
@@ -1131,14 +1396,14 @@ public class GUI extends Application {
 	        statuscolumn.setCellValueFactory((Callback<CellDataFeatures<ObservableList, String>, ObservableValue<String>>) param -> new SimpleStringProperty(param.getValue().get(4).toString()));
 	     	statuscolumn.setGraphic(view);
 
-	     	TableColumn offsetcolumn = new TableColumn<>("Offset");
+	     	TableColumn offsetcolumn = new TableColumn<>(Global.col_offset);
 			offsetcolumn.setComparator(new CustomComparator());
 			offsetcolumn.setCellFactory(TooltippedTableCell.forTableColumn(tablename,job,this.stage));
 	     	offsetcolumn.setCellValueFactory((Callback<CellDataFeatures<ObservableList, String>, ObservableValue<String>>) param -> new SimpleStringProperty(param.getValue().get(5).toString()));
 			offsetcolumn.setStyle( "-fx-text-fill: gray;-fx-alignment: TOP-RIGHT;");
 	     		
 	     	//[no,pll,hl,tabname,status,...]
-			table.getColumns().addAll(numbercolumn,statuscolumn,offsetcolumn,pllcolumn,hlcolumn);
+			table.getColumns().addAll(numbercolumn,statuscolumn,offsetcolumn,pllcolumn,rowidcolumn);
 		
 		
 		
@@ -1194,8 +1459,8 @@ public class GUI extends Application {
 				}	
 			}
 			
-			if(colname.equals("salt2") || colname.equals("salt1") ||
-					colname.equals("walframe") 	|| colname.equals("dbpage") || colname.equals("commit"))
+			if(colname.equals(Global.col_salt2) || colname.equals(Global.col_salt1) ||
+					colname.equals(Global.col_walframe) 	|| colname.equals(Global.col_dbpage) || colname.equals(Global.col_commit))
 			{			col.setStyle( "-fx-text-fill: gray;-fx-alignment: TOP-RIGHT;");
 
 				
@@ -1224,11 +1489,11 @@ public class GUI extends Application {
 	    ComboBox<String> columnselection = new ComboBox<>();
 
 	    columnselection.getItems().add("All Columns (Filter) -> ");
-	    columnselection.getItems().add("No.");
-	    columnselection.getItems().add("Status");
-	    columnselection.getItems().add("Offset");
-	    columnselection.getItems().add("PLL|HL");
-	    columnselection.getItems().add("ROWID");
+	    columnselection.getItems().add(Global.col_no);
+	    columnselection.getItems().add(Global.col_status);
+	    columnselection.getItems().add(Global.col_offset);
+	    columnselection.getItems().add(Global.col_pll);
+	    columnselection.getItems().add(Global.col_rowid);
 
 
         for (String choice: columns) {
@@ -1279,37 +1544,44 @@ public class GUI extends Application {
         ImageView iv = new ImageView(s);
 		dmtn.setGraphic(iv);
  		
-		String tp = null;
-		
+
 		if (walnode) {
 				
 			/* WAL-tree node - add child node of table */
 			walNode.getChildren().add(dmtn);
-		
+			String tp = null;
 			tp = getPath(dmtn);
 			
 			// save assignment between the tree item's path and a tree item
 			treeitems.put(tp, dmtn);
-	
-			
+			tables.put(tp, tablePane);
+			future.complete(tp);
 		}
 		else if (rjnode) {
 			/* Rollback Journal */
 			rjNode.getChildren().add(dmtn);
+			String tp = null;
 			tp = getPath(dmtn);
 			
 			// save assignment between the tree item's path and a tree item
 			treeitems.put(tp, dmtn);
-			
+			tables.put(tp, tablePane);
+			future.complete(tp);
 		}
 		else{
-			 /* main db */
-		    job.getTreeItem().getChildren().add(dmtn);
-			tp = getPath(dmtn);
+			/* main db */
+			Platform.runLater(()->{
+				job.getTreeItem().getChildren().add(dmtn);
+				String tp = null;
+				tp = getPath(dmtn);
+				// save assignment between the tree item's path and a tree item
+				treeitems.put(tp, dmtn);
+				tables.put(tp, tablePane);
+				future.complete(tp);
+			});
 
-			// save assignment between the tree item's path and a tree item
-			treeitems.put(tp, dmtn);
-			
+
+
 		}
 		
 		ContextMenu tcm = createContextMenu(CtxTypes.TABLE,tablename,table,job); 
@@ -1379,7 +1651,7 @@ public class GUI extends Application {
                ObservableValue off =  toff.getCellObservableValue(row);
 
 
-               if (col.getText().equals("Offset"))
+               if (col.getText().equals(Global.col_offset))
                {
                    // get currently selected database
                    NodeObject no = getSelectedNode();
@@ -1485,16 +1757,9 @@ public class GUI extends Application {
 
                }
 
-
-
-
-
            });
-		
-		
-	
-		tables.put(tp, tablePane);
-		return tp;
+
+		return future;
 	}
 	
 	@SuppressWarnings({ "rawtypes", "unchecked" })
@@ -2320,16 +2585,20 @@ public class GUI extends Application {
 
         Platform.runLater(() -> {
 
+			btnLLM.setDisable(active);
             btnSQL.setDisable(active);
             btnExport.setDisable(active);
             btnExportDB.setDisable(active);
-            hexViewBtn.setDisable(active);
+            btnHTML.setDisable(active);
+			btnSchema.setDisable(active);
+			hexViewBtn.setDisable(active);
             cmExport.setDisable(active);
             mntmExportDB.setDisable(active);
             mntmHex.setDisable(active);
             mntmSQL.setDisable(active);
-
-            });
+			mntmSchema.setDisable(active);
+			mntmHTML.setDisable(active);
+		});
     }
 	
 
@@ -2632,18 +2901,66 @@ public class GUI extends Application {
 
     }
 
-        /**
-         * This method is called to write the contents of a database to a CSV file.
-         *
-         * @param no Database node for export
-         */
-	private void export_table(NodeObject no) {
+
+
+	/**
+	 * This method is called to transfer the recovered data of a database to a new database.
+	 *
+	 * @param no Database node for export
+	 */
+	private void export_html(NodeObject no) {
+
+		boolean success;
+
+		FileChooser fileChooser = new FileChooser();
+		fileChooser.setTitle("Export recovered data to html report");
+		fileChooser.setInitialFileName(prepareDefaultHtmlReportName(no.name));
+		File f = fileChooser.showSaveDialog(stage);
+
+		if(null == f)
+			return;
+
+		ExportType etype = switch (no.tabletype) {
+			case 99 -> ExportType.SQLITEDB;
+			case 100 -> ExportType.ROLLBACKJOURNAL;
+			case 101 -> ExportType.WALARCHIVE;
+			default -> null;
+		};
+
+        try {
+            no.job.exportToHtml(no.job.filename, f.getAbsolutePath(), f.getParent(), etype);
+      		openInBrowser(f.getAbsolutePath(), gui.getHostServices());
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+
+    }
+
+
+	public void openInBrowser(String htmlFilePath, HostServices hostServices) {
+		try {
+			File htmlFile = new File(htmlFilePath);
+			String url = htmlFile.toURI().toString();
+			hostServices.showDocument(url);
+		} catch (Exception e) {
+			e.printStackTrace();
+			System.err.println("An error occurred while try to open browser: " + e.getMessage());
+		}
+	}
+
+
+	/**
+	 * This method is called to write the contents of a database to a CSV file.
+	 *
+	 * @param no Database node for export
+	 */
+	private void export2csv(NodeObject no) {
 
 		if (null == no)
 			return;
 			
 		FileChooser fileChooser = new FileChooser();
-		fileChooser.setTitle("Export Element");	
+		fileChooser.setTitle("Export to .csv");
         fileChooser.setInitialFileName(prepareDefaultFileName(no.name));
 		File f = fileChooser.showSaveDialog(stage);
         
@@ -2716,7 +3033,18 @@ public class GUI extends Application {
         date = date.replace(":","_");
         return nameofnode + date + ".sqlite";
     }
-	
+
+	private String prepareDefaultHtmlReportName(String nameofnode){
+		LocalDateTime now = LocalDateTime.now();
+		DateTimeFormatter df;
+		df = DateTimeFormatter.ISO_DATE_TIME; // 2020-01-31T20:07:07.095
+		String date = df.format(now);
+		date = date.replace(":","_");
+		return nameofnode + date + ".html";
+	}
+
+
+
 
 	/**
 	 * This method is used to insert new records into an output table.
@@ -2888,10 +3216,10 @@ public class GUI extends Application {
 				if (r.size()>cnumber) {
 
                     cnumber = switch (cname) {
-                        case "pll|hl" -> 2;
-                        case "rowid" -> 3;
-                        case "" -> 4;
-                        case "offset" -> 5;
+						case Global.col_pll -> 2;
+						case Global.col_rowid -> 3;
+						case Global.col_status -> 4;
+                        case Global.col_offset -> 5;
                         default -> cnumber;
                     };
 					

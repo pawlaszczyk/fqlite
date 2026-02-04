@@ -1,6 +1,7 @@
 package fqlite.ui;
 
 import fqlite.base.GUI;
+import fqlite.base.Global;
 import javafx.application.Platform;
 import javafx.beans.property.SimpleStringProperty;
 import javafx.beans.value.ObservableValue;
@@ -118,7 +119,7 @@ public class WALPropertyPanel extends StackPane {
 	public void initCheckpointTable(String[][] data) {
 		
 
-		  String[] column ={"salt1", "salt2", "framenumber", "pagenumber", "commit"};
+		  String[] column ={Global.col_salt1, Global.col_salt2, Global.col_walframe, Global.col_dbpage, Global.col_commit};
 			
 			TableView table = new TableView<>();
 			

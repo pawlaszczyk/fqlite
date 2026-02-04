@@ -124,12 +124,13 @@ public class SettingsDialog extends Application{
             loglevel.getItems().add(Level.FINEST.toString());
             loglevel.setTooltip(new Tooltip("Select a LOG Level"));
             loglevel.getSelectionModel().select(Global.LOGLEVEL.toString());
+			HBox loggrp = new HBox(text2, loglevel);
 
-            HBox loggrp = new HBox(text2, loglevel);
-            loggrp.setPadding(new Insets(5, 5, 5, 0));
+			loggrp.setPadding(new Insets(5, 5, 5, 0));
             loggrp.setSpacing(10);
             loggrp.setStyle(cssLayout);
             rootGroup.getChildren().addAll(heading3, loggrp);
+
 	        ButtonBar buttonBar = new ButtonBar();
 	        buttonBar.setPadding( new Insets(10) );
 
@@ -158,6 +159,9 @@ public class SettingsDialog extends Application{
 		                	else if (r3.isSelected()) 
 			                		Global.EXPORT_MODE = Global.EXPORT_MODES.TOSEPARATEFILES;
 
+
+
+
 		                	File baseDir = new File(System.getProperty("user.home"), ".fqlite");
 		                	String path = baseDir.getAbsolutePath()+ File.separator + "fqlite.conf";
 		            
@@ -171,7 +175,6 @@ public class SettingsDialog extends Application{
 		            	        Global.CSV_SEPARATOR = choiceBox.getSelectionModel().getSelectedItem();
 		            	        appProps.setProperty("CSV_SEPARATOR",Global.CSV_SEPARATOR);
 		            	        appProps.setProperty("LOG-LEVEL",Global.LOGLEVEL.toString());
-
 		            	        appProps.store(new FileOutputStream(path), null);
 
 		            		} catch (Exception err) {
@@ -203,7 +206,7 @@ public class SettingsDialog extends Application{
 	  
 	        rootGroup.getChildren().add(buttonBar);
 	        
-	        stage.setScene(new Scene(rootGroup,400,550));
+	        stage.setScene(new Scene(rootGroup,400,650));
 	        stage.setAlwaysOnTop(true);
 	        stage.show();
 

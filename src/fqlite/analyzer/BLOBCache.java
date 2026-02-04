@@ -67,9 +67,13 @@ public class BLOBCache {
 	 * @return hex string
 	 */
 	public String getHexString(String path){
-	    
+
+		System.out.println("path:"+path);
 		String result;
-		ByteBuffer bf = ByteBuffer.wrap(get(path).binary);
+		BLOBElement e = get(path);
+		if (e ==null)
+			return "NULL";
+		ByteBuffer bf = ByteBuffer.wrap(e.binary);
 		bf.position(0);
 		result = Auxiliary.bytesToHex2(bf); 
 		return result;

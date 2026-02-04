@@ -6,7 +6,6 @@ import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
-
 import org.fxmisc.richtext.CodeArea;
 import org.fxmisc.richtext.GenericStyledArea;
 import org.fxmisc.richtext.LineNumberFactory;
@@ -33,7 +32,6 @@ import javafx.scene.control.SelectionMode;
 import javafx.scene.control.TableColumn;
 import javafx.scene.control.TablePosition;
 import javafx.scene.control.TableView;
-import javafx.scene.control.TextArea;
 import javafx.scene.control.ToolBar;
 import javafx.scene.control.Tooltip;
 import javafx.scene.image.ImageView;
@@ -57,9 +55,8 @@ import javafx.stage.Stage;
 
 public class SQLWindow extends Application {
     
-    public TextArea resultTA = new TextArea(); 
     Hashtable<String,ObservableList<ObservableList<String>>> tabledata;
-    TableView<Object> resultview = new TableView<Object>();
+    TableView<Object> resultview = new TableView<>();
     List<String> dbnames; 
     final ComboBox<String> dbBox = new ComboBox<>();
     final ComboBox<String> templateBox = new ComboBox<>();
@@ -67,7 +64,12 @@ public class SQLWindow extends Application {
     VBox root = new VBox();
     org.fxmisc.richtext.CodeArea codeArea = new CodeArea();
     public Label statusline;
-    private String preselection;
+    private final String preselection;
+    static SQLParser p;
+    static Stage primaryStage;
+    Button btnGo;
+    InMemoryDatabase inMemoryDatabase;
+    String initial_statement;
 
     private static final String[] KEYWORDS = new String[] {
             "ADD","ADD CONSTRAINT","ALL","ALTER","ALTER COLUMN","ALTER TABLE",
@@ -100,11 +102,8 @@ public class SQLWindow extends Application {
             + "|(?<COMMENT>" + COMMENT_PATTERN + ")"
     );
     
-    static final String sampleCode = String.join("\n", new String[] {
-            " SELLECT * FROM ITEMS WHERE A = 'B'; "
-        });
 
-    static final Hashtable<String,String> templates = new Hashtable<String,String>();
+    static final Hashtable<String,String> templates = new Hashtable<>();
 
     
     /**
@@ -112,20 +111,17 @@ public class SQLWindow extends Application {
      * @param app reference to the parent frame
      * @param selectedDB the name of the db for preselection
      */
-    public SQLWindow(GUI app, String selectedDB){
+    public SQLWindow(GUI app, String selectedDB, InMemoryDatabase mdb, String statement){
 
     	this.app = app;
     	tabledata = app.datasets;
-    	this.dbnames = app.dbnames;
+        List<String> db = new ArrayList<>();
+        db.add(selectedDB);
+    	this.dbnames = db; //app.dbnames;
         this.preselection = selectedDB;
+        this.inMemoryDatabase = mdb;
+        this.initial_statement = statement;
 
-       // xEnumeration<String> keys = tabledata.keys();
-       // while(keys.hasMoreElements()) {
-       // 	String key = keys.nextElement();        
-       // 	ObservableList<ObservableList<String>> obl =  tabledata.get(key);
-       // }
-        
-        
         templates.put("SIMPLE SELECT","-- Place your SELECT statement below this text.\n-- Then click on the Play [>] button to execute. \nSELECT * FROM TABLENAME WHERE <condition>;");
         templates.put("INNER JOIN", "-- Returns records that have matching values in both tables \nSELECT * FROM <TABLE1> AS t1 INNER JOIN <TABLE2> AS t2 ON t1.colX = t2.colY;");
         templates.put("LEFT (OUTER) JOIN", "-- Returns all records from the left table, and the matched records from the right table \n SELECT t1.colX, t2.colY FROM <TABLE1> AS t1 LEFT JOIN <TABLE2> AS t2 ON t1.colX = t2.colY\n"
@@ -139,7 +135,12 @@ public class SQLWindow extends Application {
 
       
     }
-    
+
+    public void show(){
+        primaryStage.show();
+        primaryStage.toFront();
+    }
+
 	
 	public static void main(String[] args) {
         launch(args);
@@ -148,54 +149,48 @@ public class SQLWindow extends Application {
     @SuppressWarnings("unused")
 	@Override
     public void start(Stage primaryStage) {
-        primaryStage.setTitle("SQL Analyzer (Beta)");
-		
+
+        SQLWindow.primaryStage = primaryStage;
+
+        primaryStage.setTitle("SQL Analyzer [" + preselection +"]");
+
+        p = SQLParser.getInstance();
+
         ToolBar toolBar = new ToolBar();
 
-        Button btnGo = new Button();
-        String s = GUI.class.getResource("/start.png").toExternalForm();
+        btnGo = new Button();
+        String s = Objects.requireNonNull(GUI.class.getResource("/start.png")).toExternalForm();
 		ImageView iv = new ImageView(s);
 		btnGo.setGraphic(iv);
 		btnGo.setTooltip(new Tooltip("click her to execute your SELECT statement"));
-		btnGo.setOnAction(new EventHandler<ActionEvent>() {
- 
-            @Override
-            public void handle(ActionEvent event) {
-            	SQLParser p = new SQLParser();
-            	// open connection to calcite 
-            	p.connectToInMemoryDatabase();
-            	String result = p.parse(codeArea.getText(),dbBox.getSelectionModel().getSelectedItem(),app,primaryStage,resultview,statusline);
-            	Platform.runLater( () -> {resultTA.setText(result);});
-            }
+		btnGo.setOnAction(event -> {
+
+            p.parse(codeArea.getText(),dbBox.getSelectionModel().getSelectedItem(), primaryStage,resultview,statusline);
+            //Platform.runLater( () -> {resultTA.setText(result);});
         });
         
 
         Button btnCopy = new Button();
-        s = GUI.class.getResource("/edit-copy_small.png").toExternalForm();
+        s = Objects.requireNonNull(GUI.class.getResource("/edit-copy_small.png")).toExternalForm();
 		iv = new ImageView(s);
 		btnCopy.setGraphic(iv);
 		btnCopy.setTooltip(new Tooltip("copy result set to clipboard"));
-		btnCopy.setOnAction(new EventHandler<ActionEvent>() {
- 
-            @Override
-        	@SuppressWarnings("rawtypes")
-            public void handle(ActionEvent event) {
-               resultview.getSelectionModel().selectAll();
-            	StringBuilder sb = new StringBuilder();
-             	final javafx.scene.input.Clipboard clipboard = javafx.scene.input.Clipboard.getSystemClipboard();
-                final ClipboardContent content = new ClipboardContent();
-                ObservableList<TablePosition> selection = resultview.getSelectionModel().getSelectedCells();
+		btnCopy.setOnAction(event -> {
+            resultview.getSelectionModel().selectAll();
+            StringBuilder sb = new StringBuilder();
+            final javafx.scene.input.Clipboard clipboard = javafx.scene.input.Clipboard.getSystemClipboard();
+            final ClipboardContent content = new ClipboardContent();
+            ObservableList<TablePosition> selection = resultview.getSelectionModel().getSelectedCells();
 
-                for (TablePosition pos: selection) {
+            for (TablePosition pos : selection) {
 
-                    @SuppressWarnings("unchecked")
-                    ObservableList<String> hl = (ObservableList<String>) resultview.getItems().get(pos.getRow());
-                    sb.append(hl.toString()).append("\n");
-                }
-                content.putString(sb.toString());
-                clipboard.setContent(content);
-
+                @SuppressWarnings("unchecked")
+                ObservableList<String> hl = (ObservableList<String>) resultview.getItems().get(pos.getRow());
+                sb.append(hl.toString()).append("\n");
             }
+            content.putString(sb.toString());
+            clipboard.setContent(content);
+
         });
         
 	    Button btnExit = new Button();
@@ -203,11 +198,11 @@ public class SQLWindow extends Application {
 		iv = new ImageView(s);
 		btnExit.setGraphic(iv);
 		btnExit.setTooltip(new Tooltip("Quit SQL Analyzer"));
-		btnExit.setOnAction(new EventHandler<ActionEvent>() {
- 
+		btnExit.setOnAction(new EventHandler<>() {
+
             @Override
             public void handle(ActionEvent event) {
-            	primaryStage.close();
+                primaryStage.close();
             }
         });
         		
@@ -231,10 +226,10 @@ public class SQLWindow extends Application {
         templateBox.setOnAction(e -> {
 
         	String selection = templateBox.getSelectionModel().getSelectedItem();
-        	if (selection != null && templates.containsKey(selection))
-        		codeArea.clear();
-        		codeArea.replaceText(0, 0,templates.get(selection));
-
+        	if (selection != null && templates.containsKey(selection)) {
+                codeArea.clear();
+                codeArea.replaceText(0, 0, templates.get(selection));
+            }
         });
         
 
@@ -256,15 +251,25 @@ public class SQLWindow extends Application {
         (
             new VisibleParagraphStyler<>( codeArea, this::computeHighlighting)
         );
-        String txt =  "-- Place your SELECT statement below this text.\n-- Then click on the Play [>] button to execute. "
-        		+ "\nSELECT * FROM TABLENAME;";
-        codeArea.replaceText(0, 0,txt);
-        int pos = txt.indexOf("TABLENAME");
-        if (pos >=1)
-        {	codeArea.selectRange(1, pos);
-        	codeArea.selectWord();
+
+        System.out.println("initial statement:" + initial_statement);
+        if (initial_statement != null){
+                codeArea.clear();
+                codeArea.replaceText(0, 0,initial_statement);
         }
-        
+        else
+        {
+            String txt = """
+                    -- Place your SELECT statement below this text.
+                    -- Then click on the Play [>] button to execute. \
+                    
+                    SELECT * FROM TABLENAME;""";
+            codeArea.replaceText(0, 0, txt);
+            int pos = txt.indexOf("TABLENAME");
+            codeArea.selectRange(1, pos);
+            codeArea.selectWord();
+        }
+
         statusline = new Label();
 	    statusline.setText("<no rows selected>" + " | rows: " + 0);
         statusline.setStyle("-fx-text-fill: gray; -fx-max-width:200;");
@@ -276,14 +281,13 @@ public class SQLWindow extends Application {
             if ( KE.getCode() == KeyCode.ENTER ) {
             	int caretPosition = codeArea.getCaretPosition();
             	int currentParagraph = codeArea.getCurrentParagraph();
-                Matcher m0 = whiteSpace.matcher( codeArea.getParagraph( currentParagraph-1 ).getSegments().get( 0 ) );
+                Matcher m0 = whiteSpace.matcher( codeArea.getParagraph( currentParagraph-1 ).getSegments().getFirst() );
                 if ( m0.find() ) Platform.runLater( () -> codeArea.insertText( caretPosition, m0.group() ) );              
             }
         });
-        
-        
+
     	
-        resultview = new TableView<Object>();
+        resultview = new TableView<>();
   	    
 		resultview.getSelectionModel().setSelectionMode(
 			    SelectionMode.MULTIPLE
@@ -303,13 +307,12 @@ public class SQLWindow extends Application {
 		Scene scene = new Scene(root,Screen.getPrimary().getVisualBounds().getWidth()*0.8,Screen.getPrimary().getVisualBounds().getHeight()*0.8);
         
         primaryStage.setScene(scene);
-        scene.getStylesheets().add(GUI.class.getResource("/sql-keywords.css").toExternalForm());
+        scene.getStylesheets().add(Objects.requireNonNull(GUI.class.getResource("/sql-keywords.css")).toExternalForm());
         primaryStage.sizeToScene();
         codeArea.requestFocus();
         primaryStage.show();
-        primaryStage.setAlwaysOnTop(true);
+        //primaryStage.setAlwaysOnTop(true);
     }
-
 
     private StyleSpans<Collection<String>> computeHighlighting(String text) {
     	
@@ -339,50 +342,36 @@ public class SQLWindow extends Application {
     	
     	final ContextMenu contextMenu = new ContextMenu();
 
-    	table.setOnMouseClicked(new EventHandler<javafx.scene.input.MouseEvent>() {
-    		
-    		@Override
-    		public void handle(javafx.scene.input.MouseEvent event) {
+    	table.setOnMouseClicked(event -> {
 
-    			if(event.getButton() == MouseButton.SECONDARY) {
-                        contextMenu.show(table.getScene().getWindow(), event.getScreenX(), event.getScreenY());
-    			   }
-    			
-    		}	
-    	});
+            if(event.getButton() == MouseButton.SECONDARY) {
+                contextMenu.show(table.getScene().getWindow(), event.getScreenX(), event.getScreenY());
+            }
+
+        });
     	
     	// copy a single table line
     	MenuItem mntcopyline = new MenuItem("Copy Line(s)");
     	String s = Objects.requireNonNull(GUI.class.getResource("/edit-copy.png")).toExternalForm();
         ImageView iv = new ImageView(s); 
 
-    	
      	final KeyCodeCombination copylineCombination = new KeyCodeCombination(KeyCode.L, KeyCombination.SHORTCUT_DOWN);
     	final KeyCodeCombination copycellCombination = new KeyCodeCombination(KeyCode.C, KeyCombination.SHORTCUT_DOWN);
 
         
-    	table.setOnKeyPressed(new EventHandler<KeyEvent>(){
-    	
-    		
-    	    @Override
-    	    public void handle(KeyEvent event) {
-    		    if (!table.getSelectionModel().isEmpty())
-    		    {   	
-    		   	 
-    		    	if(copylineCombination.match(event))
-    		    	{	
-    			    	copyLineAction(table);
-    			    	event.consume();
-    			    }
-    		    	else if(copycellCombination.match(event))
-    		    	{
-    		    		copyCellAction(table);
-    		    		event.consume();
-    		    	}
-    		    	
-    		    }
-    	    }
-    	});
+    	table.setOnKeyPressed(event -> {
+            if (!table.getSelectionModel().isEmpty()) {
+
+                if (copylineCombination.match(event)) {
+                    copyLineAction(table);
+                    event.consume();
+                } else if (copycellCombination.match(event)) {
+                    copyCellAction(table);
+                    event.consume();
+                }
+
+            }
+        });
      
     	
     	
@@ -449,7 +438,7 @@ public class SQLWindow extends Application {
     ObservableList<TablePosition> selection = table.getSelectionModel().getSelectedCells();
     if (selection.isEmpty())
     	return;
-    TablePosition tp = selection.get(0); 
+    TablePosition tp = selection.getFirst();
     int row = tp.getRow();
     int col = tp.getColumn();
 
@@ -483,12 +472,11 @@ public class SQLWindow extends Application {
     			  if(event.getTarget().toString().startsWith("TableColumnHeader"))
     				   return;
     			  
-    			 	
-    			   int row = -1;
-    			   TablePosition pos = null;
+                   int row;
+    			   TablePosition pos;
     			   try 
     			   {
-    			     pos = (TablePosition) table.getSelectionModel().getSelectedCells().get(0);
+    			     pos = (TablePosition) table.getSelectionModel().getSelectedCells().getFirst();
     		         row = pos.getRow();
 
     			   }catch(Exception err) {
@@ -518,8 +506,7 @@ public class SQLWindow extends Application {
     	
     	});
     }
-    
-   
+
 }
 
 class VisibleParagraphStyler<PS, SEG, S> implements Consumer<ListModification<? extends Paragraph<PS, SEG, S>>>
@@ -556,7 +543,6 @@ class VisibleParagraphStyler<PS, SEG, S> implements Consumer<ListModification<? 
     }
 
 
-    
 
 }
 

@@ -1,7 +1,9 @@
 # What's Changed
-- with the latest version, an export into a SQLite database instead of a CSV file is supported
-- reworked user interface (introduced new icons, added points to context menus)
-- smaller bug fixes
-- source code was improved - better readability, comments were added
-- login level can now be adjusted by the user within the settings dialogue
-
+- The schema view was completely reworked
+- HTML Report functionality was added
+- Introducing a new RAG-pipeline support AI-based 
+  a Text-to-SQL functionality for SQL query generation
+- SQL-Analyzer now works with SQLite syntax, Support for
+  other dialects has been canceled
+- Smaller Bug fixes
+- Solved some issues around IllegalStateException: "Not on FX application thread"

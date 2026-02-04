@@ -223,8 +223,8 @@ public class SimpleSQLiteParser {
         			
     
         			colnames.add(clname);
-        			
         			coltypes.add("STRING");
+					sqltypes.add("STRING");
         			column++;
         		}
         		
@@ -233,11 +233,15 @@ public class SimpleSQLiteParser {
         		{
         			colnames.add(modulargument);
         			
-        			if (column == 0)
+        			if (column == 0){
         				coltypes.add("INT");
-        			else
-        				coltypes.add("NUMERIC");
-        			column++;
+						sqltypes.add("INT");
+					}
+					else {
+						coltypes.add("REAL");
+						sqltypes.add("NUMERIC");
+					}
+						column++;
         		}
         	}
 
@@ -416,7 +420,10 @@ public class SimpleSQLiteParser {
         		
         		String value = ctx.getText();
         	    value = value.trim();
-        		
+
+				// case: there is actually no type info given, but a NOT NULL constraint
+				if(value.equals("NOT"))
+					value = "BLOB";
         	    if(value.isEmpty())
         	    	value = "BLOB";
         	    	

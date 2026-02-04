@@ -346,8 +346,6 @@ public class Auxiliary{
 	public CarvingResult readDeletedRecordNew(Job job, ByteBuffer buffer, BitSet bs, Match m, Match next,
 			int pagenumber, String fallback) throws IOException {
 
-		//System.out.println("readDeletedRecordNew() - Entry");
-		
 		LinkedList<String> record = new LinkedList<>();
 		List<SqliteElement> columns;
 		int rowid = -1;
@@ -813,22 +811,7 @@ public class Auxiliary{
 		return val;
 	}
 
-	/**
-	 * Check for weather the table name belongs to a virtual table 
-	 * or not.
-	 * 
-	 * @param tblname
-	 * @return
-	 */
-	private boolean isVirtualTable(String tblname){
-		int p;
-		if ((p = tblname.indexOf("_node")) > 0){
-			String tbln = tblname.substring(0, p);
-			return job.virtualTables.containsKey(tbln);
-		}
-		return false;
-	}
-	
+
 	
 	/**
 	 * This method can be used to read an active data record.
@@ -841,8 +824,8 @@ public class Auxiliary{
 	 * 
 	 * 
 	 **/
-	public LinkedList<String> readRecord(int cellstart, ByteBuffer buffer, int pagenumber_db, BitSet bs, int pagetype,
-			int maxlength, StringBuffer firstcol, boolean withoutROWID, int filetype, long offset) throws IOException {
+	public LinkedList<String> readRecord(int cellstart, ByteBuffer buffer, int pagenumber_db, BitSet bs,
+                                         int maxlength, boolean withoutROWID, int filetype, long offset) throws IOException {
 
 		
 		/* we use a list to hold the fields of the data record to read */
@@ -869,7 +852,7 @@ public class Auxiliary{
 				if (ad instanceof TableDescriptor) {
 					td = (TableDescriptor) ad;
 				}			
-				isVT = isVirtualTable(ad.getName());
+				isVT = td.sql.toUpperCase().contains("CREATE VIRTUAL");
 				record.add(job.pages[pagenumber_db].getName());
 			} 
 			else {
@@ -1002,7 +985,7 @@ public class Auxiliary{
 
 				td = matchTable(columns);
 
-				/* this is only necessary, when component name is unknown */
+				/* this is only necessary when component name is unknown */
 				if (null == td) {
 					record.add(Global.DELETED_RECORD_IN_PAGE);
 				} else {
@@ -1221,8 +1204,6 @@ public class Auxiliary{
 						break;
 				
 			}
-			
-			//System.out.println("$$$$$" + record);
 
 		} else {
 			/*
@@ -1235,12 +1216,11 @@ public class Auxiliary{
 			int blobcolidx = 0;
 
 			/*
-			 * there is a max length set - because we are in the unallocated space and may
+			 * There is a max length set - because we are in the unallocated space and may
 			 * not read beyond the content area start
 			 */
-			for (SqliteElement en : columns) {
-				
-				
+			for (SqliteElement en: columns) {
+
 				if (en == null) {
 					record.add("NULL");
 					continue;
@@ -1279,7 +1259,7 @@ public class Auxiliary{
 					String tablecelltext; //= en.getBLOB(value,true);
 				    
 					if(isVT)
-						/* do not trunc the hex-string to 32 if the record belongs to a
+						/* do not truncate the hex-string to 32 if the record belongs to a
 						 * virtual table
 						 */
 						tablecelltext = en.getBLOB(value,false);
@@ -1329,7 +1309,7 @@ public class Auxiliary{
 						}
 						
 					} else {
-						/* no table description (td) avail. -> take the raw-value */
+						/* no table description (td) available -> take the raw-value */
 						record.add(en.toString(value, false, true));
 						continue;
 					}
@@ -1369,96 +1349,28 @@ public class Auxiliary{
 		record.add(1, "[" + pll + "|" + hh.length() / 2 + "]");
 		//record.add(2, "" + hh.length() / 2);	
 		record.add(2, "" + rowid);
-		
-		/* mark as visited */
-		if (so < pll) {
-			bs.set(cellstart, cellstart + so + 4);
-		} else {
-			bs.set(cellstart, buffer.position());
-		}
-		if (error) {
+
+        if (bs != null) {
+            /* mark as visited */
+            if (so < pll) {
+                bs.set(cellstart, cellstart + so + 4);
+            } else {
+                bs.set(cellstart, buffer.position());
+            }
+        }
+
+        if (error) {
 			AppLog.error("spilles overflow page error ...");
 			return null;
-			
 		}
 	
 
-		/* the offset is derived from the name of the table plus primary key / rowid */
-//		String archivekey = getPrimaryKey(td,record);
- 	    //System.out.println("Archiv Key::" + archivekey);
-		
-		
 		if (ad == null)
     	{	
-			// every record that has no table descriptor assigned should be shown in the __FREELIST table. 
-    		record.set(0,"__FREELIST");
+			//Every record that has no table descriptor assigned should be shown in the fqlite_freelist table.
+    		record.set(0,"fqlite_freelist");
     	}		
-		
-        /*  Is a Rollback journal file present ? */
-//		if (filetype == Global.ROLLBACK_JOURNAL_FILE && null != ad && !unkown && !withoutROWID) {
-//		
-//			/* first occurrence of this records or already existing ? */
-//			if(job.LineHashes.containsKey(archivekey)){
-//		    	
-//		    	Integer originalhash = job.LineHashes.get(archivekey);
-//		    	Integer journalhash = computeHash(record);
-//		    	
-//		    	/* hash of line in database differs from hash in journal file */
-//		    	if(!originalhash.equals(journalhash))
-//		    	{
-//		    		record.set(3,"");
-//		    	}
-//		    }
-//		    else {
-//		     	System.out.println("removed record at offset " + archivekey);
-//		     	record.set(3,"");
-//		    }
-//		
-//		}
-//		
-		
-		
-		/* Is a WAL archive file present ? */
-//		if (filetype == Global.WAL_ARCHIVE_FILE && !unkown && !withoutROWID && null != ad) { 
-//			
-//			    
-//		    if(job.TimeLineHashes.containsKey(archivekey)){
-//		    	    	
-//			    	LinkedList<Version> versions = job.TimeLineHashes.get(archivekey);
-//			      
-//			    	Integer originalhash = computeHash(record);
-//			    	Integer journalhash = versions.getFirst().hash;
-//				    	
-//		    	if(!originalhash.equals(journalhash))
-//		    	{
-//		    	
-//		    	    record.set(3,"");
-//
-//		    	}
-//		    	else
-//		    	{
-//		    	    record.set(3,"");
-//		    	    //record.set(3,String.format("%03d", lvs)  + ". version" + " (no change)");
-//		    	  	//System.out.println("new change record for primary key " + archivekey);
-//			     	//System.out.println(record);
-//			   
-//		    	}
-//		    	
-//		    	versions.addFirst(new Version(record));
-//		    }
-//		    else {
-//	    	    record.set(3,"");
-//		     	LinkedList<Version> recordlist = new LinkedList<Version>();
-//		     	recordlist.add(new Version(record));
-//		     	job.TimeLineHashes.put(archivekey,recordlist);
-//		    }
-//			
-//			
-//			
-//		}
-//
-//		System.out.println("$$$$ " + record);
-//		
+
 		return record;
 	}
 	
@@ -2501,8 +2413,8 @@ public class Auxiliary{
 		byte[] ret = new byte[4];
 		ret[0] = 0;
 		ret[1] = 0;
-		ret[2] = b.get(0);
-		ret[3] = b.get(1);
+		ret[2] = b.get();
+		ret[3] = b.get();
 
 		return ByteBuffer.wrap(ret).getInt();
 	}
@@ -2812,7 +2724,7 @@ public class Auxiliary{
 	public static String getSerial(SqliteElement[] columns) {
 		String serial = "";
 
-		for (SqliteElement e : columns)
+		for (SqliteElement e: columns)
 			serial += e.serial;
 		return serial;
 	}
@@ -2820,7 +2732,7 @@ public class Auxiliary{
 	public static String getTableFingerPrint(SqliteElement[] columns) {
 		String fp = "";
 
-		for (SqliteElement e : columns)
+		for (SqliteElement e: columns)
 			fp += e.type;
 		return fp;
 	}
@@ -2844,20 +2756,33 @@ public class Auxiliary{
 		}
 	}
 
-	/**
-	 * This method can be used to compute the payload length for a record, which pll
-	 * field is deleted or overwritten.
-	 * 
-	 * @param header should be the complete header without headerlength byte
-	 * @return the number of bytes including header and payload
-	 */
-	public static int computePayloadLengthS(String header) {
+    /**
+     * This method can be used to compute the payload length for a record, which pll
+     * field is deleted or overwritten.
+     *
+     * @param header should be the complete header without the headerlength byte
+     * @return the number of bytes including header and payload
+     */
+    public static int computePayloadLengthS(String header) {
+        byte[] bcol = Auxiliary.decode(header);
 
-		byte[] bcol = Auxiliary.decode(header);
+
+        return computePayloadLengthByte(bcol,header.length() / 2 + 1);
+    }
+
+        /**
+         * This method can be used to compute the payload length for a record, which pll
+         * field is deleted or overwritten.
+         *
+         * @param bcol should be the complete header without the headerlength byte
+         * @param hoffset length of header, including header length byte
+         * @return the number of bytes including header and payload
+         */
+	public static int computePayloadLengthByte(byte[] bcol, int hoffset) {
+
 		int[] columns = Auxiliary.readVarInt(bcol);
 		int pll = 0;
-
-		pll += header.length() / 2 + 1;
+		pll += hoffset;
 
 		for (int i = 0; i < columns.length; i++) {
 			switch (columns[i]) {
@@ -3201,5 +3126,22 @@ public class Auxiliary{
     	return sb.toString();
     
 	}
-   
+
+	/**
+	 * Check for weather the table name belongs to a virtual table
+	 * or not.
+	 *
+	 * @param tblname
+	 * @return
+	 */
+	private boolean isVirtualTable(String tblname){
+		int p;
+		if ((p = tblname.indexOf("_node")) > 0){
+			String tbln = tblname.substring(0, p);
+			return job.virtualTables.containsKey(tbln);
+		}
+		return false;
+	}
+
+
 }

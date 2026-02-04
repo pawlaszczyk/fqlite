@@ -440,7 +440,7 @@ public class RollbackJournalReader{
             LinkedList<String> record = null;
 			
 			try {
-				record = ct.readRecord(celloff, buffer, pagenumber_maindb, visit, type, Integer.MAX_VALUE, firstcol, withoutROWID, Global.ROLLBACK_JOURNAL_FILE, pageoffset + celloff);
+				record = ct.readRecord(celloff, buffer, pagenumber_maindb, visit, Integer.MAX_VALUE, withoutROWID, Global.ROLLBACK_JOURNAL_FILE, pageoffset + celloff);
 			} catch (IOException e) {
 				e.printStackTrace();
 			}
@@ -582,7 +582,7 @@ public class RollbackJournalReader{
 
 			/* access pattern for a particular component */
 			String tablename = tab.get(n).tblname;
-			if (tablename.startsWith("__FREELIST"))
+			if (tablename.startsWith("fqlite_freelist"))
 				continue;
 			/* create matcher object for constraint check */
 			SerialTypeMatcher stm = new SerialTypeMatcher(buffer);
@@ -689,12 +689,12 @@ public class RollbackJournalReader{
 			{
 				LinkedList<String> line = lines.next();
 		
-			 	/* if table name is empty -> assign data record to table __FREELIST */
+			 	/* if table name is empty -> assign data record to table fqlite_freelist */
 			   	if (line.getFirst().trim().length()==0)
 			   	{
 			 
 			        // Add the new element add the beginning
-			       // line.set(0,"__FREELIST"); 			   	
+			       // line.set(0,"fqlite_freelist"); 			   	
 			   	}
 				
 			   	// is there already a data set for this particular table
@@ -860,7 +860,7 @@ public class RollbackJournalReader{
 			/* access pattern for a particular component */
 			String tablename = tab.get(n).tblname;
 			AppLog.debug("Check component : " + tablename);
-			if (tablename.startsWith("__FREELIST"))
+			if (tablename.startsWith("fqlite_freelist"))
 				continue;
 			/* create matcher object for constraint check */
 			SerialTypeMatcher stm = new SerialTypeMatcher(buffer);

@@ -65,8 +65,7 @@ public class TableDescriptor extends AbstractDescriptor implements Comparable<Ta
 			 * including this byte
 			 */
 			int headerlength = values[0];
-			System.out.println(headerlength);
-			
+
 			boolean valid = true;
 	
 			// check serialtypes, only if all serialtypes are valid, the match is also valid
@@ -190,7 +189,7 @@ public class TableDescriptor extends AbstractDescriptor implements Comparable<Ta
 		for(int i=0; i < names.size(); i++)
 		{
 			
-			if (tblname.equals("__FREELIST"))
+			if (tblname.equals("fqlite_freelist"))
 				break;
 			if (constraints == null)
 				break;
@@ -297,7 +296,11 @@ public class TableDescriptor extends AbstractDescriptor implements Comparable<Ta
         }
 	}
 	
-	
+	public int numberOfColumns(){
+        return getColumntypes().size();
+    }
+
+
 	public String getSqlTypeForColumn(String column){
 		return tooltiptypes.get(column);
 	}

@@ -615,7 +615,7 @@ public class WALReader{
 			
 
 			try { 
-				rc = ct.readRecord(celloff, buffer, pagenumber_maindb, visit, type, Integer.MAX_VALUE, firstcol, withoutROWID,Global.WAL_ARCHIVE_FILE,framestart+24 + celloff);
+				rc = ct.readRecord(celloff, buffer, pagenumber_maindb, visit, Integer.MAX_VALUE, withoutROWID,Global.WAL_ARCHIVE_FILE, framestart + 24 + celloff);
 			    if (null == rc)
 			    	continue;
 			} catch (IOException e) {
@@ -705,7 +705,7 @@ public class WALReader{
 			
 			/* Tricky thing: data record could be partly overwritten with a new data record!!!  */
 			/* We should read until the end of the unallocated area and not above! */
-			rc = ct.readRecord(buffer.position(), buffer, ps, visit, type, ccrstart - buffer.position(),firstcol,withoutROWID,Global.WAL_ARCHIVE_FILE,framestart+24 + buffer.position());
+			rc = ct.readRecord(buffer.position(), buffer, ps, visit, ccrstart - buffer.position(), withoutROWID,Global.WAL_ARCHIVE_FILE, framestart + 24 + buffer.position());
 			
 			// add new line to output
 			if (null != rc) { 
@@ -870,7 +870,7 @@ public class WALReader{
 			/* access pattern for a particular component */
 			String tablename = tab.get(n).tblname;
 			AppLog.debug("WALReader Check component : " + tablename);
-			if (tablename.startsWith("__FREELIST"))
+			if (tablename.startsWith("fqlite_freelist"))
 				continue;
 			/* create matcher object for constraint check */
 			SerialTypeMatcher stm = new SerialTypeMatcher(buffer);
@@ -983,12 +983,12 @@ public class WALReader{
 				LinkedList<String> line = lines.next();
 
 			   	
-			   	/* if table name is empty -> assign data record to table __FREELIST */
+			   	/* if table name is empty -> assign data record to table fqlite_freelist */
 			   	if (line.getFirst().trim().length()==0)
 			   	{
 			 
 			        // Add the new element add the beginning
-			        //line.add(0,"__FREELIST"); 
+			        //line.add(0,"fqlite_freelist"); 
 			 
 			   	}
 	
@@ -1160,7 +1160,7 @@ public class WALReader{
 			/* access pattern for a particular component */
 			String tablename = tab.get(n).tblname;
 			AppLog.debug("Check component : " + tablename);
-			if (tablename.startsWith("__FREELIST"))
+			if (tablename.startsWith("fqlite_freelist"))
 				continue;
 			/* create matcher object for constraint check */
 			SerialTypeMatcher stm = new SerialTypeMatcher(buffer);

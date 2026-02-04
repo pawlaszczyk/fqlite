@@ -2,14 +2,12 @@ package fqlite.base;
 
 import java.io.BufferedWriter;
 import java.io.File;
+import java.io.FileWriter;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.Paths;
-import java.nio.file.StandardOpenOption;
+import java.nio.file.*;
 import java.sql.SQLException;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
@@ -38,6 +36,9 @@ import fqlite.descriptor.TableDescriptor;
 import fqlite.export.SQLiteDatabaseCreator;
 import fqlite.log.AppLog;
 import fqlite.pattern.HeaderPattern;
+import fqlite.sql.DBManager;
+import fqlite.sql.InMemoryDatabase;
+import fqlite.types.BLOBElement;
 import fqlite.types.ExportType;
 import fqlite.types.FileTypes;
 import fqlite.ui.DBPropertyPanel;
@@ -54,6 +55,7 @@ import javafx.scene.control.Alert;
 import javafx.scene.control.Alert.AlertType;
 import javafx.scene.control.TreeItem;
 import javafx.scene.image.Image;
+import org.apache.commons.codec.digest.DigestUtils;
 
 import static java.nio.file.Files.newBufferedWriter;
 
@@ -62,17 +64,17 @@ import static java.nio.file.Files.newBufferedWriter;
  * Core application class. It is used to recover lost SQLite records from a
  * sqlite database file. As a carving utility, it is binary based and can
  * recover deleted entries from sqlite 3.x database files.
- * 
+ *
  * Note: For each database file exactly one Job object is created. This class
  * has a reference to the file on disk.
- * 
+ *
  * From the sqlite web-page: "A database file might contain one or more pages
  * that are not in active use. Unused pages can come about, for example, when
  * information is deleted startRegion the database. Unused pages are stored on
  * the freelist and are reused when additional pages are required."
- * 
+ *
  * This class makes use of this behavior.
- * 
+ *
  * 
  * 
  *  
@@ -244,6 +246,8 @@ public class Job {
 	
     public LinkedList<WALFrame> checkpointlist = new LinkedList<WALFrame>();
 
+	// for analyzing
+	public InMemoryDatabase mdb;
 	
 	/******************************************************************************************************/
 	
@@ -671,7 +675,7 @@ public class Job {
 			names.add("col" + (i + 1));
 		}
 		
-		tdefault = new TableDescriptor("__FREELIST", "",col, col, names, null, null, null, false);	
+		tdefault = new TableDescriptor("fqlite_freelist", "",col, col, names, null, null, null, false);	
 
 	}
 	
@@ -1023,10 +1027,10 @@ public class Job {
 					
 					/**
 					 *  Attention:
-					 *  
+					 *
 					 *  A master table record has always 5 columns: 
 					 *  [type text, name text, tbl_name text, rootpage integer, sql texte]
-					 * 
+					 *
 					 *  Accordingly the header can have a length of at least 6 Bytes (5+1 for the header length byte).
 					 *  In most cases the header has a length of 7, because the length of SQL-statement is typically 
 					 *  higher than 57 characters ((127-13)/2 -> 57) and lower than 8192. 
@@ -1092,8 +1096,8 @@ public class Job {
 		
 					/**
 					 * case 3: seems to be a dropped index data set
-					 *         add the missing header length byte in front 
-					 **/					
+					 *         add the missing header length byte in front
+					 **/
 					 if (headerStr.startsWith("17") || headerStr.startsWith("21")) {
 	
 						// a typical master table record has a length of 7 bytes
@@ -1319,58 +1323,51 @@ public class Job {
 				td.printTableDefinition();
 
 				int r = td.getRootOffset();
-				//info(" root offset for component " + r);
 
 				String signature = td.getSignature();
-				//info(" signature " + signature);
 
 				/* save component fingerprint for compare */
 				if (signature != null && signature.length() > 0)
 					tblSig.put(td.getSignature(), td.tblname);
 
-							
 				/* update treeview - skip this step in console modus */
 				if (null != gui) {
-                     
-					//Platform.runLater(() -> {
-						
-						
+
 						/* since table nodes will also be needed in journals and wal-files we have to add those nodes too */
 						
-						String path = gui.add_table(this, td.tblname, td.columnnames, td.getColumntypes(), td.primarykeycolumns, td.boolcolumns, false, false,0);
-						guitab.put(td.tblname, path);
-							//lastpath = path;
-												
+						gui.add_table(this, td.tblname, td.columnnames, td.getColumntypes(), td.primarykeycolumns, td.boolcolumns, false, false,0).thenAccept(result -> {
+							String path = result;
+							guitab.put(td.tblname, path);
+						});
+
 						if (readWAL) {
-													
-							
+
 							List<String> cnames = 	new ArrayList<>(td.columnnames);							
-							cnames.add(0,"commit");
-							cnames.add(1,"dbpage");
-							cnames.add(2,"walframe");
-							cnames.add(3,"salt1");
-							cnames.add(4,"salt2");
+							cnames.add(0,Global.col_commit);
+							cnames.add(1,Global.col_dbpage);
+							cnames.add(2,Global.col_walframe);
+							cnames.add(3,Global.col_salt1);
+							cnames.add(4,Global.col_salt2);
 							
 							List<String> ctypes = new ArrayList<>(td.serialtypes);
-							
-							/* add missing SQL types for the first 5 columns */
-							for(int cc =0; cc < 5; cc++)
-							{
-							//	td.sqltypes.add(0,"INT");
-							}
-							
-							String walpath = gui.add_table(this, td.tblname, cnames, ctypes, td.primarykeycolumns, td.boolcolumns, true, false,0);
-							guiwaltab.put(td.tblname, walpath);
-							setWALPath(walpath.toString());
-	
+
+							gui.add_table(this, td.tblname, cnames, ctypes, td.primarykeycolumns, td.boolcolumns, true, false,0).thenAccept(result -> {
+								String walpath = result;
+								guiwaltab.put(td.tblname, walpath);
+								setWALPath(walpath.toString());
+							});
+
 						}
 	
 						else if (readRollbackJournal) {
-							String rjpath = gui.add_table(this, td.tblname, td.columnnames, td.getColumntypes(),td.primarykeycolumns, td.boolcolumns, false, true,0);
-							guiroltab.put(td.tblname, rjpath);
-							setRollbackJournalPath(rjpath.toString());
+							gui.add_table(this, td.tblname, td.columnnames, td.getColumntypes(),td.primarykeycolumns, td.boolcolumns, false, true,0).thenAccept(result -> {
+								String rjpath = result;
+								guiroltab.put(td.tblname, rjpath);
+								setRollbackJournalPath(rjpath.toString());
+							});
+
 						}
-					//});
+
 				}
 
 				if (td.isVirtual())
@@ -1404,10 +1401,10 @@ public class Job {
 						id.columntypes.add("String");
 					}
 					
-					String path = gui.add_table(this, id.idxname, id.columnnames, id.columntypes, id.boolcolumns, null, false, false,1);
-					
-					//System.out.println("id.idxname " + id.idxname);
-					guitab.put(id.idxname, path);
+					gui.add_table(this, id.idxname, id.columnnames, id.columntypes, id.boolcolumns, null, false, false,1).thenAccept(result -> {
+						String path =  result;
+						guitab.put(id.idxname, path);
+					});
 
 					if (readWAL) {
 						
@@ -1421,15 +1418,21 @@ public class Job {
 						
 						List<String> ctypes = new ArrayList<>(id.columntypes);
 
-						String walpath = gui.add_table(this, id.idxname, cnames, ctypes, id.boolcolumns, null, true, false,1);
-						guiwaltab.put(id.idxname, walpath);
-						setWALPath(walpath);
+						gui.add_table(this, id.idxname, cnames, ctypes, id.boolcolumns, null, true, false,1).thenAccept(result -> {
+							String walpath = result;
+							guiwaltab.put(id.idxname, walpath);
+							setWALPath(walpath);
+						});
+
 					}
 					else if (readRollbackJournal) {
 						
-							String rjpath = gui.add_table(this, id.idxname, id.columnnames, id.columntypes, id.boolcolumns, null, false, true,1);
-							guiroltab.put(id.idxname, rjpath);
-							setRollbackJournalPath(rjpath);
+							gui.add_table(this, id.idxname, id.columnnames, id.columntypes, id.boolcolumns, null, false, true,1).thenAccept(result -> {
+								String rjpath =result;
+								guiroltab.put(id.idxname, rjpath);
+								setRollbackJournalPath(rjpath);
+							});
+
 					}
 
 					
@@ -1463,7 +1466,7 @@ public class Job {
 
 			/*
 			 * Sometimes, a record cannot be assigned to a component or index -> these records
-			 * are assigned to the __FREELIST component.
+			 * are assigned to the fqlite_freelist component.
 			 */
 
 			if (null != gui) {
@@ -1481,7 +1484,7 @@ public class Job {
 				
 				List<String> mnames = new ArrayList<String>();
 				mnames.add("object"); mnames.add("obj name"); mnames.add("namespace");  mnames.add("root page");  mnames.add("Statement");
-				TableDescriptor tdmaster = new TableDescriptor("__SQLiteMaster", "",mcol, mcol, mnames, null, null, hp, false);
+				TableDescriptor tdmaster = new TableDescriptor("sqlite_master", "",mcol, mcol, mnames, null, null, hp, false);
 				for (int pg: mastertable) {
 				    if (pg > 0)
 						if(pg < pages.length && pages[pg]== null)
@@ -1498,69 +1501,85 @@ public class Job {
 					
 				}
 
-                String path = gui.add_table(this, tdefault.tblname, tdefault.columnnames,
-                        tdefault.getColumntypes(), tdefault.boolcolumns, null, false, false,0);
-                guitab.put(tdefault.tblname, path);
+                 gui.add_table(this, tdefault.tblname, tdefault.columnnames,
+                        tdefault.getColumntypes(), tdefault.boolcolumns, null, false, false,0).thenAccept(result -> {
 
-                String pathmaster = gui.add_table(this, tdmaster.tblname, tdmaster.columnnames,
-							tdmaster.getColumntypes(), tdmaster.boolcolumns, null, false, false,0);
+					 String path = result;
+					 guitab.put(tdefault.tblname, path);
+
+				 });
+
+                gui.add_table(this, tdmaster.tblname, tdmaster.columnnames,
+							tdmaster.getColumntypes(), tdmaster.boolcolumns, null, false, false,0).thenAccept(result -> {
+
+					String pathmaster = result;
 					guitab.put(tdmaster.tblname, pathmaster);
-				
-					
-					//lastpath = path;
+				});
 
-					if (readWAL) {
-						
-						tdefault.columnnames.add(0, "salt2");
-						tdefault.columnnames.add(0, "salt1");
-						tdefault.columnnames.add(0, "walframe");
-						tdefault.columnnames.add(0, "dbpage");
-						tdefault.columnnames.add(0, "commit");
-						
-						
-						tdefault.getColumntypes().add(0, "INTEGER");
-						tdefault.getColumntypes().add(0, "INTEGER");
-						tdefault.getColumntypes().add(0, "INTEGER");
-						tdefault.getColumntypes().add(0, "INTEGER");
-						tdefault.getColumntypes().add(0, "BOOLEAN");
-						
-						
-						String walpath = gui.add_table(this, tdefault.tblname, tdefault.columnnames,
-								tdefault.getColumntypes(), tdefault.boolcolumns ,null, true, false,0);
-						guiwaltab.put(tdefault.tblname, walpath);
-						setWALPath(walpath);
-		
-						tdmaster.columnnames.add(0, "salt2");
-						tdmaster.columnnames.add(0, "salt1");
-						tdmaster.columnnames.add(0, "walframe");
-						tdmaster.columnnames.add(0, "dbpage");
-						tdmaster.columnnames.add(0, "commit");
-						
-						
-						tdmaster.getColumntypes().add(0, "INTEGER");
-						tdmaster.getColumntypes().add(0, "INTEGER");
-						tdmaster.getColumntypes().add(0, "INTEGER");
-						tdmaster.getColumntypes().add(0, "INTEGER");
-						tdmaster.getColumntypes().add(0, "BOOLEAN");
-							
-						
-						String walpathmaster = gui.add_table(this, tdmaster.tblname, tdmaster.columnnames,
-								tdmaster.getColumntypes(), tdmaster.boolcolumns ,null, true, false,0);
-						guiwaltab.put(tdmaster.tblname, walpathmaster);
-						
-						
-					}
-					else if (readRollbackJournal) {
-						String rjpath = gui.add_table(this, tdefault.tblname, tdefault.columnnames,
-								tdefault.getColumntypes(),tdefault.boolcolumns ,null, false, true,0);
-						guiroltab.put(tdefault.tblname, rjpath);
-						setRollbackJournalPath(rjpath);
-					
-						String rjpathmaster = gui.add_table(this, tdmaster.tblname, tdmaster.columnnames,
-								tdmaster.getColumntypes(), tdmaster.boolcolumns ,null,false, true,0);
-						guiroltab.put(tdmaster.tblname, rjpathmaster);
-					
-					}
+
+				if (readWAL) {
+
+					tdefault.columnnames.add(0, "salt2");
+					tdefault.columnnames.add(0, "salt1");
+					tdefault.columnnames.add(0, "walframe");
+					tdefault.columnnames.add(0, "dbpage");
+					tdefault.columnnames.add(0, "commit");
+
+
+					tdefault.getColumntypes().add(0, "INTEGER");
+					tdefault.getColumntypes().add(0, "INTEGER");
+					tdefault.getColumntypes().add(0, "INTEGER");
+					tdefault.getColumntypes().add(0, "INTEGER");
+					tdefault.getColumntypes().add(0, "BOOLEAN");
+
+
+					gui.add_table(this, tdefault.tblname, tdefault.columnnames,
+							tdefault.getColumntypes(), tdefault.boolcolumns ,null, true, false,0).thenAccept(result -> {
+								String walpath = result;
+								guiwaltab.put(tdefault.tblname, walpath);
+								setWALPath(walpath);
+					});
+
+
+					tdmaster.columnnames.add(0, "salt2");
+					tdmaster.columnnames.add(0, "salt1");
+					tdmaster.columnnames.add(0, "walframe");
+					tdmaster.columnnames.add(0, "dbpage");
+					tdmaster.columnnames.add(0, "commit");
+
+
+					tdmaster.getColumntypes().add(0, "INTEGER");
+					tdmaster.getColumntypes().add(0, "INTEGER");
+					tdmaster.getColumntypes().add(0, "INTEGER");
+					tdmaster.getColumntypes().add(0, "INTEGER");
+					tdmaster.getColumntypes().add(0, "BOOLEAN");
+
+
+					gui.add_table(this, tdmaster.tblname, tdmaster.columnnames,
+							tdmaster.getColumntypes(), tdmaster.boolcolumns ,null, true, false,0).thenAccept(result -> {
+							String walpathmaster = result;
+							guiwaltab.put(tdmaster.tblname, walpathmaster);
+					});
+
+
+				}
+				else if (readRollbackJournal) {
+
+					gui.add_table(this, tdefault.tblname, tdefault.columnnames,
+							tdefault.getColumntypes(),tdefault.boolcolumns ,null, false, true,0).thenAccept(result -> {
+							String rjpath = result;
+							guiroltab.put(tdefault.tblname, rjpath);
+							setRollbackJournalPath(rjpath);
+					});
+
+
+					gui.add_table(this, tdmaster.tblname, tdmaster.columnnames,
+							tdmaster.getColumntypes(), tdmaster.boolcolumns ,null,false, true,0).thenAccept(result -> {
+							String rjpathmaster = result;
+							guiroltab.put(tdmaster.tblname, rjpathmaster);
+					});
+
+				}
 
 					
 			}
@@ -1581,7 +1600,7 @@ public class Job {
 			info("Total number of free list (trunk) pages " + Auxiliary.bytesToHex3(freepageno));
 			ByteBuffer no = ByteBuffer.wrap(freepageno);
 			fpnumber = no.getInt();
-			System.out.println(" no " + fpnumber);
+		    //	System.out.println(" no " + fpnumber);
 
 			///******************************************************************/
 
@@ -1913,6 +1932,73 @@ public class Job {
 	    return new BigByteBuffer(checkpoint);
 	}
 
+	public static String db_info;
+
+	/**
+	 *  This method is used to create a InMemory DB for SQL Analyzes
+	 */
+	public InMemoryDatabase createInMemoryDB(String filename, String objectname, ExportType exp) {
+
+		String dbname = objectname;
+
+		if (exp == ExportType.SQLITEDB || exp == ExportType.ROLLBACKJOURNAL || exp == ExportType.WALARCHIVE) {
+
+			ConcurrentHashMap<String, ObservableList<ObservableList<String>>> exportlist = switch (exp) {
+				case ROLLBACKJOURNAL -> this.rol.resultlist;
+				case SQLITEDB -> this.resultlist;
+				case WALARCHIVE -> this.wal.resultlist;
+				default -> null;
+			};
+
+			if (exp == ExportType.WALARCHIVE || exp == ExportType.ROLLBACKJOURNAL)
+			{
+				/* 1st step: get a database manager instance and create the database schema */
+				mdb = DBManager.get(objectname);
+				try {
+					mdb.createDatabaseAndSchema(headers, tdefault, objectname, exp == ExportType.WALARCHIVE);
+				} catch (SQLException e) {
+					throw new RuntimeException(e);
+				}
+			}
+			else{
+				/* 1st step: get a database manager instance and create the database schema */
+				mdb = DBManager.get(filename);
+				try {
+					mdb.createDatabaseAndSchema(headers, tdefault, objectname, exp == ExportType.WALARCHIVE);
+				} catch (SQLException e) {
+					throw new RuntimeException(e);
+				}
+			}
+
+			/* get all values of the result list*/
+			Enumeration<String> keyset = exportlist.keys();
+
+			/* iterate over all tables inside the file */
+			while (keyset.hasMoreElements()) {
+
+				/* get next table */
+				String tblname = keyset.nextElement();
+				ObservableList<ObservableList<String>> rows = exportlist.get(tblname);
+
+				try {
+					// skip the internal tables
+					if (tblname.equals("sqlite_master") || tblname.startsWith("sqlite_"))
+						continue;
+					mdb.insertRows(bincache, objectname, tblname, headers, tdefault, rows, exp == ExportType.WALARCHIVE);
+				} catch (SQLException e) {
+					throw new RuntimeException(e);
+				}
+
+			}
+
+			return mdb;
+
+		}
+
+		return null;
+	}
+
+
     /**
      * This method can be used to export all recovered database records into
      * a new database.
@@ -1954,9 +2040,10 @@ public class Job {
                ObservableList<ObservableList<String>> rows = exportlist.get(tblname);
 
                 try {
-                    // skip the internal tables
-                    if(tblname.equals("__SQLiteMaster") || tblname.startsWith("sqlite_"))
-                        continue;
+                    // skip the internal tables except the freelist
+					if (!tblname.equals("fqlite_freelist"))
+						if(tblname.equals("sqlite_master") || tblname.startsWith("sqlite_"))
+                        	continue;
                     exporter.insertRows(bincache,filename,tblname,headers,tdefault,rows,exp == ExportType.WALARCHIVE);
                 } catch (SQLException e) {
                     throw new RuntimeException(e);
@@ -1973,6 +2060,7 @@ public class Job {
 
         return true;
     }
+
 
 
 	
@@ -2016,12 +2104,28 @@ public class Job {
 					
 					/* get next table */
 					String tblname = keyset.nextElement();
+
+					/* filter internal tables */
+					if(tblname.equals("sqlite_master") || tblname.startsWith("sqlite_"))
+						continue;
+
 					ObservableList<ObservableList<String>> table = exportlist.get(tblname);
 
-					if(Global.EXPORTTABLEHEADER)
-	  				 	writer.write(prepareHeader(tblname) + "\n");
-		  			
-					/* get table lines */
+					if(Global.EXPORTTABLEHEADER) {
+						String hd = prepareHeader(tblname, exp == ExportType.WALARCHIVE);
+						if (null != hd) {
+							writer.write(hd +"\n");
+						}
+					}
+
+					/* only export regular tables no index or autoindex tables */
+					boolean istable = false;
+					for (TableDescriptor td: headers) {
+						if (td.tblname.equals(tblname)) {
+							istable = true;
+						}
+					}
+					if (!istable) { continue; }
 
                     /* as long as there are lines inside, go on */
                     for (ObservableList<String> strings : table) {
@@ -2063,7 +2167,7 @@ public class Job {
   				 Iterator<ObservableList<String>> iter = table.iterator();
 				
   				 if(Global.EXPORTTABLEHEADER)
-  				 	writer.write(prepareHeader(objectname) + "\n");
+  				 	writer.write(prepareHeader(objectname,exp == ExportType.WALARCHIVE) + "\n");
 	  				
   				 /* as long as there are lines inside, go on */
 				 while(iter.hasNext()){
@@ -2089,7 +2193,7 @@ public class Job {
 	}
 	
 	
-	private String prepareHeader(String tablename) {
+	public String prepareHeader(String tablename, boolean isWAL) {
 		
 		String token = Global.CSV_SEPARATOR;
 		
@@ -2098,19 +2202,68 @@ public class Job {
 		
 		
 		String[] head = getColumnNamesForTable(tablename);
-		if (head != null) {
+		if ((head != null && head.length > 0) || tablename.equals("fqlite_freelist")) {
 			String line = "";
-			line += "PLL" + token + "HL" + token + "STATE" + token + "OFFSET" + token;
-			for(String c : head){
-				line += c + token;
+			if (isWAL) {
+				line += Global.col_tblname + token + Global.col_pll + token + Global.col_rowid + token + Global.col_status + token + Global.col_offset + token + Global.col_commit + token + Global.col_dbpage + token + Global.col_walframe + token + Global.col_salt1 + token + Global.col_salt2 + token;
+			}
+			else{
+				line += Global.col_tblname + token + Global.col_pll + token + Global.col_rowid + token + Global.col_status + token + Global.col_offset + token;
+			}
+			if (tablename.equals("fqlite_freelist")){
+				// add actual column names
+				for (int i = 0; i < 42; i++) {
+					line += "col" + i + token;
+				}
+			}
+			else {
+				// add actual column names
+				for (String c : head) {
+					line += c + token;
+				}
 			}
 			return line;
 		}
 		
 		return null;
 	}
-	
-	private String[] getColumnNamesForTable (String tablename){
+
+	public String[] getExentedColumnNamesForTable (String tablename, ExportType exp){
+
+
+		for (TableDescriptor td: headers) {
+
+			if (td.tblname.equals(tablename)) {
+
+				List<String> names = new ArrayList<>();
+
+				if(exp == ExportType.WALARCHIVE){
+					names.addFirst(Global.col_salt2);
+					names.addFirst(Global.col_salt1);
+					names.addFirst(Global.col_walframe);
+					names.addFirst(Global.col_dbpage);
+					names.addFirst(Global.col_commit);
+				}
+
+				names.addFirst(Global.col_offset);
+				names.addFirst(Global.col_status);
+				names.addFirst(Global.col_rowid);
+				names.addFirst(Global.col_pll);
+				//names.addFirst(Global.col_tblname);
+				names.addFirst(Global.col_no);
+
+
+
+				names.addAll(td.columnnames);
+				return names.toArray(new String[0]);
+
+			}
+		}
+
+		return null;
+	}
+
+	public String[] getColumnNamesForTable (String tablename){
 
         for (TableDescriptor td: headers) {
             if (td.tblname.equals(tablename)) {
@@ -2121,6 +2274,692 @@ public class Job {
         }
 		
 		return null;
+	}
+
+	private String createMetadataSection(Map<String, String> metaData) {
+		StringBuilder sb = new StringBuilder();
+
+		sb.append("<div class='metadata-section'>\n");
+		sb.append("<h2>File Information</h2>\n");
+		sb.append("<div class='metadata-grid'>\n");
+
+		// Erste Spalte
+		sb.append("<div class='metadata-column'>\n");
+		sb.append(createMetadataField("File size", metaData.get("size")));
+		sb.append(createMetadataField("Path", metaData.get("path")));
+		sb.append(createMetadataField("Creation Date", metaData.get("creationTime")));
+		sb.append(createMetadataField("Last Access", metaData.get("lastAccess")));
+		sb.append(createMetadataField("Last Modified", metaData.get("lastModified")));
+		sb.append("</div>\n");
+
+		// Zweite Spalte
+		sb.append("<div class='metadata-column'>\n");
+		sb.append(createMetadataField("SHA-1", metaData.get("sha1"), true));
+		sb.append(createMetadataField("SHA-256", metaData.get("sha256"), true));
+		sb.append(createMetadataField("MD5", metaData.get("md5"), true));
+		sb.append(createMetadataField("Investigator", metaData.get("investigator")));
+		sb.append(createMetadataField("Tool-Version", metaData.get("toolVersion")));
+		sb.append("</div>\n");
+
+		sb.append("</div>\n");
+		sb.append("</div>\n");
+
+		return sb.toString();
+	}
+
+	private String createMetadataField(String label, String value) {
+		return createMetadataField(label, value, false);
+	}
+
+	private String createMetadataField(String label, String value, boolean monospace) {
+		StringBuilder sb = new StringBuilder();
+		String displayValue = (value != null && !value.trim().isEmpty()) ? escapeHtml(value) : "<span class='no-data'>Nicht verfügbar</span>";
+		String cssClass = monospace ? " class='monospace'" : "";
+
+		sb.append("<div class='metadata-row'>\n");
+		sb.append("<div class='metadata-label'>").append(escapeHtml(label)).append(":</div>\n");
+		sb.append("<div class='metadata-value'").append(cssClass).append(">").append(displayValue).append("</div>\n");
+		sb.append("</div>\n");
+
+		return sb.toString();
+	}
+
+	/**
+	 * This method actually creates a html file with the database content
+	 * @param dbname
+	 * @param outputPath
+	 * @param exp
+	 * @throws IOException
+	 */
+	public void exportToHtml(String dbname, String outputPath, String xpath, ExportType exp ) throws IOException {
+
+		BufferedWriter writer = new BufferedWriter(new FileWriter(outputPath));
+
+		ConcurrentHashMap<String, ObservableList<ObservableList<String>>> exportlist = switch (exp) {
+				case ROLLBACKJOURNAL -> this.rol.resultlist;
+				case SQLITEDB -> this.resultlist;
+				case WALARCHIVE -> this.wal.resultlist;
+				default -> null;
+		};
+
+		Path p = Paths.get(path);
+		Map<String,Object> attributes = Files.readAttributes(p,"*", LinkOption.NOFOLLOW_LINKS);
+
+
+		// collect metadata
+		Map<String, String> metaData = new HashMap<>();
+		metaData.put("size", attributes.get("size").toString() + " bytes");
+		if (exp == ExportType.SQLITEDB)
+			metaData.put("path", path + " (database file)");
+		if (exp == ExportType.WALARCHIVE) {
+			int id = walpath.lastIndexOf("/");
+			String wpath = walpath.substring(0, id);
+			metaData.put("path", wpath + " (write-ahead log)");
+		}
+		if (exp == ExportType.ROLLBACKJOURNAL) {
+			int id = rollbackjournalpath.lastIndexOf("/");
+			String rpath = rollbackjournalpath.substring(0, id);
+			metaData.put("path", rpath + " (journal file)");
+		}
+		metaData.put("creationTime", attributes.get("creationTime").toString());
+		metaData.put("lastAccess", attributes.get("lastAccessTime").toString());
+		metaData.put("lastModified", attributes.get("lastModifiedTime").toString());
+		metaData.put("sha1", new DigestUtils(org.apache.commons.codec.digest.MessageDigestAlgorithms.SHA_1).digestAsHex(new File(path)));
+		metaData.put("sha256", new DigestUtils(org.apache.commons.codec.digest.MessageDigestAlgorithms.SHA_256).digestAsHex(new File(path)));
+		metaData.put("md5", new DigestUtils(org.apache.commons.codec.digest.MessageDigestAlgorithms.MD5).digestAsHex(new File(path)));
+		metaData.put("investigator", System.getProperty("user.name"));
+		metaData.put("toolVersion", "FQlite v" + Global.FQLITE_VERSION);
+
+		Enumeration<String> tbls = exportlist.keys();
+
+
+		try {
+			writer.write(createHtmlHeader());
+
+			writer.write("<body>\n");
+			writer.write("<div class='container'>\n");
+			writer.write("<h1>database export: " + escapeHtml(dbname) + "</h1>\n");
+
+			// meta data division
+			writer.write(createMetadataSection(metaData));
+
+			while (tbls.hasMoreElements()) {
+				String tblname = tbls.nextElement();
+
+				ObservableList<ObservableList<String>> table = exportlist.get(tblname);
+
+				// skip index tables
+				String[] h = getExentedColumnNamesForTable(tblname,exp);
+				if ((!tblname.equals("fqlite_freelist") && (h == null)))continue;
+				if (tblname.startsWith("sqlite_")) {continue;}
+
+				if (table.isEmpty()) continue;
+
+				writer.write("<div class='table-section'>\n");
+				writer.write("<h2>" + escapeHtml(tblname) + "</h2>\n");
+
+				writer.write("<div class='filter-row'>\n");
+				writer.write("<input type='text' class='global-filter-input' ");
+				writer.write("placeholder='Search in complete table...' ");
+				writer.write("onkeyup=\"applyFilters('" + tblname + "')\">\n");
+				writer.write("</div>\n");
+				writer.write("<div class='table-wrapper'>\n");
+				writer.write("<table id='table-" + escapeHtml(tblname) + "' class='data-table'>\n");
+
+				if (!table.isEmpty() && h!=null && h.length>0) {
+					//ObservableList<String> headerRow = table.get(0);
+
+					// Spaltenüberschriften mit Sortierung
+					writer.write("<thead>\n");
+					writer.write("<tr class='header-row'>\n");
+					for (int colIndex = 0; colIndex < h.length; colIndex++) {
+						String header = h[colIndex];
+						writer.write("<th onclick=\"sortTable('" + tblname + "', " + colIndex + ")\">");
+						writer.write(escapeHtml(header));
+						writer.write(" <span class='sort-indicator'></span>");
+						writer.write("</th>\n");
+					}
+					writer.write("</tr>\n");
+
+					writer.write("<tr class='filter-row'>\n");
+					for (int colIndex = 0; colIndex < h.length; colIndex++) {
+						writer.write("<th>");
+						writer.write("<input type='text' class='column-filter' ");
+						writer.write("data-column='" + colIndex + "' ");
+						writer.write("placeholder='Filter...' ");
+						writer.write("onkeyup=\"applyFilters('" + tblname + "')\">");
+						writer.write("</th>\n");
+					}
+					writer.write("</tr>\n");
+					writer.write("</thead>\n");
+				}
+
+				writer.write("<tbody>\n");
+				//int startIndex = Global.EXPORTTABLEHEADER ? 1 : 0;
+				int startIndex = 0;
+
+
+				for (int i = startIndex; i < table.size(); i++) {
+					ObservableList<String> row = table.get(i);
+					String offset = row.get(5);
+					writer.write("<tr>\n");
+					int cl = 0;
+					for (String cell : row) {
+						if(cl==1) {
+							cl++;
+							continue;
+						}
+						if(cell.contains("[BLOB")){
+
+							cell = exportBLOB(dbname,offset,cell,xpath);
+
+							if(cell.endsWith(".png") || cell.endsWith(".jpg") || cell.endsWith(".gif") || cell.endsWith(".jpeg") || cell.endsWith(".bmp")) {
+								cell = "<a href=" + cell + ">"
+									   + "<img src=" + cell + " width=\"40\" height=\"40\" alt=\"preview\"></a>";
+							}
+							else {
+								cell = "<a href=" + cell + ">" + cell + "</a>";
+							}
+							writer.write("<td>" + cell + "</td>\n");
+						}
+						else
+							writer.write("<td>" + escapeHtml(cell) + "</td>\n");
+						cl++;
+					}
+					writer.write("</tr>\n");
+				}
+
+				writer.write("</tbody>\n");
+				writer.write("</table>\n");
+				writer.write("</div>\n");
+				writer.write("<div class='pagination-container'>\n");
+				writer.write("<div class='pagination-info'>\n");
+				writer.write("<span class='showing-info' id='showing-" + tblname + "'></span>\n");
+				writer.write("</div>\n");
+				writer.write("<div class='pagination-controls'>\n");
+				writer.write("<label>Zeilen pro Seite: ");
+				writer.write("<select class='rows-per-page' onchange=\"changeRowsPerPage('" + tblname + "', this.value)\">\n");
+				writer.write("<option value='10'>10</option>\n");
+				writer.write("<option value='25' selected>25</option>\n");
+				writer.write("<option value='50'>50</option>\n");
+				writer.write("<option value='100'>100</option>\n");
+				writer.write("<option value='all'>all</option>\n");
+				writer.write("</select>\n");
+				writer.write("</label>\n");
+				writer.write("<div class='pagination-buttons' id='pagination-" + tblname + "'></div>\n");
+				writer.write("</div>\n");
+				writer.write("</div>\n");
+
+				writer.write("</div>\n\n");
+			}
+
+			writer.write("</div>\n");
+			writer.write("<script>\n");
+			writer.write("document.addEventListener('DOMContentLoaded', function() {\n");
+
+			Enumeration<String> keysetInit = exportlist.keys();
+			while (keysetInit.hasMoreElements()) {
+
+				String tblname = keysetInit.nextElement();
+
+				// skip index tables
+				String[] h = getExentedColumnNamesForTable(tblname,exp);
+				if ((!tblname.equals("fqlite_freelist") && (h == null)))continue;
+				if (tblname.startsWith("sqlite_")) {continue;}
+
+				writer.write("    initTable('" + tblname + "');\n");
+			}
+
+			writer.write("});\n");
+			writer.write("</script>\n");
+
+			writer.write("</body>\n</html>");
+
+		} finally {
+			writer.close();
+		}
+	}
+
+
+	private String createHtmlHeader() {
+		return "<!DOCTYPE html>\n" +
+			   "<html lang='de'>\n" +
+			   "<head>\n" +
+			   "<meta charset='UTF-8'>\n" +
+			   "<meta name='viewport' content='width=device-width, initial-scale=1.0'>\n" +
+			   "<title>Datenbank Export</title>\n" +
+			   "<style>\n" +
+			   "* {\n" +
+			   "    box-sizing: border-box;\n" +
+			   "}\n" +
+			   "body {\n" +
+			   "    font-family: Arial, sans-serif;\n" +
+			   "    margin: 0;\n" +
+			   "    padding: 20px;\n" +
+			   "    background-color: #f5f5f5;\n" +
+			   "}\n" +
+			   ".container {\n" +
+			   "    max-width: 1400px;\n" +
+			   "    margin: 0 auto;\n" +
+			   "    background: white;\n" +
+			   "    padding: 20px;\n" +
+			   "    border-radius: 8px;\n" +
+			   "    box-shadow: 0 2px 4px rgba(0,0,0,0.1);\n" +
+			   "}\n" +
+			   "h1 {\n" +
+			   "    color: #333;\n" +
+			   "    border-bottom: 3px solid #4CAF50;\n" +
+			   "    padding-bottom: 10px;\n" +
+			   "    margin-top: 0;\n" +
+			   "}\n" +
+			   "h2 {\n" +
+			   "    color: #555;\n" +
+			   "    margin-top: 30px;\n" +
+			   "    margin-bottom: 15px;\n" +
+			   "}\n" +
+			   ".metadata-section {\n" +
+			   "    background-color: #f9f9f9;\n" +
+			   "    border: 1px solid #e0e0e0;\n" +
+			   "    border-radius: 6px;\n" +
+			   "    padding: 20px;\n" +
+			   "    margin-bottom: 30px;\n" +
+			   "}\n" +
+			   ".metadata-section h2 {\n" +
+			   "    margin-top: 0;\n" +
+			   "    color: #333;\n" +
+			   "    font-size: 1.3em;\n" +
+			   "    border-bottom: 2px solid #4CAF50;\n" +
+			   "    padding-bottom: 8px;\n" +
+			   "}\n" +
+			   ".metadata-grid {\n" +
+			   "    display: grid;\n" +
+			   "    grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));\n" +
+			   "    gap: 20px;\n" +
+			   "}\n" +
+			   ".metadata-column {\n" +
+			   "    display: flex;\n" +
+			   "    flex-direction: column;\n" +
+			   "    gap: 12px;\n" +
+			   "}\n" +
+			   ".metadata-row {\n" +
+			   "    display: grid;\n" +
+			   "    grid-template-columns: 150px 1fr;\n" +
+			   "    gap: 10px;\n" +
+			   "    padding: 8px 0;\n" +
+			   "    border-bottom: 1px solid #e8e8e8;\n" +
+			   "}\n" +
+			   ".metadata-row:last-child {\n" +
+			   "    border-bottom: none;\n" +
+			   "}\n" +
+			   ".metadata-label {\n" +
+			   "    font-weight: bold;\n" +
+			   "    color: #555;\n" +
+			   "    align-self: start;\n" +
+			   "}\n" +
+			   ".metadata-value {\n" +
+			   "    color: #333;\n" +
+			   "    word-break: break-all;\n" +
+			   "}\n" +
+			   ".metadata-value.monospace {\n" +
+			   "    font-family: 'Courier New', monospace;\n" +
+			   "    font-size: 0.9em;\n" +
+			   "    background-color: #f5f5f5;\n" +
+			   "    padding: 4px 8px;\n" +
+			   "    border-radius: 3px;\n" +
+			   "}\n" +
+			   ".no-data {\n" +
+			   "    color: #999;\n" +
+			   "    font-style: italic;\n" +
+			   "}\n" +
+			   ".table-section {\n" +
+			   "    margin-bottom: 40px;\n" +
+			   "}\n" +
+			   ".filter-row {\n" +
+			   "    margin-bottom: 15px;\n" +
+			   "}\n" +
+			   ".global-filter-input {\n" +
+			   "    width: 100%;\n" +
+			   "    padding: 10px;\n" +
+			   "    border: 2px solid #ddd;\n" +
+			   "    border-radius: 4px;\n" +
+			   "    font-size: 14px;\n" +
+			   "}\n" +
+			   ".global-filter-input:focus {\n" +
+			   "    outline: none;\n" +
+			   "    border-color: #4CAF50;\n" +
+			   "}\n" +
+			   ".table-wrapper {\n" +
+			   "    overflow-x: auto;\n" +
+			   "    margin-bottom: 15px;\n" +
+			   "}\n" +
+			   ".data-table {\n" +
+			   "    width: 100%;\n" +
+			   "    border-collapse: collapse;\n" +
+			   "    box-shadow: 0 1px 3px rgba(0,0,0,0.1);\n" +
+			   "}\n" +
+			   ".data-table thead {\n" +
+			   "    background-color: #4CAF50;\n" +
+			   "    color: white;\n" +
+			   "    position: sticky;\n" +
+			   "    top: 0;\n" +
+			   "    z-index: 10;\n" +
+			   "}\n" +
+			   ".data-table thead .header-row th {\n" +
+			   "    cursor: pointer;\n" +
+			   "    user-select: none;\n" +
+			   "    position: relative;\n" +
+			   "    padding-right: 25px;\n" +
+			   "}\n" +
+			   ".data-table thead .header-row th:hover {\n" +
+			   "    background-color: #45a049;\n" +
+			   "}\n" +
+			   ".sort-indicator {\n" +
+			   "    position: absolute;\n" +
+			   "    right: 8px;\n" +
+			   "    top: 50%;\n" +
+			   "    transform: translateY(-50%);\n" +
+			   "}\n" +
+			   ".sort-indicator::after {\n" +
+			   "    content: '⇅';\n" +
+			   "    opacity: 0.5;\n" +
+			   "}\n" +
+			   ".sort-indicator.asc::after {\n" +
+			   "    content: '▲';\n" +
+			   "    opacity: 1;\n" +
+			   "}\n" +
+			   ".sort-indicator.desc::after {\n" +
+			   "    content: '▼';\n" +
+			   "    opacity: 1;\n" +
+			   "}\n" +
+			   ".data-table th,\n" +
+			   ".data-table td {\n" +
+			   "    padding: 12px;\n" +
+			   "    text-align: left;\n" +
+			   "    border-bottom: 1px solid #ddd;\n" +
+			   "}\n" +
+			   ".data-table .filter-row {\n" +
+			   "    background-color: #f8f8f8;\n" +
+			   "}\n" +
+			   ".column-filter {\n" +
+			   "    width: 100%;\n" +
+			   "    padding: 6px;\n" +
+			   "    border: 1px solid #ccc;\n" +
+			   "    border-radius: 3px;\n" +
+			   "    font-size: 12px;\n" +
+			   "}\n" +
+			   ".column-filter:focus {\n" +
+			   "    outline: none;\n" +
+			   "    border-color: #4CAF50;\n" +
+			   "}\n" +
+			   ".data-table tbody tr:hover {\n" +
+			   "    background-color: #f5f5f5;\n" +
+			   "}\n" +
+			   ".data-table tbody tr.hidden {\n" +
+			   "    display: none;\n" +
+			   "}\n" +
+			   ".pagination-container {\n" +
+			   "    display: flex;\n" +
+			   "    justify-content: space-between;\n" +
+			   "    align-items: center;\n" +
+			   "    padding: 15px 0;\n" +
+			   "    flex-wrap: wrap;\n" +
+			   "    gap: 15px;\n" +
+			   "}\n" +
+			   ".pagination-info {\n" +
+			   "    color: #666;\n" +
+			   "    font-size: 14px;\n" +
+			   "}\n" +
+			   ".pagination-controls {\n" +
+			   "    display: flex;\n" +
+			   "    align-items: center;\n" +
+			   "    gap: 15px;\n" +
+			   "}\n" +
+			   ".rows-per-page {\n" +
+			   "    padding: 6px 10px;\n" +
+			   "    border: 1px solid #ddd;\n" +
+			   "    border-radius: 4px;\n" +
+			   "    font-size: 14px;\n" +
+			   "}\n" +
+			   ".pagination-buttons {\n" +
+			   "    display: flex;\n" +
+			   "    gap: 5px;\n" +
+			   "}\n" +
+			   ".page-btn {\n" +
+			   "    padding: 6px 12px;\n" +
+			   "    border: 1px solid #ddd;\n" +
+			   "    background-color: white;\n" +
+			   "    cursor: pointer;\n" +
+			   "    border-radius: 4px;\n" +
+			   "    font-size: 14px;\n" +
+			   "    transition: all 0.2s;\n" +
+			   "}\n" +
+			   ".page-btn:hover:not(:disabled) {\n" +
+			   "    background-color: #4CAF50;\n" +
+			   "    color: white;\n" +
+			   "    border-color: #4CAF50;\n" +
+			   "}\n" +
+			   ".page-btn.active {\n" +
+			   "    background-color: #4CAF50;\n" +
+			   "    color: white;\n" +
+			   "    border-color: #4CAF50;\n" +
+			   "}\n" +
+			   ".page-btn:disabled {\n" +
+			   "    opacity: 0.5;\n" +
+			   "    cursor: not-allowed;\n" +
+			   "}\n" +
+			   "@media (max-width: 768px) {\n" +
+			   "    .metadata-grid {\n" +
+			   "        grid-template-columns: 1fr;\n" +
+			   "    }\n" +
+			   "    .metadata-row {\n" +
+			   "        grid-template-columns: 120px 1fr;\n" +
+			   "    }\n" +
+			   "    .pagination-container {\n" +
+			   "        flex-direction: column;\n" +
+			   "    }\n" +
+			   "}\n" +
+			   "</style>\n" +
+			   "<script>\n" +
+			   "// [JavaScript-Code bleibt unverändert wie vorher]\n" +
+			   "const tableStates = {};\n" +
+			   "\n" +
+			   "function initTable(tableName) {\n" +
+			   "    const table = document.getElementById('table-' + tableName);\n" +
+			   "    const tbody = table.querySelector('tbody');\n" +
+			   "    const rows = Array.from(tbody.querySelectorAll('tr'));\n" +
+			   "    \n" +
+			   "    tableStates[tableName] = {\n" +
+			   "        allRows: rows,\n" +
+			   "        filteredRows: rows,\n" +
+			   "        currentPage: 1,\n" +
+			   "        rowsPerPage: 25,\n" +
+			   "        sortColumn: -1,\n" +
+			   "        sortDirection: 'asc'\n" +
+			   "    };\n" +
+			   "    \n" +
+			   "    updatePagination(tableName);\n" +
+			   "}\n" +
+			   "\n" +
+			   "function applyFilters(tableName) {\n" +
+			   "    const table = document.getElementById('table-' + tableName);\n" +
+			   "    const state = tableStates[tableName];\n" +
+			   "    \n" +
+			   "    const globalFilter = table.closest('.table-section').querySelector('.global-filter-input').value.toLowerCase();\n" +
+			   "    const columnFilters = Array.from(table.querySelectorAll('.column-filter')).map(input => ({\n" +
+			   "        column: parseInt(input.dataset.column),\n" +
+			   "        value: input.value.toLowerCase()\n" +
+			   "    }));\n" +
+			   "    \n" +
+			   "    state.filteredRows = state.allRows.filter(row => {\n" +
+			   "        const cells = Array.from(row.querySelectorAll('td'));\n" +
+			   "        \n" +
+			   "        if (globalFilter) {\n" +
+			   "            const rowText = cells.map(cell => cell.textContent).join(' ').toLowerCase();\n" +
+			   "            if (rowText.indexOf(globalFilter) === -1) return false;\n" +
+			   "        }\n" +
+			   "        \n" +
+			   "        for (const filter of columnFilters) {\n" +
+			   "            if (filter.value && cells[filter.column]) {\n" +
+			   "                const cellText = cells[filter.column].textContent.toLowerCase();\n" +
+			   "                if (cellText.indexOf(filter.value) === -1) return false;\n" +
+			   "            }\n" +
+			   "        }\n" +
+			   "        \n" +
+			   "        return true;\n" +
+			   "    });\n" +
+			   "    \n" +
+			   "    state.currentPage = 1;\n" +
+			   "    updatePagination(tableName);\n" +
+			   "}\n" +
+			   "\n" +
+			   "function sortTable(tableName, columnIndex) {\n" +
+			   "    const state = tableStates[tableName];\n" +
+			   "    const table = document.getElementById('table-' + tableName);\n" +
+			   "    \n" +
+			   "    if (state.sortColumn === columnIndex) {\n" +
+			   "        state.sortDirection = state.sortDirection === 'asc' ? 'desc' : 'asc';\n" +
+			   "    } else {\n" +
+			   "        state.sortColumn = columnIndex;\n" +
+			   "        state.sortDirection = 'asc';\n" +
+			   "    }\n" +
+			   "    \n" +
+			   "    table.querySelectorAll('.sort-indicator').forEach(indicator => {\n" +
+			   "        indicator.className = 'sort-indicator';\n" +
+			   "    });\n" +
+			   "    \n" +
+			   "    const indicators = table.querySelectorAll('.sort-indicator');\n" +
+			   "    if (indicators[columnIndex]) {\n" +
+			   "        indicators[columnIndex].classList.add(state.sortDirection);\n" +
+			   "    }\n" +
+			   "    \n" +
+			   "    state.filteredRows.sort((a, b) => {\n" +
+			   "        const cellA = a.querySelectorAll('td')[columnIndex].textContent.trim();\n" +
+			   "        const cellB = b.querySelectorAll('td')[columnIndex].textContent.trim();\n" +
+			   "        \n" +
+			   "        const numA = parseFloat(cellA);\n" +
+			   "        const numB = parseFloat(cellB);\n" +
+			   "        \n" +
+			   "        if (!isNaN(numA) && !isNaN(numB)) {\n" +
+			   "            return state.sortDirection === 'asc' ? numA - numB : numB - numA;\n" +
+			   "        }\n" +
+			   "        \n" +
+			   "        const comparison = cellA.localeCompare(cellB, 'de');\n" +
+			   "        return state.sortDirection === 'asc' ? comparison : -comparison;\n" +
+			   "    });\n" +
+			   "    \n" +
+			   "    updatePagination(tableName);\n" +
+			   "}\n" +
+			   "\n" +
+			   "function changeRowsPerPage(tableName, value) {\n" +
+			   "    const state = tableStates[tableName];\n" +
+			   "    state.rowsPerPage = value === 'all' ? state.filteredRows.length : parseInt(value);\n" +
+			   "    state.currentPage = 1;\n" +
+			   "    updatePagination(tableName);\n" +
+			   "}\n" +
+			   "\n" +
+			   "function changePage(tableName, page) {\n" +
+			   "    const state = tableStates[tableName];\n" +
+			   "    state.currentPage = page;\n" +
+			   "    updatePagination(tableName);\n" +
+			   "}\n" +
+			   "\n" +
+			   "function updatePagination(tableName) {\n" +
+			   "    const state = tableStates[tableName];\n" +
+			   "    const totalRows = state.filteredRows.length;\n" +
+			   "    const totalPages = Math.ceil(totalRows / state.rowsPerPage);\n" +
+			   "    \n" +
+			   "    state.allRows.forEach(row => row.classList.add('hidden'));\n" +
+			   "    \n" +
+			   "    const startIndex = (state.currentPage - 1) * state.rowsPerPage;\n" +
+			   "    const endIndex = Math.min(startIndex + state.rowsPerPage, totalRows);\n" +
+			   "    \n" +
+			   "    for (let i = startIndex; i < endIndex; i++) {\n" +
+			   "        state.filteredRows[i].classList.remove('hidden');\n" +
+			   "    }\n" +
+			   "    \n" +
+			   "    const showingInfo = document.getElementById('showing-' + tableName);\n" +
+			   "    if (totalRows === 0) {\n" +
+			   "        showingInfo.textContent = 'Keine Ergebnisse';\n" +
+			   "    } else {\n" +
+			   "        showingInfo.textContent = `Zeige ${startIndex + 1}-${endIndex} von ${totalRows} Zeilen`;\n" +
+			   "    }\n" +
+			   "    \n" +
+			   "    const paginationDiv = document.getElementById('pagination-' + tableName);\n" +
+			   "    paginationDiv.innerHTML = '';\n" +
+			   "    \n" +
+			   "    if (totalPages <= 1) return;\n" +
+			   "    \n" +
+			   "    const prevBtn = document.createElement('button');\n" +
+			   "    prevBtn.className = 'page-btn';\n" +
+			   "    prevBtn.textContent = '«';\n" +
+			   "    prevBtn.disabled = state.currentPage === 1;\n" +
+			   "    prevBtn.onclick = () => changePage(tableName, state.currentPage - 1);\n" +
+			   "    paginationDiv.appendChild(prevBtn);\n" +
+			   "    \n" +
+			   "    const maxButtons = 5;\n" +
+			   "    let startPage = Math.max(1, state.currentPage - Math.floor(maxButtons / 2));\n" +
+			   "    let endPage = Math.min(totalPages, startPage + maxButtons - 1);\n" +
+			   "    \n" +
+			   "    if (endPage - startPage < maxButtons - 1) {\n" +
+			   "        startPage = Math.max(1, endPage - maxButtons + 1);\n" +
+			   "    }\n" +
+			   "    \n" +
+			   "    if (startPage > 1) {\n" +
+			   "        const firstBtn = document.createElement('button');\n" +
+			   "        firstBtn.className = 'page-btn';\n" +
+			   "        firstBtn.textContent = '1';\n" +
+			   "        firstBtn.onclick = () => changePage(tableName, 1);\n" +
+			   "        paginationDiv.appendChild(firstBtn);\n" +
+			   "        \n" +
+			   "        if (startPage > 2) {\n" +
+			   "            const dots = document.createElement('span');\n" +
+			   "            dots.textContent = '...';\n" +
+			   "            dots.style.padding = '6px';\n" +
+			   "            paginationDiv.appendChild(dots);\n" +
+			   "        }\n" +
+			   "    }\n" +
+			   "    \n" +
+			   "    for (let i = startPage; i <= endPage; i++) {\n" +
+			   "        const pageBtn = document.createElement('button');\n" +
+			   "        pageBtn.className = 'page-btn' + (i === state.currentPage ? ' active' : '');\n" +
+			   "        pageBtn.textContent = i;\n" +
+			   "        pageBtn.onclick = () => changePage(tableName, i);\n" +
+			   "        paginationDiv.appendChild(pageBtn);\n" +
+			   "    }\n" +
+			   "    \n" +
+			   "    if (endPage < totalPages) {\n" +
+			   "        if (endPage < totalPages - 1) {\n" +
+			   "            const dots = document.createElement('span');\n" +
+			   "            dots.textContent = '...';\n" +
+			   "            dots.style.padding = '6px';\n" +
+			   "            paginationDiv.appendChild(dots);\n" +
+			   "        }\n" +
+			   "        \n" +
+			   "        const lastBtn = document.createElement('button');\n" +
+			   "        lastBtn.className = 'page-btn';\n" +
+			   "        lastBtn.textContent = totalPages;\n" +
+			   "        lastBtn.onclick = () => changePage(tableName, totalPages);\n" +
+			   "        paginationDiv.appendChild(lastBtn);\n" +
+			   "    }\n" +
+			   "    \n" +
+			   "    const nextBtn = document.createElement('button');\n" +
+			   "    nextBtn.className = 'page-btn';\n" +
+			   "    nextBtn.textContent = '»';\n" +
+			   "    nextBtn.disabled = state.currentPage === totalPages;\n" +
+			   "    nextBtn.onclick = () => changePage(tableName, state.currentPage + 1);\n" +
+			   "    paginationDiv.appendChild(nextBtn);\n" +
+			   "}\n" +
+			   "</script>\n" +
+			   "</head>\n";
+	}
+
+	private String escapeHtml(String text) {
+		if (text == null) return "";
+		return text.replace("&", "&amp;")
+				.replace("<", "&lt;")
+				.replace(">", "&gt;")
+				.replace("\"", "&quot;")
+				.replace("'", "&#39;");
 	}
 	
 	private String prepareOutput(ObservableList<String> list, String dbname, String exportfolder) throws IOException{
@@ -2139,8 +2978,8 @@ public class Job {
 			
 			int counter = 0;
 				
-			/* skip schema definition lines of table __SQLiteMaster */
-			if(line[0].startsWith("__SQLiteMaster"))
+			/* skip schema definition lines of table sqlite_master */
+			if(line[0].startsWith("sqlite_master"))
 					return null;
 			
 			// iterate over all cells in one particular table row
@@ -2159,7 +2998,7 @@ public class Job {
 				
 				
 				/* column for offset found? */
-	    		if(counter == 4)
+	    		if(counter == 5)
 	    		{
 	    			offset = c;
 	    			output += offset;
@@ -2184,60 +3023,10 @@ public class Job {
 						counter++;
 						continue;
 					}
-					
 					else if(Global.EXPORT_MODE == Global.EXPORT_MODES.TOCSV || Global.EXPORT_MODE == Global.EXPORT_MODES.TOSEPARATEFILES)
-					{	
-						
-						/* BLOB-value found? */
-			    		if(c.length()>7) {
-			    			
-			    			int from = c.indexOf("BLOB-");
-			        	    int to = c.indexOf("]");
-			        	    
-			        	    if(from > 0 && to > 0)
-			        	    {
-			        	    
-				        	    String number = c.substring(from+5, to);			
-				        		int start = c.indexOf("<");
-				        		int end   = c.indexOf(">");
-				        				
-				        		String type;
-								if (end > 0) {
-									type = c.substring(start+1,end);
-								}
-								else 
-				        			type = "bin";
-				        				
-				        		if(type.equals("java"))
-				        			type = "bin";
-				        			
-				        		String path = GUI.baseDir + Global.separator + dbname + "_" + offset + "-" + number + "." + type;
-				        		String data = bincache.getHexString(path);
-				    
-				        		/* CASE: export BLOB data directly to CSV */
-				        		if (Global.EXPORT_MODE == Global.EXPORT_MODES.TOCSV)
-				        		{
-				        			c = data.toUpperCase();
-				        		}
-				        		/* CASE: export BLOB to separate file & write filename to csv-file */
-				        		else
-				        		{
-				        			// file name of the BLOB 
-				        			c = dbname + "_" + offset + "-" + number + "." + type;
-				        			String saveas = exportfolder + Global.separator + c;
-				        			Path p = Path.of(saveas);
-				        			
-				        			// write binary file to export folder
-				        			Files.write(p,bincache.get(path).binary,StandardOpenOption.CREATE);
-
-				        		}
-				        	   
-				        }
-			        	    
-							
-			        }
-							
-						output += c;
+					{
+						String fname = exportBLOB(dbname,offset,c,exportfolder);
+						output += fname;
 						counter++;
 						continue;
 					}
@@ -2251,8 +3040,66 @@ public class Job {
 	
 			return output;
 	}
-	
-	
+
+	/// This method is used to export a BLOB-field as spearate file
+	/// to the file system.
+	private String exportBLOB(String dbname, String offset, String c, String exportfolder){
+
+		/* BLOB-value found? */
+		if(c.length()>7) {
+
+			int from = c.indexOf("BLOB-");
+			int to = c.indexOf("]");
+
+			if (from > 0 && to > 0) {
+
+				String number = c.substring(from + 5, to);
+				int start = c.indexOf("<");
+				int end = c.indexOf(">");
+
+				String type;
+				if (end > 0) {
+					type = c.substring(start + 1, end);
+				} else
+					type = "bin";
+
+				if (type.equals("java"))
+					type = "bin";
+
+				String path = GUI.baseDir + Global.separator + dbname + "_" + offset + "-" + number + "." + type;
+				String data = bincache.getHexString(path);
+
+				/* CASE: export BLOB data directly to CSV */
+				if (Global.EXPORT_MODE == Global.EXPORT_MODES.TOCSV) {
+					c = data.toUpperCase();
+				}
+				/* CASE: export BLOB to separate file & write filename to csv-file */
+				else {
+
+					// file name of the BLOB
+					c = dbname + "_" + offset + "-" + number + "." + type;
+					String saveas = exportfolder + Global.separator + c;
+					Path p = Path.of(saveas);
+
+					// write binary file to export folder
+					BLOBElement e = bincache.get(path);
+					if (e != null) {
+                        try {
+                            Files.write(p, e.binary, StandardOpenOption.CREATE);
+                        } catch (IOException ex) {
+                            throw new RuntimeException(ex);
+                        }
+                    }
+
+				}
+
+			}
+
+		}
+		return c;
+	}
+
+
 	
 	/**
 	 * Save findings into a comma-separated file.

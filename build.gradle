@@ -7,6 +7,7 @@ plugins {
     id "de.undercouch.download" version "5.6.0"
 }
 
+
 group 'hswm.fqlite'
 version '3.3'
 
@@ -36,7 +37,7 @@ sourceSets {
 
 java {
     toolchain {
-        languageVersion = JavaLanguageVersion.of(20)
+        languageVersion = JavaLanguageVersion.of(21)
     }
 }
 
@@ -67,9 +68,31 @@ compileTestJava.options.encoding = 'UTF-8'
 javadoc.options.encoding = 'UTF-8'
 
 dependencies {
-	
-	
-	implementation group: 'com.googlecode.plist', name: 'dd-plist', version: '1.28'
+
+    // https://mvnrepository.com/artifact/dev.langchain4j/langchain4j-ollama
+    implementation("dev.langchain4j:langchain4j-ollama:1.9.1")
+
+    // https://mvnrepository.com/artifact/dev.langchain4j/langchain4j-local-ai
+    implementation("dev.langchain4j:langchain4j-local-ai:1.9.1-beta17")
+
+    // Lokales LLM via llama.cpp (GGUF)
+    // https://mvnrepository.com/artifact/dev.langchain4j/langchain4j-hugging-face
+    implementation("dev.langchain4j:langchain4j-hugging-face:1.9.1-beta17")
+    // CSV Reader
+    implementation("com.opencsv:opencsv:5.8")
+    // Vector Store
+    //implementation("dev.langchain4j:langchain4j-memory-store:1.9.1")
+    // https://mvnrepository.com/artifact/de.kherud/llama
+    implementation("de.kherud:llama:4.2.0")
+    implementation group: 'dev.langchain4j', name: 'langchain4j', version: '1.9.1'
+    implementation group: 'dev.langchain4j', name: 'langchain4j-core', version: '1.9.1'
+    implementation group: 'dev.langchain4j', name: 'langchain4j-embeddings', version: '1.9.1-beta17'
+    implementation group: 'dev.langchain4j', name: 'langchain4j-embeddings-bge-small-en-v15', version: '1.9.1-beta17'
+    implementation group: 'dev.langchain4j', name: 'langchain4j-ollama', version: '1.9.1'
+    implementation group: 'dev.langchain4j', name: 'langchain4j-community', version: '1.9.1-beta17'
+    implementation group: 'dev.langchain4j', name: 'langchain4j-embeddings-all-minilm-l6-v2', version: '1.9.1-beta17'
+    implementation group: 'de.kherud', name: 'llama', version: '3.1.1'
+    implementation group: 'com.googlecode.plist', name: 'dd-plist', version: '1.28'
     implementation group: 'org.antlr', name: 'antlr4', version: '4.8'
     implementation group: 'org.apache.avro', name: 'avro', version: '1.11.4'
     implementation group: 'nl.pvanassen', name: 'bplist', version: '1.0.0'
@@ -100,13 +123,12 @@ dependencies {
     implementation group: 'javax.measure', name: 'unit-api', version: '2.2'
     implementation group: 'com.dlsc.unitfx', name: 'unitfx', version: '1.0.10'
     implementation group: 'tech.uom.lib', name: 'uom-lib-common', version: '2.1'
-	implementation group: 'com.github.jsqlparser', name: 'jsqlparser', version: '5.0'
+	implementation group: 'com.github.jsqlparser', name: 'jsqlparser', version: '5.3'
     implementation files('lib/FxTextEditor.jar')
     implementation files('lib/SerializationDumper-v1.13.jar')
     implementation group: 'org.fxmisc.richtext', name: 'richtextfx', version: '0.11.3'
-    implementation group: 'org.apache.calcite', name: 'calcite-core', version: '1.38.0'
+    implementation group: 'org.apache.calcite', name: 'calcite-core', version: '1.41.0'
     implementation group: 'org.xerial', name: 'sqlite-jdbc', version: '3.47.0.0'
-    
 
     testImplementation group: 'junit', name: 'junit', version: '4.13.2'
 }
@@ -154,6 +176,15 @@ tasks.jpackage.doFirst {
         include 'proto.run', 'proto.sh', 'protoc.bat'
         into "$fqliteJpackageDirectory"
     }
+}
+
+// Erhöhe Heap-Größe für bessere Performance
+tasks.withType(JavaExec) {
+    jvmArgs = [
+            '-Xmx4g',              // Mehr Speicher
+            '-XX:+UseG1GC',        // Besserer Garbage Collector
+            '-XX:MaxGCPauseMillis=200'
+    ]
 }
 
 

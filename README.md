@@ -28,8 +28,11 @@ FQLite allows you to:
 * automatic detection of different BLOB types like .png, .bmp, .gif, .jpeg, .tiff, .heic, .pdf
 * analysing BLOB formats like Google protobuf, AVRO, Apple plist, Thrift,... 
 * integrated SQL-Analyser 
+* HTML-export functionality (since. 4.0)
 * Displaying database PRAGMA values
 * Export recovered data into a new SQLite database 
+* Text-to-SQL generation with AI-based Assistant (since 4.0)
+* Graphic SQL-Schema analyser (based on Mermaid.js)
 
 Some features:
 
@@ -42,6 +45,10 @@ Some features:
 
 <p align="center">
   <img width="95%" height="95%" src="img/fqlite_sqlanalyzer.png?raw=true" alt="SQL Analyzer"/>
+</p>
+
+<p align="center">
+  <img width="80%" height="80%" src="img/fqlite_assistant.png?raw=true" alt="SQL Analyzer"/>
 </p>
 
 
