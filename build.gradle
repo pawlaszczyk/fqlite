@@ -209,10 +209,10 @@ runtime {
         } else if (currentOs.linux) {
             installerOptions += ['--linux-package-name', 'fqlite', '--linux-shortcut']
         } else if (currentOs.isMacOsX()) {
-    		installerType = 'dmg'
-    		installerOptions += ['--mac-package-name', 'fqlite']
-    		// Ad-hoc Signing - funktioniert ohne Developer Account
-    		installerOptions += ['--mac-signing-key-user-name', '-']  // '-' bedeutet Ad-hoc
+    		 // Kein installerType setzen = nur app-bundle erstellen, kein DMG/PKG
+       		 // Oder explizit app-image erstellen
+       		 imageOptions += ['--mac-package-name', 'fqlite']
+        	 skipInstaller = true  // Überspringt DMG/PKG Erstellung komplett
 		}
 								
     }
