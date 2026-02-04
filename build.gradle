@@ -9,7 +9,7 @@ plugins {
 
 
 group 'hswm.fqlite'
-version '3.3'
+version '4.0'
 
 def protocversion = "27.4"
 
@@ -69,20 +69,10 @@ javadoc.options.encoding = 'UTF-8'
 
 dependencies {
 
-    // https://mvnrepository.com/artifact/dev.langchain4j/langchain4j-ollama
     implementation("dev.langchain4j:langchain4j-ollama:1.9.1")
-
-    // https://mvnrepository.com/artifact/dev.langchain4j/langchain4j-local-ai
     implementation("dev.langchain4j:langchain4j-local-ai:1.9.1-beta17")
-
-    // Lokales LLM via llama.cpp (GGUF)
-    // https://mvnrepository.com/artifact/dev.langchain4j/langchain4j-hugging-face
     implementation("dev.langchain4j:langchain4j-hugging-face:1.9.1-beta17")
-    // CSV Reader
     implementation("com.opencsv:opencsv:5.8")
-    // Vector Store
-    //implementation("dev.langchain4j:langchain4j-memory-store:1.9.1")
-    // https://mvnrepository.com/artifact/de.kherud/llama
     implementation("de.kherud:llama:4.2.0")
     implementation group: 'dev.langchain4j', name: 'langchain4j', version: '1.9.1'
     implementation group: 'dev.langchain4j', name: 'langchain4j-core', version: '1.9.1'
