@@ -213,8 +213,6 @@ public class GUI extends Application {
 		ImageIcon img = new ImageIcon(Objects.requireNonNull(GUI.class.getResource("/logo.png")));
 
 
-	 	SystemTray st = SystemTray.getSystemTray();
-
 		if (Taskbar.isTaskbarSupported())
 	    {
 			try {
@@ -228,6 +226,7 @@ public class GUI extends Application {
 	    }
 		else if(SystemTray.isSupported()){
 			try {
+				SystemTray st = SystemTray.getSystemTray();
 				TrayIcon ti = new java.awt.TrayIcon(img.getImage());
 				st.add(ti);
 			} catch (AWTException e) {
