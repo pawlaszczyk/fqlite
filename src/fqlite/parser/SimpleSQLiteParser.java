@@ -339,6 +339,7 @@ public class SimpleSQLiteParser {
 	 */
 	private TableDescriptor parseCreateTable(String stmt)
 	{
+
 		column = 0;
 		
 	    // Create a lexer and parser for the input.

@@ -851,9 +851,11 @@ public class Auxiliary{
 				ad = job.pages[pagenumber_db];
 				if (ad instanceof TableDescriptor) {
 					td = (TableDescriptor) ad;
-				}			
-				isVT = td.sql.toUpperCase().contains("CREATE VIRTUAL");
-				record.add(job.pages[pagenumber_db].getName());
+				}
+				if (null != td) {
+					isVT = td.sql.toUpperCase().contains("CREATE VIRTUAL");
+					record.add(job.pages[pagenumber_db].getName());
+				}
 			} 
 			else {
 				record.add(Global.DELETED_RECORD_IN_PAGE);

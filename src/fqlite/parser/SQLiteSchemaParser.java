@@ -33,6 +33,9 @@ public class SQLiteSchemaParser {
 	 */
 	public static void parse(Job job, String tablename, int root, String sql) {
 
+		if (!SQLValidator.validate(sql).isValid())
+			return;
+
 		boolean rowid = true;
 		
 		int indexrowid = sql.indexOf("WITHOUT ROWID");
@@ -64,6 +67,8 @@ public class SQLiteSchemaParser {
 		
 		if (sql.contains("CREATE TABLE"))
 		{
+
+
 			TableDescriptor tds = p.parseCREATETABLEStatement(sql);
 		
 			/* save link to this component object within the virtual component list */

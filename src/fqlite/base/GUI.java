@@ -668,7 +668,7 @@ public class GUI extends Application {
 					if (Files.exists(p)) {
 
 						LLMWindow llmw = new LLMWindow(this,selected);
-						prepareLLM(llmw);
+						prepareLLM(llmw,model_path);
 						Platform.runLater(llmw::show);
 						return;
 
@@ -708,7 +708,7 @@ public class GUI extends Application {
 		}
 	}
 
-	public void prepareLLM(LLMWindow llmw) {
+	public void prepareLLM(LLMWindow llmw, String model_path) {
 
 
 		// Popup anzeigen
@@ -718,7 +718,7 @@ public class GUI extends Application {
 		// Zeitintensive Aufgabe in separatem Thread
 		new Thread(() -> {
 			try {
-				llmw.prepareRAG();
+				llmw.prepareRAG(model_path);
 				// Deine zeitintensive Aufgabe hier
 				Platform.runLater(() -> {
 					try {

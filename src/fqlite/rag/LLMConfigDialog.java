@@ -26,7 +26,7 @@ import java.util.Properties;
 public class LLMConfigDialog extends Application {
 
     private static final String CONFIG_FILE = Global.CONFIG_FILE;
-    private Path configPath;
+    public static Path configPath;
     private TextField modelPathField;
     private Spinner<Integer> gpuLayersSpinner;
     // Randomness of the model output. Higher -> more variation.

@@ -553,10 +553,13 @@ public class LLMWindow extends Application {
      * This method is used to initialize the modell and handover the database schema to the LLM.
      *
      */
-    public void prepareRAG() {
+    public void prepareRAG(String model_path) {
 
         /* Create a RAG-Pipline object */
-        pipline = new RAGPipeline("/Users/pawel/llm_models/forensic-sqlite-llama-3.2-3b-Q4_K_M.gguf");
+
+        pipline = new RAGPipeline(model_path);
+        System.out.println("path to LLM: " + model_path);
+        //"/Users/pawel/llm_models/forensic-sqlite-llama-3.2-3b-Q4_K_M.gguf");
 
         String dbname = db_node.getValue().name;
 

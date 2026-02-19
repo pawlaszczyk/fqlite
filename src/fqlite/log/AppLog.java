@@ -53,12 +53,12 @@ public class AppLog extends Application {
             
             // This block configures the logger with a handler and a formatter
 			FileHandler fh = new FileHandler(GUI.baseDir.getAbsolutePath() + FileSystems.getDefault().getSeparator() + "fqlite.log",4096*1000,3,true);
+            System.out.println("Log File: " + fh.toString());
             LOGGER.addHandler(fh);
             SimpleFormatter formatter = new SimpleFormatter();  
             fh.setFormatter(formatter);
             LOGGER.addHandler(new TextAreaHandler(textArea));
             LOGGER.severe("<FQLite message log>");
-
 
             ButtonBar buttonBar = new ButtonBar();
             buttonBar.setPadding( new Insets(10) );
