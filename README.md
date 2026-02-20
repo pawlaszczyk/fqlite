@@ -154,7 +154,7 @@ To use the Text2SQL function, you must click on the brain icon:
 The first time you use this feature, you will be prompted to specify the path to the LLM: 
 
 <p align="center">
-  <img width="95%" height="95%" src="img/llm_config.png?raw=true" alt="LLM Model Configuration"/>
+  <img width="65%" height="65%" src="img/llm_config.png?raw=true" alt="LLM Model Configuration"/>
 </p>
 
 After accepting the change, the Text2SQL function can then be used in FQLite.
