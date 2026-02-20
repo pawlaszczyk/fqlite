@@ -1,4 +1,4 @@
-# What's Changed
+# What's Changed 
 - The schema view was completely reworked
 - HTML Report functionality was added
 - Introducing a new RAG-pipeline support AI-based 

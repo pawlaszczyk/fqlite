@@ -122,3 +122,39 @@ sudo apt install ./fqlite.deb
 ```
 
 4. After installation, FQLite can be launched from the application menu.
+
+## Using AI within FQLite
+To obtain AI support for formulating SQL statements, 
+you must first download an LLM model. There are 4 models available, 
+which differ in size and performance:
+
+1. **GGUF Q4_K_M: ~2.3 GB:**
+4-bit quantized model with K-Mean optimization. The smallest and fastest variant, ideal for systems with limited RAM or older hardware. Inference speed is highest among all variants. Output quality is slightly reduced compared to higher quantizations, but remains well-suited for most SQL generation tasks. Recommended for quick prototyping or resource-constrained environments.
+https://huggingface.co/pawlaszc/DigitalForensicsText2SQLite/blob/main/forensic-sqlite-llama-3.2-3b-Q4_K_M.gguf
+
+2. **GGUF Q5_K_M: ~2.8 GB:**
+5-bit quantized model with K-Mean optimization. A well-balanced middle ground between size, speed, and output quality. Offers noticeably better SQL accuracy than Q4_K_M while still being significantly smaller than the full-precision model. Recommended as the default choice for most users running inference on consumer hardware (8–16 GB RAM).
+https://huggingface.co/pawlaszc/DigitalForensicsText2SQLite/blob/main/forensic-sqlite-llama-3.2-3b-Q5_K_M.gguf
+
+3. **GGUF Q8_0: ~3.8 GB:**
+8-bit quantized model. Near full-precision quality with only minimal accuracy loss. Inference is slower than Q4/Q5 variants but the output quality is very close to the FP16 baseline. A good choice when output accuracy is a priority and sufficient RAM (16+ GB) is available. Suitable for production use cases where result correctness is critical.
+https://huggingface.co/pawlaszc/DigitalForensicsText2SQLite/blob/main/forensic-sqlite-llama-3.2-3b-Q8_0.gguf
+
+4. **Full (FP16): ~6 GB:**
+Full 16-bit floating point model without any quantization. Delivers the highest possible output quality and serves as the reference baseline for all other variants. Requires the most memory (16–24 GB RAM recommended) and has the slowest inference speed. Recommended for benchmarking, fine-tuning experiments, or high-end systems where maximum accuracy is required.
+https://huggingface.co/pawlaszc/DigitalForensicsText2SQLite/blob/main/forensic-sqlite-llama-3.2-3b-fp16.gguf
+
+If you are unsure, we recommend choosing the smallest model. This should run on all common computer systems without significant delays. 
+A GPU support is not necessary to run this model. 
+
+To use the Text2SQL function, you must click on the brain icon:
+
+  <img width="24" height="24" src="img/llm_logo.png?raw=true" alt="LLM Model Logo"/>
+
+The first time you use this feature, you will be prompted to specify the path to the LLM: 
+
+<p align="center">
+  <img width="95%" height="95%" src="img/llm_config.png?raw=true" alt="LLM Model Configuration"/>
+</p>
+
+After accepting the change, the Text2SQL function can then be used in FQLite.
