@@ -371,8 +371,6 @@ public class SimpleSQLiteParser {
         	
         	@Override public void enterColumn_name(SQLiteParser.Column_nameContext ctx) 
         	{
-        		sqltypes_defined = false;
-        		
         		if(inForeignTable)
         		{
         			inForeignTable = false;
@@ -383,9 +381,18 @@ public class SimpleSQLiteParser {
         		{
         			return;
         		}
-        		cons="";
-        		
         		String colname = ctx.getText();
+        		
+    			// Sanity check for duplicate column name
+    			// TODO: This happens unfortunately in yet unhandled construct "CHECK(...)"
+    			if(colnames.contains(colname))
+    			{
+    				return;
+    			}
+    			
+    			sqltypes_defined = false;
+        		
+        		cons="";
         		
         		//System.out.println("enterColumn_name()::colname =" + colname);
         		
@@ -423,7 +430,8 @@ public class SimpleSQLiteParser {
         	    value = value.trim();
 
 				// case: there is actually no type info given, but a NOT NULL constraint
-				if(value.equals("NOT"))
+        	    // or DEFAULT XXX
+				if(value.equals("NOT") || value.equals("DEFAULT"))
 					value = "BLOB";
         	    if(value.isEmpty())
         	    	value = "BLOB";
