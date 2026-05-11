@@ -163,7 +163,6 @@ runtime {
         installerOptions += ['--resource-dir', "resources"]
         imageOptions += [
                 '--java-options', '-XX:+UseZGC',
-                '-XX:+ZGenerational',
                 '-Xms32m',
                 '-Xmx4G',
                 '-XX:G1PeriodicGCInterval=10000',  
