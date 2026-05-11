@@ -162,8 +162,7 @@ runtime {
     jpackage {
         installerOptions += ['--resource-dir', "resources"]
         imageOptions += [
-                '--java-options', '-XX:+UseZGC',
-                '-Xmx4G'
+                '--java-options', '-XX:+UseZGC'
         ]
 
         if (currentOs.windows) {
