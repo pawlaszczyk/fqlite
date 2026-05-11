@@ -9,7 +9,7 @@ plugins {
 
 
 group 'hswm.fqlite'
-version '4.2'
+version '4.1'
 
 def protocversion = "27.4"
 
@@ -161,14 +161,12 @@ runtime {
 
     jpackage {
         installerOptions += ['--resource-dir', "resources"]
-
-        // JVM-Args für die installierte Anwendung
         imageOptions += [
                 '--java-options', '-XX:+UseZGC',
                 '-XX:+ZGenerational',
                 '-Xms32m',
                 '-Xmx4G',
-                '-XX:G1PeriodicGCInterval=10000',  // GC alle 10s wenn idle
+                '-XX:G1PeriodicGCInterval=10000',  
                 '-XX:GCTimeRatio=4'
         ]
 
