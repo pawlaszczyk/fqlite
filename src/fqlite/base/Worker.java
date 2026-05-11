@@ -51,7 +51,6 @@ public class Worker implements Runnable {
 	@Override
 	public void run() {
 
-		//long start = System.currentTimeMillis();
 		/* go through the stack */
 		while (toDo.size() > 0)
 		{
@@ -59,8 +58,7 @@ public class Worker implements Runnable {
 			RecoveryTask next = toDo.pop();
 			next.run();
 		}
-		//long end = System.currentTimeMillis();
-		
+
 		
 	}
 

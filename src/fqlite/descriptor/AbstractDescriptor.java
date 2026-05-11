@@ -1,5 +1,6 @@
 package fqlite.descriptor;
 
+import java.util.ArrayList;
 import java.util.List;
 
 import fqlite.pattern.HeaderPattern;
@@ -18,10 +19,11 @@ public abstract class AbstractDescriptor {
     public boolean doNotScan = false;
 	public List<String> serialtypes;
 	public List<String> columnnames;
-	public List<String> sqltypes;
+	public List<String> sqltypes = new ArrayList<String>();
 	public List<String> columntypes;
     public String tblname;
-	
+	public String sql = "";
+
 	/**
 	 * Return the name of the database object.
 	 * @return element name

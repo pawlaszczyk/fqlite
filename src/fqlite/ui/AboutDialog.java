@@ -7,6 +7,7 @@ import java.net.URI;
 import java.util.Objects;
 
 import fqlite.base.GUI;
+import fqlite.base.ThemeManager;
 import fqlite.base.Global;
 import fqlite.log.AppLog;
 import javafx.event.ActionEvent;
@@ -70,14 +71,15 @@ public class AboutDialog extends javafx.scene.control.Dialog<Object>{
 		createLayout();		
 		  
 		setTitle("About this Program");
-		
+
+		// Register with ThemeManager once the dialog's scene is available
+		setOnShown(e -> ThemeManager.register(dialogPane.getScene()));
 		
 		show();
 	}
 
 	private void createLayout() {
-
-		dialogPane.setBackground(new Background(new BackgroundFill(Color.WHITE, new CornerRadii(5), Insets.EMPTY)));
+		// Background is now controlled by ThemeManager CSS – no hardcoded colour here
 		 
         this.setContentText("FQLite Retrieval Tool, Version " + Global.FQLITE_VERSION + "\n" 
         		+ "Author: Dirk Pawlaszczyk \n\n"

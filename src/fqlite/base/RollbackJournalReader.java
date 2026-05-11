@@ -8,12 +8,7 @@ import java.nio.file.Paths;
 import java.nio.file.StandardOpenOption;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
-import java.util.BitSet;
-import java.util.Enumeration;
-import java.util.Hashtable;
-import java.util.Iterator;
-import java.util.LinkedList;
-import java.util.List;
+import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.Future;
@@ -50,7 +45,9 @@ public class RollbackJournalReader{
 
 	/* this is a multi-threaded program -> all data are saved to the list first*/
 	ConcurrentHashMap<String,ObservableList<ObservableList<String>>> resultlist = new ConcurrentHashMap<>();
-	
+	public ConcurrentHashMap<String,ObservableList<ObservableList<byte[]>>> hexdumplist = new ConcurrentHashMap<>();
+
+
 	/* This buffer holds RollbackJournal-file in RAM */
 	ByteBuffer rollbackjournal;
 
@@ -276,20 +273,28 @@ public class RollbackJournalReader{
 	
 	}
 	
-	private void updateResultSet(LinkedList<String> line) 
+	private void updateResultSet(DataRow row)
 	{
-		// entry for table name already exists  
-		if (resultlist.containsKey(line.getFirst()))
+		// entry for table name already exists
+		if (resultlist.containsKey(row.line().getFirst()))
 		{
-			     ObservableList<ObservableList<String>> tablelist = resultlist.get(line.getFirst());
-			     tablelist.add(FXCollections.observableList(line)); // add row 
+			ObservableList<ObservableList<String>> tablelist = resultlist.get(row.line().getFirst());
+			tablelist.add(FXCollections.observableList(row.line()));  // add row
+
+			// save the original bytes-values of the table row separately to a different list
+			ObservableList<ObservableList<byte[]>> hexlist = hexdumplist.get(row.line().getFirst());
+			hexlist.add(FXCollections.observableList(row.hexdump()));
 		}
-		
+
 		// create a new data set since the table name occurs for the first time
 		else {
-		          ObservableList<ObservableList<String>> tablelist = FXCollections.observableArrayList();
-				  tablelist.add(FXCollections.observableList(line)); // add row 
-				  resultlist.put(line.getFirst(),tablelist);  	
+			ObservableList<ObservableList<String>> tablelist = FXCollections.observableArrayList();
+			tablelist.add(FXCollections.observableList(row.line())); // add row
+			resultlist.put(row.line().getFirst(),tablelist);
+
+			ObservableList<ObservableList<byte[]>> hexlist = FXCollections.observableArrayList();
+			hexlist.add(FXCollections.observableList(row.hexdump()));
+			hexdumplist.put(row.line().getFirst(),hexlist);
 		}
 	}
 
@@ -440,18 +445,20 @@ public class RollbackJournalReader{
             LinkedList<String> record = null;
 			
 			try {
-				record = ct.readRecord(celloff, buffer, pagenumber_maindb, visit, Integer.MAX_VALUE, withoutROWID, Global.ROLLBACK_JOURNAL_FILE, pageoffset + celloff);
+				DataRow r = ct.readRecord(celloff, buffer, pagenumber_maindb, visit, Integer.MAX_VALUE, withoutROWID, Global.ROLLBACK_JOURNAL_FILE, pageoffset + celloff);
+				record = r.line();
+
+				// add new line to output
+				if (null != record && record.size() > 0) {
+					output.add(record);
+					updateResultSet(r);
+				}
+
 			} catch (IOException e) {
 				e.printStackTrace();
 			}
 
-			// add new line to output
-			if (null != record && record.size() > 0) {
 
-		
-				output.add(record);
-				updateResultSet(record);
-			}
 
 		} // end of for - cell pointer
 
@@ -543,8 +550,6 @@ public class RollbackJournalReader{
 			/* start carving on the complete page */
 			c = new Carver(job, buffer, content, visit, ps);
 
-		// Matcher mat = null;
-		// boolean match = false;
 
 		/* try to get component schema for the current page, if possible */
 		TableDescriptor tdesc = null;
@@ -729,9 +734,9 @@ public class RollbackJournalReader{
 			while(tables.hasMoreElements())
 			{	
 				String tablename = tables.nextElement();
-		        /* get tree path, i.e. /data bases/02-05.db/users */
+		        /* get tree path, i.e. /databases/02-05.db/users */
 				String rpath = job.guiroltab.get(tablename);
-				job.gui.update_table(rpath,dataSets.get(tablename),false);
+				job.gui.update_table(rpath,dataSets.get(tablename),hexdumplist.get(tablename),false);
 				
 			}
 		} 
@@ -906,4 +911,5 @@ public class RollbackJournalReader{
 
 		}
 	}
+
 }

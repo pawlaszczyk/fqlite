@@ -1,0 +1,89 @@
+/* ================================================================
+   sql-editor-theme.css
+   Dark- und Light-Styles für die RichTextFX CodeArea im SQLWindow.
+
+   RichTextFX rendert Text NICHT über den normalen JavaFX CSS-Baum,
+   daher reicht -fx-text-fill auf der CodeArea selbst nicht aus.
+   Stattdessen werden die internen Selektoren .paragraph-text und
+   .text direkt angesprochen, scoped unter den Theme-Klassen
+   .code-area-dark bzw. .code-area-light.
+   ================================================================ */
+
+/* ── DARK ──────────────────────────────────────────────────────── */
+.code-area-dark {
+    -fx-background-color: #181d2a;
+}
+
+.code-area-dark .virtual-flow,
+.code-area-dark .clipped-container,
+.code-area-dark .sheet,
+.code-area-dark .cell,
+.code-area-dark .paragraph-box {
+    -fx-background-color: #181d2a;
+}
+
+/* Standard-Fließtext (ungekennzeichnete Spans) */
+.code-area-dark .paragraph-text .text {
+    -fx-fill: #c8d0e8;
+}
+
+/* Zeilennummern-Gutter */
+.code-area-dark .lineno {
+    -fx-background-color: #1a1f2e;
+    -fx-text-fill: #5a6a8a;
+}
+
+/* Caret */
+.code-area-dark .caret {
+    -fx-stroke: #c8d0e8;
+}
+
+/* Selektion */
+.code-area-dark .selection {
+    -fx-fill: #3a4a7a;
+}
+
+/* Selektierter Text muss lesbar bleiben */
+.code-area-dark .paragraph-text:selected .text,
+.code-area-dark .paragraph-text .text:selected {
+    -fx-fill: #ffffff;
+}
+
+/* ── LIGHT ─────────────────────────────────────────────────────── */
+.code-area-light {
+    -fx-background-color: #ffffff;
+}
+
+.code-area-light .virtual-flow,
+.code-area-light .clipped-container,
+.code-area-light .sheet,
+.code-area-light .cell,
+.code-area-light .paragraph-box {
+    -fx-background-color: #ffffff;
+}
+
+/* Standard-Fließtext */
+.code-area-light .paragraph-text .text {
+    -fx-fill: #1a2040;
+}
+
+/* Zeilennummern-Gutter */
+.code-area-light .lineno {
+    -fx-background-color: #e8ebf4;
+    -fx-text-fill: #8898c0;
+}
+
+/* Caret */
+.code-area-light .caret {
+    -fx-stroke: #1a2040;
+}
+
+/* Selektion */
+.code-area-light .selection {
+    -fx-fill: #c0d0f0;
+}
+
+.code-area-light .paragraph-text:selected .text,
+.code-area-light .paragraph-text .text:selected {
+    -fx-fill: #0a1030;
+}

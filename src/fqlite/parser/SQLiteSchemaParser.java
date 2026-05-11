@@ -33,6 +33,9 @@ public class SQLiteSchemaParser {
 	 */
 	public static void parse(Job job, String tablename, int root, String sql) {
 
+		// Remove comments from sql statement
+		sql = removeSingleLineComments(sql);
+
 		if (!SQLValidator.validate(sql).isValid())
 			return;
 
@@ -141,6 +144,52 @@ public class SQLiteSchemaParser {
 			}	
 		}
 			
+	}
+
+
+	/**
+	 * Entfernt einzeilige SQL-Kommentare (-- ...) aus einem SQL-String.
+	 * Berücksichtigt dabei String-Literale, sodass '--' innerhalb von
+	 * einfachen Anführungszeichen nicht entfernt wird.
+	 *
+	 * @param sql Der SQL-String mit Kommentaren
+	 * @return Der SQL-String ohne einzeilige Kommentare
+	 */
+	public static String removeSingleLineComments(String sql) {
+		StringBuilder result = new StringBuilder();
+		boolean inStringLiteral = false;
+		int i = 0;
+
+		while (i < sql.length()) {
+			char c = sql.charAt(i);
+
+			// Wechsel in/aus String-Literal (einfache Anführungszeichen)
+			if (c == '\'' && !inStringLiteral) {
+				inStringLiteral = true;
+				result.append(c);
+				i++;
+			} else if (c == '\'' && inStringLiteral) {
+				// Escaped quote ('') innerhalb eines Literals behandeln
+				if (i + 1 < sql.length() && sql.charAt(i + 1) == '\'') {
+					result.append("''");
+					i += 2;
+				} else {
+					inStringLiteral = false;
+					result.append(c);
+					i++;
+				}
+			} else if (!inStringLiteral && c == '-' && i + 1 < sql.length() && sql.charAt(i + 1) == '-') {
+				// Kommentar gefunden – bis zum Zeilenende überspringen
+				while (i < sql.length() && sql.charAt(i) != '\n') {
+					i++;
+				}
+			} else {
+				result.append(c);
+				i++;
+			}
+		}
+
+		return result.toString();
 	}
 
 }

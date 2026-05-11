@@ -1,5 +1,6 @@
 package fqlite.rag;
 
+import fqlite.base.ThemeManager;
 import javafx.application.Platform;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
@@ -308,6 +309,7 @@ public class HuggingFaceDownloadDialog {
         );
 
         Scene scene = new Scene(mainLayout, 550, 720);
+        ThemeManager.register(scene);   // ← apply global theme
         dialog.setScene(scene);
         dialog.show();
     }
@@ -433,10 +435,12 @@ public class HuggingFaceDownloadDialog {
             throws IOException, InterruptedException, ExecutionException {
 
         String urlString = String.format("https://huggingface.co/%s/resolve/main/%s", modelId, fileName);
+        System.out.println("urlString: " + urlString);
         Path targetFile = targetDir.resolve(fileName);
 
         // determine file size
         HttpURLConnection connection = (HttpURLConnection) new URL(urlString).openConnection();
+        connection.setConnectTimeout(10000);
         connection.setRequestMethod("HEAD");
         connection.setRequestProperty("User-Agent", "Mozilla/5.0");
 
@@ -445,6 +449,7 @@ public class HuggingFaceDownloadDialog {
 
         if (fileSize <= 0) {
             // fallback to single-thread
+            System.out.println("modelID: " + modelId + ", fileName: " + fileName);
             downloadSingleFileWithResume(modelId, fileName, targetDir);
             return fileSize;
         }
@@ -458,6 +463,7 @@ public class HuggingFaceDownloadDialog {
 
         if (acceptRanges == null || !acceptRanges.equals("bytes")) {
             // server does not accept ranges -> use fallback
+            System.out.println("modelID: " + modelId + ", fileName: " + fileName);
             downloadSingleFileWithResume(modelId, fileName, targetDir);
             return fileSize;
         }
@@ -728,6 +734,7 @@ public class HuggingFaceDownloadDialog {
         layout.getChildren().addAll(titleLabel, listView, buttonBox);
 
         Scene scene = new Scene(layout, 650, 500);
+        ThemeManager.register(scene);   // ← apply global theme
         historyStage.setScene(scene);
         historyStage.show();
     }

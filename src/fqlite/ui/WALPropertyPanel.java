@@ -7,13 +7,8 @@ import javafx.beans.property.SimpleStringProperty;
 import javafx.beans.value.ObservableValue;
 import javafx.collections.FXCollections;
 import javafx.collections.ObservableList;
-import javafx.scene.control.Label;
-import javafx.scene.control.Tab;
-import javafx.scene.control.TabPane;
-import javafx.scene.control.TableColumn;
+import javafx.scene.control.*;
 import javafx.scene.control.TableColumn.CellDataFeatures;
-import javafx.scene.control.TableRow;
-import javafx.scene.control.TableView;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.StackPane;
 import javafx.scene.layout.VBox;
@@ -43,16 +38,12 @@ public class WALPropertyPanel extends StackPane {
 	{
 		
 		    javafx.scene.control.TextArea headerinfo = new javafx.scene.control.TextArea();
-		    headerinfo.setEditable(false);
-		    headerinfo.setStyle("-fx-font-alignment: center");
-		    headerinfo.setText(info.toString());
-		    StackPane sp =  new StackPane();
-		    sp.getChildren().add(headerinfo);
-			Tab headerinfotab = new Tab("File Info",sp);
+		   	ScrollPane fileInfoPanel = info.getPanel();
+			Tab headerinfotab = new Tab("File Info",fileInfoPanel);
 	        tabpane.getTabs().add(headerinfotab);
-		
-		
-	        String[] column ={"Offset", "Property", "Value"};
+
+
+			String[] column ={"Offset", "Property", "Value"};
 			
 			TableView table = new TableView<>();
 			

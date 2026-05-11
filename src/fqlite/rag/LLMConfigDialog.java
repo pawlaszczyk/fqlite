@@ -1,6 +1,7 @@
 package fqlite.rag;
 
 import fqlite.base.Global;
+import fqlite.base.ThemeManager;
 import javafx.application.Application;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
@@ -161,6 +162,11 @@ public class LLMConfigDialog extends Application {
 
         // Load saved values
         loadConfig();
+
+        // Register with ThemeManager once the dialog's scene is available
+        dialog.setOnShown(e ->
+            ThemeManager.register(dialog.getDialogPane().getScene())
+        );
 
         // Show dialog
         dialog.showAndWait().ifPresent(response -> {

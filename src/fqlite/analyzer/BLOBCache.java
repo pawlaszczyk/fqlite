@@ -49,6 +49,7 @@ public class BLOBCache {
 	 * @return a BLOBElement
 	 */
 	public BLOBElement get(String key){
+		//System.out.println("Cache get() BLOB " + key );
 		return cache.get(key);
 	}
 	
@@ -58,6 +59,7 @@ public class BLOBCache {
 	 * @param value the value to store
 	 */
 	public void put(String key, BLOBElement value){
+		//System.out.println("Cache put() BLOB " + key );
 		cache.put(key,value);
 	}
 	
@@ -68,7 +70,6 @@ public class BLOBCache {
 	 */
 	public String getHexString(String path){
 
-		System.out.println("path:"+path);
 		String result;
 		BLOBElement e = get(path);
 		if (e ==null)
@@ -80,8 +81,7 @@ public class BLOBCache {
 	}
 	
 	public String getASCII(String path){
-	
-		
+
 		ByteBuffer bf = ByteBuffer.wrap(get(path).binary);
 		bf.position(0);
 		char[] result = new char[bf.limit()];

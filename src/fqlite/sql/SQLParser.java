@@ -71,7 +71,15 @@ public class SQLParser {
 			InMemoryDatabase mdb = DBManager.get(dbname);
 			// for possible error windows we have to forward the main stage
 			mdb.setStage(stage);
-			ResultSet rs = mdb.execute(command);
+
+			ResultSet rs = null;
+			try{
+				rs = mdb.execute(command);
+			}catch(Exception e){}
+
+			if (rs == null)
+				return;
+
 			ObservableList<ObservableList> obdata = FXCollections
 					.observableList(new ArrayList<>(rs.getFetchSize()));
 

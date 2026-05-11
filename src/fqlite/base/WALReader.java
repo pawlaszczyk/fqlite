@@ -8,14 +8,7 @@ import java.nio.file.Paths;
 import java.nio.file.StandardOpenOption;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
-import java.util.BitSet;
-import java.util.Enumeration;
-import java.util.HashMap;
-import java.util.Hashtable;
-import java.util.Iterator;
-import java.util.LinkedList;
-import java.util.List;
-import java.util.TreeMap;
+import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.Future;
@@ -63,8 +56,8 @@ public class WALReader{
 	
 	/* this is a multi-threaded program -> all data are saved to the list first*/
 	public ConcurrentHashMap<String,ObservableList<ObservableList<String>>> resultlist = new ConcurrentHashMap<>();
+	public ConcurrentHashMap<String,ObservableList<ObservableList<byte[]>>> hexdumplist = new ConcurrentHashMap<>();
 
-	
 	/* An asynchronous channel for reading, writing, and manipulating a file. */
 	public AsynchronousFileChannel file;
 
@@ -154,7 +147,6 @@ public class WALReader{
 	 * This method is the main processing loop. First, the header is analysed.
 	 * Afterwards, all write-ahead frames are recovered.
 	 * 
-	 * @return
 	 */
 	public void parse() {
 		int framenumber = 0;
@@ -175,7 +167,7 @@ public class WALReader{
 			return;
 		}
 
-		/** Caution!!! We read the complete file into RAM **/
+		// Caution!!! We read the complete file into RAM
 		try {
 			readFileIntoBuffer();
 		} catch (IOException e) {
@@ -222,7 +214,6 @@ public class WALReader{
 		 *  Source: https://www.sqlite.org/fileformat2.html#walformat
 		 */
 		
-		/********************************************************************/
 		/* Check the MAGIC NUMBERS 0x377f0682 or 0x377f0683 */
 
 		byte header[] = new byte[4];
@@ -244,7 +235,6 @@ public class WALReader{
 			AppLog.error("Doesn't seem to be an valid WAL file. Wrong header");
 		}
 
-		/*******************************************************************/
 
 		/* at offset 4 */
 		buffer.position(4);
@@ -344,7 +334,7 @@ public class WALReader{
 		do
 		{
 			/* 24 Byte - with six 4-Byte big endian values */
-			byte frameheader[] = new byte[24];
+			byte[] frameheader = new byte[24];
 			wal.position(framestart);
 			wal.get(frameheader);
 			ByteBuffer fheader = ByteBuffer.wrap(frameheader);
@@ -366,18 +356,6 @@ public class WALReader{
 			 *    the content of all frames up to and including the current frame.
 			 */
 			
-			//if (hsalt1 == fsalt1 && hsalt2 == fsalt2)
-			//{
-			//	 AppLog.info("seems to be an valid frame. Condition 1 is true at least. ");
-			//}
-				
-	
-			//AppLog.debug("pagenumber of frame in main db " + pagenumber_maindb);
-	
-			/* now we can read the page - it follows immediately after the frame header */
-	
-			/* read the db page into buffer */
-			//System.out.println(" page number of frame in main db " + pagenumber_maindb);
 			buffer = readPage();
 	
 			numberofpages++;
@@ -451,6 +429,9 @@ public class WALReader{
 		/* convert byte array into a string representation */
 		String content = Auxiliary.bytesToHex2(buffer);
 
+		if(null == content || content.length() == 0)
+			return 0;
+
 		// offset 0
 		buffer.position(0);
 
@@ -480,13 +461,7 @@ public class WALReader{
 			 */
 			buffer.position(0);
 			Integer checksum = buffer.getInt();
-			/* was page dropped? */
-			if (checksum == 0) {
-				// System.out.println(" DROPPED PAGE !!!");
-				/* no overflow page -> carve for data records - we do our best! ;-) */
-				//if(Global.intenseScan)
-				//	carve(content, null);
-			}
+
 			/*
 			 * otherwise it seems to be an overflow page - however, that is not 100% safe!!!
 			 */
@@ -495,12 +470,7 @@ public class WALReader{
 			return 0;
 		}
 
-		if (pagenumber_wal == 12)
-		{
-			System.out.println(" page 12 type ::" + type);
-		}
-		
-			
+
 		/************** skip unknown page types ******************/
 
 		// no leaf page -> skip this page
@@ -537,7 +507,7 @@ public class WALReader{
 		// boolean freeblocks = false;
 		if (type == 8 || type == 13) {
 			// offset 1-2 let us find the first free block offset for carving
-			byte fboffset[] = new byte[2];
+			byte[] fboffset = new byte[2];
 			buffer.position(1);
 			buffer.get(fboffset);
 
@@ -546,12 +516,12 @@ public class WALReader{
 		int ccrstart = job.ps;
 
 		// found Data-Page - determine number of cell pointers at offset 3-4 of page
-		byte cpn[] = new byte[2];
+		byte[] cpn = new byte[2];
 		buffer.position(3);
 		buffer.get(cpn);
 
 		// get start pointer for the cell content region
-		byte ccr[] = new byte[2];
+		byte[] ccr = new byte[2];
 		buffer.position(5);
 
 		ByteBuffer contentregionstart = ByteBuffer.wrap(ccr);
@@ -584,7 +554,7 @@ public class WALReader{
 		for (int i = 0; i < cp; i++) {
 
 			// address of the next cell pointer
-			byte pointer[] = new byte[2];
+			byte[] pointer = new byte[2];
 			if (type == 5)
 				buffer.position(12 + 2 * i);
 			else {
@@ -609,20 +579,24 @@ public class WALReader{
 			}
 			last = celloff;
 			String hls = Auxiliary.Int2Hex(celloff); 
-			hls.trim();
-			
+
 			LinkedList<String> rc = null;
-			
+			LinkedList<byte[]> raw = null;
 
 			try { 
-				rc = ct.readRecord(celloff, buffer, pagenumber_maindb, visit, Integer.MAX_VALUE, withoutROWID,Global.WAL_ARCHIVE_FILE, framestart + 24 + celloff);
+				DataRow result = ct.readRecord(celloff, buffer, pagenumber_maindb, visit, Integer.MAX_VALUE, withoutROWID,Global.WAL_ARCHIVE_FILE, framestart + 24 + celloff);
+
+			    rc = result.line();
+				raw = result.hexdump();
+
 			    if (null == rc)
 			    	continue;
 			} catch (IOException e) {
 				e.printStackTrace();
 			}
 
-			if(rc.size()==0)
+            assert rc != null;
+            if(rc.isEmpty())
 				System.out.println("rc ist leer");
 	
 			
@@ -634,12 +608,17 @@ public class WALReader{
 			rc.add(5,""+frame.framenumber);
 			rc.add(5,""+pagenumber_maindb);
 			rc.add(5,""+frame.committed);
-								
+
+			raw.add(5,null);
+			raw.add(5,null);
+			raw.add(5,null);
+			raw.add(5,null);
+			raw.add(5,null);
+
 			// add new line to output
 			if (null != rc && rc.size() > 0) {
-		
 				output.add(rc);
-				updateResultSet(rc);
+				updateResultSet(new DataRow(rc,raw));
 			}
 
 		} // end of for - cell pointer
@@ -652,7 +631,6 @@ public class WALReader{
 
 		/***************************************************************
 		 * STEP 3:
-		 * 
 		 * Scan unallocated space between the header and  the cell
 		 * content region 
 		 * 
@@ -671,7 +649,7 @@ public class WALReader{
 		 * artefacts in the unallocated space.
 		 */
 		
-		byte garbage[] = new byte[2];
+		byte[] garbage = new byte[2];
 		
 		int garbageoffset = -1;
 		do
@@ -705,16 +683,15 @@ public class WALReader{
 			
 			/* Tricky thing: data record could be partly overwritten with a new data record!!!  */
 			/* We should read until the end of the unallocated area and not above! */
-			rc = ct.readRecord(buffer.position(), buffer, ps, visit, ccrstart - buffer.position(), withoutROWID,Global.WAL_ARCHIVE_FILE, framestart + 24 + buffer.position());
-			
-			// add new line to output
-			if (null != rc) { 
-				
+			DataRow resultset = ct.readRecord(buffer.position(), buffer, ps, visit, ccrstart - buffer.position(), withoutROWID,Global.WAL_ARCHIVE_FILE, framestart + 24 + buffer.position());
+			rc = resultset.line();
 
+			// add new line to output
+			if (null != rc) {
 				String secondcol = rc.get(1);
 				secondcol = Global.DELETED_RECORD_IN_PAGE  + secondcol;
 				rc.set(1,secondcol);
-				updateResultSet(rc);
+				updateResultSet(new DataRow(rc,resultset.hexdump()));
 			}
 			
 		}
@@ -740,46 +717,34 @@ public class WALReader{
 	}
 	
 	
-	private void updateResultSet(LinkedList<String> line) 
+	private void updateResultSet(DataRow row)
 	{
 		// entry for table name already exists  
-		if (resultlist.containsKey(line.getFirst()))
+		if (resultlist.containsKey(row.line().getFirst()))
 		{
-			     ObservableList<ObservableList<String>> tablelist = resultlist.get(line.getFirst());
-			     tablelist.add(FXCollections.observableList(line));  // add row 
+			     ObservableList<ObservableList<String>> tablelist = resultlist.get(row.line().getFirst());
+			     tablelist.add(FXCollections.observableList(row.line()));  // add row
+
+			     // save the original bytes-values of the table row separately to a different list
+			     ObservableList<ObservableList<byte[]>> hexlist = hexdumplist.get(row.line().getFirst());
+				 hexlist.add(FXCollections.observableList(row.hexdump()));
 		}
 		
 		// create a new data set since the table name occurs for the first time
 		else {
 		          ObservableList<ObservableList<String>> tablelist = FXCollections.observableArrayList();
-				  tablelist.add(FXCollections.observableList(line)); // add row 
-				  resultlist.put(line.getFirst(),tablelist);  	
+				  tablelist.add(FXCollections.observableList(row.line())); // add row
+				  resultlist.put(row.line().getFirst(),tablelist);
+
+				  ObservableList<ObservableList<byte[]>> hexlist = FXCollections.observableArrayList();
+				  hexlist.add(FXCollections.observableList(row.hexdump()));
+				  hexdumplist.put(row.line().getFirst(),hexlist);
 		}
 	}
 
 	/**
-	 * Quick lookup. Does a given hex-string start with Zeros?
-	 * 
-	 * @param s the String to check
-	 * @return true if zero bytes could be found
-	 */
-	static boolean allCharactersZero(String s) {
-		if (!s.startsWith("0000"))
-			return false;
-
-		int n = s.length();
-		for (int i = 1; i < n; i++)
-			if (s.charAt(i) != s.charAt(0))
-				return false;
-
-		return true;
-	}
-
-	/**
 	 * This method is used to read the database file into RAM.
-	 * 
-	 * @return a read-only ByteBuffer representing the WAL file content
-	 * @throws IOException
+	 * @throws IOException error, if  file can't be accessed
 	 */
 	private void readFileIntoBuffer() throws IOException {
 
@@ -806,7 +771,7 @@ public class WALReader{
 	 * Starting with the current position of the wal-ByteBuffer, read the next
 	 * db-page.
 	 * 
-	 * @return
+	 * @return the database page as a buffer object.
 	 */
 	protected ByteBuffer readPage() {
 
@@ -830,9 +795,6 @@ public class WALReader{
 			/* start carving on the complete page */
 			c = new Carver(job, buffer, content, visit, ps);
 
-		// Matcher mat = null;
-		// boolean match = false;
-
 		/* try to get component schema for the current page, if possible */
 		TableDescriptor tdesc = null;
 		if (job.pages.length > ps) {
@@ -855,7 +817,7 @@ public class WALReader{
 		}
 
 		LinkedList<Gap> gaps = findGaps();
-		if (gaps.size() == 0) {
+		if (gaps.isEmpty()) {
 			AppLog.debug("no gaps anymore. Stopp search");
 			return;
 		}
@@ -877,42 +839,36 @@ public class WALReader{
 
 			gaps = findGaps();
 
-			for (int a = 0; a < gaps.size(); a++) {
+            for (Gap next : gaps) {
 
-				Gap next = gaps.get(a);
+                if (next.to - next.from > 10)
+                    /* do we have at least one match? */
+                    if (c.carve(next.from + 4, next.to, stm, CarverTypes.NORMAL, tab.get(n)) != Global.CARVING_ERROR) {
+                        AppLog.debug("*****************************  STEP NORMAL finished with matches");
 
-				if (next.to - next.from > 10)
-					/* do we have at least one match? */
-					if (c.carve(next.from + 4, next.to, stm, CarverTypes.NORMAL, tab.get(n))!= Global.CARVING_ERROR) {
-						AppLog.debug("*****************************  STEP NORMAL finished with matches");
-
-					}
-			}
+                    }
+            }
 
 			gaps = findGaps();
 
-			for (int a = 0; a < gaps.size(); a++) {
+            for (Gap next : gaps) {
 
-				Gap next = gaps.get(a);
+                if (c.carve(next.from + 4, next.to, stm, CarverTypes.COLUMNSONLY, tab.get(n)) != Global.CARVING_ERROR) {
+                    AppLog.debug("*****************************  STEP COLUMNSONLY finished with matches");
 
-				if (c.carve(next.from + 4, next.to, stm, CarverTypes.COLUMNSONLY, tab.get(n)) != Global.CARVING_ERROR) {
-					AppLog.debug("*****************************  STEP COLUMNSONLY finished with matches");
-
-				}
-			}
+                }
+            }
  
 			gaps = findGaps();
 
-			for (int a = 0; a < gaps.size(); a++) {
+            for (Gap next : gaps) {
 
-				Gap next = gaps.get(a);
+                if (c.carve(next.from + 4, next.to, stm, CarverTypes.FIRSTCOLUMNMISSING, tab.get(n)) != Global.CARVING_ERROR) {
+                    AppLog.debug("*****************************  STEP FIRSTCOLUMNMISSING finished with matches");
 
-				if (c.carve(next.from + 4, next.to, stm, CarverTypes.FIRSTCOLUMNMISSING, tab.get(n)) != Global.CARVING_ERROR) {
-					AppLog.debug("*****************************  STEP FIRSTCOLUMNMISSING finished with matches");
+                }
 
-				}
-
-			}
+            }
 
 			/**
 			 * When a record deletion occurs, the first 2 bytes of the cell are set to the
@@ -982,19 +938,8 @@ public class WALReader{
 			
 				LinkedList<String> line = lines.next();
 
-			   	
-			   	/* if table name is empty -> assign data record to table fqlite_freelist */
-			   	if (line.getFirst().trim().length()==0)
-			   	{
-			 
-			        // Add the new element add the beginning
-			        //line.add(0,"fqlite_freelist"); 
-			 
-			   	}
-	
-			   	
 			   	// is there already a data set for this particular table
-			   	if (dataSets.containsKey(line.get(0)))
+			   	if (dataSets.containsKey(line.getFirst()))
 				{
 					 
 					     ObservableList<ObservableList<String>> tablelist = dataSets.get(line.getFirst());
@@ -1020,15 +965,15 @@ public class WALReader{
 			{	
 					String tablename = tables.nextElement();
 			        
-					/* there are some times false-positive matches -> just skip them */
+					/* there are sometimes false-positive matches -> just skip them */
 					if(tablename.startsWith("null#"))
 						continue;
 		
 					String walpath = job.guiwaltab.get(tablename);
 					if (walpath == null)
 						continue;
-					job.gui.update_table(walpath,dataSets.get(tablename),true);
-					
+					job.gui.update_table(walpath,dataSets.get(tablename),hexdumplist.get(tablename),true);
+
 			}	
 				
 			
@@ -1058,7 +1003,7 @@ public class WALReader{
 	/**
 	 * Check the BitSet for gaps, i.e. regions we still have to carve.
 	 * 
-	 * @return
+	 * @return A list with Gap-objects.
 	 */
 	public LinkedList<Gap> findGaps() {
 		LinkedList<Gap> gaps = new LinkedList<Gap>();
@@ -1120,9 +1065,6 @@ public class WALReader{
 			/* start carving on the complete page */
 			c = new Carver(job, buffer, content, visit, pagenumber_maindb);
 
-		// Matcher mat = null;
-		// boolean match = false;
-
 		/* try to get component schema for the current page, if possible */
 		TableDescriptor tdesc = null;
 		if (job.pages.length > pagenumber_maindb) {
@@ -1145,7 +1087,7 @@ public class WALReader{
 		}
 
 		LinkedList<Gap> gaps = findGaps();
-		if (gaps.size() == 0) {
+		if (gaps.isEmpty()) {
 			AppLog.debug("no gaps anymore. Stopp search");
 			return;
 		}
@@ -1155,7 +1097,6 @@ public class WALReader{
 			tdesc = tab.get(n);
 			AppLog.debug("pagenumber :: " + pagenumber_maindb + " component size :: " + tab.size());
 			AppLog.debug("n " + n);
-			// TableDescriptor tdb = tab.get(n);
 
 			/* access pattern for a particular component */
 			String tablename = tab.get(n).tblname;
@@ -1167,45 +1108,37 @@ public class WALReader{
 
 			gaps = findGaps();
 
-			for (int a = 0; a < gaps.size(); a++) {
+            for (Gap next : gaps) {
 
-				Gap next = gaps.get(a);
+                if (next.to - next.from > 10)
+                    /* do we have at least one match? */
+                    if (c.carve(next.from + 4, next.to, stm, CarverTypes.NORMAL, tab.get(n)) != Global.CARVING_ERROR) {
+                        AppLog.debug("*****************************  STEP NORMAL finished with matches");
 
-				if (next.to - next.from > 10)
-					/* do we have at least one match? */
-					if (c.carve(next.from + 4, next.to, stm, CarverTypes.NORMAL, tab.get(n)) != Global.CARVING_ERROR) {
-						AppLog.debug("*****************************  STEP NORMAL finished with matches");
-
-					}
-			}
+                    }
+            }
 
 			gaps = findGaps();
 
-			for (int a = 0; a < gaps.size(); a++) {
+            for (Gap next : gaps) {
 
-				Gap next = gaps.get(a);
+                if (c.carve(next.from + 4, next.to, stm, CarverTypes.COLUMNSONLY, tab.get(n)) != Global.CARVING_ERROR) {
+                    AppLog.debug("*****************************  STEP COLUMNSONLY finished with matches");
 
-				if (c.carve(next.from + 4, next.to, stm, CarverTypes.COLUMNSONLY, tab.get(n)) != Global.CARVING_ERROR) {
-					AppLog.debug("*****************************  STEP COLUMNSONLY finished with matches");
-
-				}
-			}
+                }
+            }
 
 			gaps = findGaps();
 
-			for (int a = 0; a < gaps.size(); a++) {
+            for (Gap next : gaps) {
 
-				Gap next = gaps.get(a);
+                if (c.carve(next.from + 4, next.to, stm, CarverTypes.FIRSTCOLUMNMISSING, tab.get(n)) != Global.CARVING_ERROR) {
+                    AppLog.debug("*****************************  STEP FIRSTCOLUMNMISSING finished with matches");
 
-				if (c.carve(next.from + 4, next.to, stm, CarverTypes.FIRSTCOLUMNMISSING, tab.get(n)) != Global.CARVING_ERROR) {
-					AppLog.debug("*****************************  STEP FIRSTCOLUMNMISSING finished with matches");
+                }
 
-				}
-
-			}
+            }
 
 		}
 	}
-	
-	
 }

@@ -47,7 +47,8 @@ public class SqliteElement {
         } else
 			s = toString(value,false,false);
         assert s != null;
-        return parseBLOB(s) + s;
+        //return parseBLOB(s) + s;
+		return s;
 	}
 	
 	
@@ -89,12 +90,10 @@ public class SqliteElement {
 			return String.valueOf(decodeFloat64(value)).replace(",",".");
 		else if (type == SerialTypes.BLOB)
 			 {  
-			  
-			  if (truncBLOB && value.length > 32)
-				  return String.valueOf(Auxiliary.bytesToHex3(Arrays.copyOfRange(value, 0, 32)));
-			  
-			  return String.valueOf(Auxiliary.bytesToHex3(Arrays.copyOfRange(value, 0, value.length)));   	
-			  	  
+			   // if (truncBLOB && value.length > 32)
+			   //	  return String.valueOf(Auxiliary.bytesToHex3(Arrays.copyOfRange(value, 0, 10)));
+			   // return String.valueOf(Auxiliary.bytesToHex3(Arrays.copyOfRange(value, 0, 10)));
+			 return "[BLOB]";
 	    }
 		}catch(Exception err){
 			System.out.println();
@@ -109,25 +108,25 @@ public class SqliteElement {
 	public static String parseBLOB(String blob)
 	{
 		
-		if(blob.contains("ffd8"))
+		if(blob.startsWith("ffd8"))
 			return "<jpg>";
-		if(blob.contains("89504e470d0a1a"))
+		if(blob.startsWith("89504e470d0a1a"))
 		    return "<png>";
 		if(blob.startsWith("003b"))
 		    return "<gif>";
 		if(blob.startsWith("424d"))
 		    return "<bmp>";
-		if(blob.contains("25504446"))
+		if(blob.startsWith("25504446"))
 			return "<pdf>";			
 		if(blob.startsWith("62706c697374"))
 			return "<plist>";			
 		if(blob.startsWith("49492a00") || blob.startsWith("4D4D002A"))
 			return "<tiff>";			
-		if(blob.contains("474946383761") || blob.startsWith("474946383961"))
+		if(blob.startsWith("474946383761") || blob.startsWith("474946383961"))
 			return "<gif>";			
 		if(blob.startsWith("1f8b"))
 			return "<gzip>";
-		if(blob.contains("66747970686569") || blob.contains("667479706d"))
+		if(blob.startsWith("66747970686569") || blob.contains("667479706d"))
 			return "<heic>";
 		if(blob.startsWith("aced0005"))
 			return "<java>";

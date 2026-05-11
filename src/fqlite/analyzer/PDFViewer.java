@@ -1,111 +1,132 @@
 package fqlite.analyzer;
 
-import com.dlsc.pdfviewfx.PDFView;
-import fr.brouillard.oss.cssfx.CSSFX;
 import javafx.application.Application;
-import javafx.beans.binding.Bindings;
+import javafx.application.Platform;
+import javafx.beans.property.ObjectProperty;
+import javafx.beans.property.SimpleObjectProperty;
 import javafx.collections.ObservableList;
-
-import java.awt.print.PrinterException;
-import java.awt.print.PrinterJob;
+import javafx.geometry.Insets;
+import javafx.geometry.Pos;
 import javafx.scene.Scene;
-import javafx.scene.control.Menu;
-import javafx.scene.control.MenuBar;
-import javafx.scene.control.MenuItem;
-import javafx.scene.control.SeparatorMenuItem;
+import javafx.scene.control.*;
 import javafx.scene.input.KeyCombination;
 import javafx.scene.layout.Priority;
+import javafx.scene.layout.StackPane;
 import javafx.scene.layout.VBox;
 import javafx.stage.FileChooser;
 import javafx.stage.FileChooser.ExtensionFilter;
 import javafx.stage.Stage;
 
-import javax.swing.SwingUtilities;
+import java.awt.Desktop;
 import java.io.File;
 
+/**
+ * A simple PDF viewer that delegates rendering to the OS default PDF application.
+ * No external libraries are required.
+ */
 public class PDFViewer extends Application {
 
-	 private FileChooser chooser;
-	    
-	   
-	    @Override
-	    public void start(Stage primaryStage) {
-	        PDFView pdfView = new PDFView();
+	/** The currently loaded PDF file (null = no file loaded). */
+	private final ObjectProperty<File> currentFile = new SimpleObjectProperty<>(null);
 
-	        MenuItem loadItem = new MenuItem("Load PDF...");
-	        loadItem.setAccelerator(KeyCombination.valueOf("SHORTCUT+o"));
-	        loadItem.setOnAction(evt -> {
-	            if (chooser == null) {
-	                chooser = new FileChooser();
-	                chooser.setTitle("Load PDF File");
-	                final ExtensionFilter filter = new ExtensionFilter("PDF Files", "*.pdf");
-	                chooser.getExtensionFilters().add(filter);
-	                chooser.setSelectedExtensionFilter(filter);
-	            }
+	private FileChooser chooser;
 
-	            final File file = chooser.showOpenDialog(pdfView.getScene().getWindow());
-	            if (file != null) {
-	                pdfView.load(file);
-	            }
-	        });
+	@Override
+	public void start(Stage primaryStage) {
 
-	        //try {
-	            //pdfView.load(getClass().getResourceAsStream("/tesla3-owners-manual-short.pdf"));
-	        //} catch (Exception e) {
-	        //    e.printStackTrace();
-	        //}
+		// ── Placeholder area ─────────────────────────────────────────────────
+		Label placeholder = new Label("No PDF loaded.\nUse File → Load PDF… to open a file.");
+		placeholder.setStyle("-fx-text-fill: gray; -fx-font-size: 14; -fx-text-alignment: center;");
+		placeholder.setAlignment(Pos.CENTER);
 
-	        MenuItem closeItem = new MenuItem("Close PDF");
-	        closeItem.setAccelerator(KeyCombination.valueOf("SHORTCUT+c"));
-	        closeItem.setOnAction(evt -> pdfView.unload());
-	        closeItem.disableProperty().bind(Bindings.isNull(pdfView.documentProperty()));
+		Label fileLabel = new Label("No file selected.");
+		fileLabel.setStyle("-fx-text-fill: #555; -fx-font-size: 12;");
+		fileLabel.setPadding(new Insets(6, 10, 6, 10));
 
-	        MenuItem printItem = new MenuItem("Print PDF...");
-	        printItem.setAccelerator(KeyCombination.valueOf("SHORTCUT+p"));
-	        printItem.setOnAction(evt -> {
-	            SwingUtilities.invokeLater(() -> {
-	                PDFView.Document pdfDoc = pdfView.getDocument();
-	                if (pdfDoc != null) {
-	                    PrinterJob job = PrinterJob.getPrinterJob();
-	                    job.setPageable(pdfDoc.getPageable());
-	                    if (job.printDialog()) {
-	                        try {
-	                            job.print();
-	                        } catch (PrinterException e) {
-	                            e.printStackTrace();
-	                        }
-	                    }
-	                }
-	            });
-	        });
-	        printItem.disableProperty().bind(Bindings.isNull(pdfView.documentProperty()));
+		currentFile.addListener((obs, old, file) ->
+				fileLabel.setText(file != null ? "Loaded: " + file.getName() : "No file selected.")
+		);
 
-	        Menu fileMenu = new Menu("File");
-	        ObservableList<MenuItem> fileMenuItems = fileMenu.getItems();
-	        fileMenuItems.add(loadItem);
-	        fileMenuItems.add(closeItem);
-	        fileMenuItems.add(new SeparatorMenuItem());
-	        fileMenuItems.add(printItem);
+		StackPane contentArea = new StackPane(placeholder);
+		contentArea.setStyle("-fx-background-color: #f4f4f4;");
+		VBox.setVgrow(contentArea, Priority.ALWAYS);
 
-	        MenuBar menuBar = new MenuBar(fileMenu);
-	        menuBar.setUseSystemMenuBar(false);
+		// ── Menu ─────────────────────────────────────────────────────────────
+		MenuItem loadItem = new MenuItem("Load PDF…");
+		loadItem.setAccelerator(KeyCombination.valueOf("SHORTCUT+O"));
+		loadItem.setOnAction(evt -> {
+			if (chooser == null) {
+				chooser = new FileChooser();
+				chooser.setTitle("Load PDF File");
+				ExtensionFilter filter = new ExtensionFilter("PDF Files", "*.pdf");
+				chooser.getExtensionFilters().add(filter);
+				chooser.setSelectedExtensionFilter(filter);
+			}
+			File file = chooser.showOpenDialog(primaryStage);
+			if (file != null) {
+				loadAndOpen(file);
+			}
+		});
 
-	        VBox.setVgrow(pdfView, Priority.ALWAYS);
-	        VBox box = new VBox(menuBar, pdfView);
-	        box.setFillWidth(true);
+		MenuItem closeItem = new MenuItem("Close PDF");
+		closeItem.setAccelerator(KeyCombination.valueOf("SHORTCUT+C"));
+		closeItem.setOnAction(evt -> currentFile.set(null));
+		closeItem.disableProperty().bind(currentFile.isNull());
 
-	        Scene scene = new Scene(box);
+		Menu fileMenu = new Menu("File");
+		fileMenu.getItems().addAll(loadItem, closeItem);
 
-	        CSSFX.start(primaryStage);
+		MenuBar menuBar = new MenuBar(fileMenu);
+		menuBar.setUseSystemMenuBar(false);
 
-	        primaryStage.setTitle("PDF View");
-	        primaryStage.setWidth(1000);
-	        primaryStage.setHeight(900);
-	        primaryStage.setScene(scene);
-	        primaryStage.centerOnScreen();
-	        primaryStage.show();
-	    }
+		// ── Layout ───────────────────────────────────────────────────────────
+		VBox box = new VBox(menuBar, fileLabel, contentArea);
+		box.setFillWidth(true);
+
+		primaryStage.setTitle("PDF Viewer");
+		primaryStage.setWidth(1000);
+		primaryStage.setHeight(900);
+		primaryStage.setScene(new Scene(box));
+		primaryStage.centerOnScreen();
+		primaryStage.show();
+	}
+
+	/**
+	 * Stores the file as the current document and opens it in the OS default
+	 * PDF application via {@link Desktop#open(File)}.
+	 */
+	private void loadAndOpen(File file) {
+		currentFile.set(file);
+
+		Thread opener = new Thread(() -> {
+			try {
+				if (Desktop.isDesktopSupported()
+					&& Desktop.getDesktop().isSupported(Desktop.Action.OPEN)) {
+					Desktop.getDesktop().open(file);
+				} else {
+					Platform.runLater(() -> showError(
+							"Cannot open PDF",
+							"Desktop.open() is not supported on this system."
+					));
+				}
+			} catch (Exception e) {
+				e.printStackTrace();
+				Platform.runLater(() -> showError("Cannot open PDF", e.getMessage()));
+			}
+		}, "pdf-opener");
+		opener.setDaemon(true);
+		opener.start();
+	}
+
+	private void showError(String title, String message) {
+		Alert alert = new Alert(Alert.AlertType.ERROR);
+		alert.setTitle(title);
+		alert.setHeaderText(title);
+		alert.setContentText(message != null ? message : "An unknown error occurred.");
+		alert.showAndWait();
+	}
 }
+
 	
 	
 

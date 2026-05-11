@@ -1,9 +1,6 @@
 package fqlite.descriptor;
 
-import java.util.Hashtable;
-import java.util.Iterator;
-import java.util.LinkedList;
-import java.util.List;
+import java.util.*;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -27,7 +24,6 @@ public class TableDescriptor extends AbstractDescriptor implements Comparable<Ta
 	String delregex = "";
 	//public List<String> serialtypes;
 	//public List<String> columnnames;
-	public List<String> sqltypes;
 	public List<String> constraints; // constraint for each column
 	public List<String> tableconstraints; // constraints on table level
 	public List<String> primarykeycolumns;
@@ -183,9 +179,9 @@ public class TableDescriptor extends AbstractDescriptor implements Comparable<Ta
 		primarykeycolumns = new LinkedList<String>();
 		primarykeycolumnnumbers = new LinkedList<Integer>();
 		boolcolumns = new LinkedList<String>();
-		
 
-		/* find the primary key by checking the column constraint */ 
+
+		/* find the primary key by checking the column constraint */
 		for(int i=0; i < names.size(); i++)
 		{
 			
@@ -294,6 +290,24 @@ public class TableDescriptor extends AbstractDescriptor implements Comparable<Ta
             fingerprint += fingerprint;
 
         }
+
+		// add missing sqltypes for the master table
+		if (tblname.equals("sqlite_master")){
+			sqltypes = new ArrayList<String>();
+			sqltypes.add("TEXT");
+			sqltypes.add("TEXT");
+			sqltypes.add("TEXT");
+			sqltypes.add("INTEGER");
+			sqltypes.add("TEXT");
+
+		}
+
+		if (tblname.equals("sqlite_sequence")) {
+			sqltypes = new ArrayList<String>();
+			sqltypes.add("TEXT");
+			sqltypes.add("INTEGER");
+		}
+
 	}
 	
 	public int numberOfColumns(){

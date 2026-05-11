@@ -1,10 +1,12 @@
 package fqlite.rag;
 
 import fqlite.base.GUI;
-import fqlite.base.Job;
+import fqlite.base.ThemeManager;
 import fqlite.sql.DBManager;
 import fqlite.sql.InMemoryDatabase;
 import fqlite.ui.NodeObject;
+import fqlite.util.AutoCompletion;
+import fqlite.util.WordListCreator;
 import javafx.application.Application;
 import javafx.application.Platform;
 import javafx.geometry.Insets;
@@ -16,19 +18,17 @@ import javafx.scene.control.ScrollPane;
 import javafx.scene.control.TextArea;
 import javafx.scene.image.Image;
 import javafx.scene.image.ImageView;
-import javafx.scene.input.KeyCode;
 import javafx.scene.layout.*;
 import javafx.scene.paint.Color;
-import javafx.scene.text.Font;
 import javafx.scene.text.Text;
 import javafx.scene.text.TextFlow;
 import javafx.stage.Modality;
 import javafx.stage.Screen;
 import javafx.stage.Stage;
-
 import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Objects;
 
@@ -40,15 +40,12 @@ import java.util.Objects;
  * - Output area for conversations
  * - Toolbar with "back" and "configuration" buttons
  * - Chat-History
- *     The llama.cpp library is a C/C++ implementation of Meta's LLaMA model, optimised for CPU usage.
- *     It allows running the LLaMA model on consumer hardware without requiring high-end GPUs.
- *     LocalAI is a framework that enables running AI models locally without relying on cloud services.
- *     It provides APIs compatible with OpenAI's interfaces, allowing developers to use their own models with the same
- *     code they would use for OpenAI services.
  *
  *  Original Author:  Dirk Pawlaszczyk
  */
 public class LLMWindow extends Application {
+
+    private static List<String> WORD_LIST = new ArrayList<>();
 
     // UI components
     private TextFlow outputArea;
@@ -73,7 +70,10 @@ public class LLMWindow extends Application {
     public LLMWindow(GUI parent, TreeItem<NodeObject> node) {
         this.parent = parent;
         this.db_node = node;
+        WordListCreator.updateWordList(node,WORD_LIST);
     }
+
+
 
     public Stage getPrimaryStage() { return primaryStage; }
 
@@ -99,6 +99,7 @@ public class LLMWindow extends Application {
 
         // Output area in the centre
         VBox centerBox = createCenterArea();
+
         root.setCenter(centerBox);
 
         // Input area at the bottom
@@ -106,9 +107,9 @@ public class LLMWindow extends Application {
         root.setBottom(bottomBox);
 
         // create scene
-        Scene scene = new Scene(root, Screen.getPrimary().getVisualBounds().getWidth() * 0.9, Screen.getPrimary().getVisualBounds().getHeight() * 0.9);
+        Scene scene = new Scene(root, Screen.getPrimary().getVisualBounds().getWidth() * 0.7, Screen.getPrimary().getVisualBounds().getHeight() * 0.7);
+        ThemeManager.register(scene);   // ← apply global theme + stay in sync
 
-        //chatHistory = new ArrayList<>();
         if (chatHistory.size()==0){historyIndex = -1;}
         else{
             historyIndex = chatHistory.size()-1;
@@ -116,21 +117,22 @@ public class LLMWindow extends Application {
         }
 
         primaryStage.setOnCloseRequest(event -> {
-            event.consume();   // verhindert echtes Schließen
-            primaryStage.hide();    // nur verstecken
+            event.consume();
+            primaryStage.hide();    // just hide
         });
+
+        promptField.setPromptText("Write your prompt here...");
+
+        List<String> listWithoutDuplicates = new ArrayList<>(new LinkedHashSet<String>(WORD_LIST));
+        AutoCompletion.installAutoComplete(promptField,listWithoutDuplicates);
+        // focus on the input prompt
+        promptField.requestFocus();
 
         primaryStage.setScene(scene);
         primaryStage.show();
         primaryStage.toFront();
 
-        promptField.setText("");
-        promptField.setOnKeyReleased(e -> { if(e.getCode() == KeyCode.ENTER ) handleRun();
-        }
-);
 
-        // focus on the input prompt
-        promptField.requestFocus();
     }
 
     /**
@@ -141,20 +143,27 @@ public class LLMWindow extends Application {
 
         // Back-Button
         resetButton = new Button(); //("← Reset");
-        String sReset = Objects.requireNonNull(LLMWindow.class.getResource("/delete_history_small.png")).toExternalForm();
-        ImageView iv = new javafx.scene.image.ImageView(sReset);
+        String s = Objects.requireNonNull(LLMWindow.class.getResource("/icon24_rb.png")).toExternalForm();
+        ImageView iv = new javafx.scene.image.ImageView(s);
+        iv = new ImageView(s);
+        iv.smoothProperty().setValue(true);
+        iv.preserveRatioProperty().setValue(true);
+        iv.setFitHeight(24);
+
         resetButton.setTooltip(new Tooltip("Clear chat history."));
         resetButton.setGraphic(iv);
         resetButton.setOnAction(e -> handleReset());
-        resetButton.setDisable(true);
 
         // Separator
         Separator separator = new Separator();
 
-        backButton = new Button(); //" \u2716 Back");
+        backButton = new Button();
         backButton.setTooltip(new Tooltip("Close this Window"));
-        String sBack = Objects.requireNonNull(LLMWindow.class.getResource("/exit_small.png")).toExternalForm();
-        iv = new javafx.scene.image.ImageView(sBack);
+        s = Objects.requireNonNull(GUI.class.getResource("/icon24_back.png")).toExternalForm();
+        iv = new ImageView(s);
+        iv.smoothProperty().setValue(true);
+        iv.preserveRatioProperty().setValue(true);
+        iv.setFitHeight(24);
         backButton.setGraphic(iv);
         backButton.setOnAction(e -> primaryStage.close());
 
@@ -166,23 +175,28 @@ public class LLMWindow extends Application {
         HBox.setHgrow(spacer, Priority.ALWAYS);
 
 
-        configButton = new Button(); //" \u2716 Back");
+        configButton = new Button();
         configButton.setTooltip(new Tooltip("Settings..."));
-        String sConfig = Objects.requireNonNull(LLMWindow.class.getResource("/settings_small.png")).toExternalForm();
-        iv = new javafx.scene.image.ImageView(sConfig);
+        s = Objects.requireNonNull(LLMWindow.class.getResource("/icon24_settingss.png")).toExternalForm();
+        iv = new javafx.scene.image.ImageView(s);
+        iv.smoothProperty().setValue(true);
+        iv.preserveRatioProperty().setValue(true);
+        iv.setFitHeight(24);
+        iv.setFitWidth(24);
         configButton.setGraphic(iv);
         configButton.setOnAction(e -> showConfigDialog());
 
         // Status Label
         statusLabel = new Label("Ready");
-        statusLabel.setFont(Font.font("Inter Medium", 16));
 
         progress = new ProgressBar();
         progress.setVisible(false);
 
         Label logoLabel = new Label();
-        String s = Objects.requireNonNull(LLMWindow.class.getResource("/cognition_small.png")).toExternalForm();
+        s = Objects.requireNonNull(LLMWindow.class.getResource("/icon24_reasoning.png")).toExternalForm();
         iv = new javafx.scene.image.ImageView(s);
+        iv.setFitWidth(40);
+        iv.setFitHeight(40);
         logoLabel.setGraphic(iv);
 
         toolbar.getItems().addAll(
@@ -204,33 +218,26 @@ public class LLMWindow extends Application {
     private VBox createCenterArea() {
         VBox centerBox = new VBox(10);
         centerBox.setPadding(new Insets(10, 0, 10, 0));
-        centerBox.setStyle("""
-            -fx-control-inner-background: #F5E6C8; """);
+        //centerBox.setStyle("""-fx-control-inner-background: #F5E6C8; """);
 
 
         // Label
         Label outputLabel = new Label("Chat:");
-        outputLabel.setFont(Font.font("System", 18));
 
         // Output TextArea
         outputArea = new TextFlow();
-        outputArea.setStyle("""
-            -fx-control-inner-background: #F5E6C8;
-            -fx-background-color: #F5E6C8;
-            -fx-text-fill: #3A2F1B;
-            -fx-opacity: 1;
-        """);
+        ThemeManager.applyToTextFlow(outputArea);
+        ThemeManager.subscribe(outputArea);
+
         Text hint1 = new Text();
-        //hint1.setText("#".repeat(80) + "\n\n" + Job.db_info);
         Text hint2= new Text();
-        hint2.setFont(Font.font("Inter Medium", 16));
-        hint2.setText(agent_emoji + "Hi. I'm the FQLite assistant. What would you like to know about the database❓ \n\n\n\n");
+        hint2.setText(agent_emoji + "Hi. I'm the FQLite assistant. What would you like to know about the database? \n\n\n\n");
         outputArea.getChildren().addAll(hint1, hint2);
 
         ScrollPane scrollPane = new ScrollPane(outputArea);
         scrollPane.setFitToWidth(true);
         scrollPane.setFitToHeight(true);
-        scrollPane.setVbarPolicy(ScrollPane.ScrollBarPolicy.ALWAYS);    // Immer anzeigen
+        scrollPane.setVbarPolicy(ScrollPane.ScrollBarPolicy.ALWAYS);
         VBox.setVgrow(scrollPane, Priority.ALWAYS);
         centerBox.getChildren().addAll(outputLabel, scrollPane);
         return centerBox;
@@ -247,30 +254,41 @@ public class LLMWindow extends Application {
         bottomBox.setPadding(new Insets(10, 0, 0, 0));
 
         // Label
-        Label promptLabel = new Label("Your input:");
-        promptLabel.setFont(Font.font("System", 18));
+        Label promptLabel = new Label("Your prompt:");
 
         // Input field with button
         HBox inputBox = new HBox(10);
-
         promptField = new TextArea();
+        promptField.setPromptText("Enter prompt text");
         promptField.setWrapText(true);
-        promptField.setFont(Font.font("System", 16));
         HBox.setHgrow(promptField, Priority.ALWAYS);
         enableHistory();
 
-        Button sendenButton = new Button("Ask \u2753");
-        sendenButton.setDefaultButton(true);
-        sendenButton.setOnAction(e -> handleRun());
-        sendenButton.setPrefWidth(100);
+        Button runButton = new Button("Run");
+        String s = Objects.requireNonNull(LLMWindow.class.getResource("/icon24_execute.png")).toExternalForm();
+        ImageView iv = new javafx.scene.image.ImageView(s);
+        iv.smoothProperty().setValue(true);
+        iv.preserveRatioProperty().setValue(true);
+        iv.setFitHeight(24);
+        runButton.setGraphic(iv);
 
-        Button templateButton = new Button("Example \uD83D\uDCD1");
+        runButton.setDefaultButton(true);
+        runButton.setOnAction(e -> handleRun());
+        runButton.setPrefWidth(100);
+
+        Button templateButton = new Button("Example");
+        s = Objects.requireNonNull(LLMWindow.class.getResource("/icon24_example.png")).toExternalForm();
+        iv = new javafx.scene.image.ImageView(s);
+        iv.smoothProperty().setValue(true);
+        iv.preserveRatioProperty().setValue(true);
+        iv.setFitHeight(24);
+        templateButton.setGraphic(iv);
         templateButton.setDefaultButton(true);
         templateButton.setOnAction(e -> copyExample2Input());
         templateButton.setPrefWidth(100);
 
         VBox btnfield = new VBox(10);
-        btnfield.getChildren().addAll(sendenButton,templateButton);
+        btnfield.getChildren().addAll(runButton,templateButton);
 
         inputBox.getChildren().addAll(promptField, btnfield);
 
@@ -281,6 +299,8 @@ public class LLMWindow extends Application {
         statusline.getChildren().addAll(statusLabel,progress);
 
         bottomBox.getChildren().addAll(promptLabel, inputBox, statusline);
+
+        bottomBox.setPrefHeight(Screen.getPrimary().getVisualBounds().getHeight()*0.1);
         return bottomBox;
     }
 
@@ -322,7 +342,7 @@ public class LLMWindow extends Application {
 
     private void copyExample2Input(){
         promptField.setText(
-                " How many entries has the table <tablename>? ");
+                " How many entries does the table <tablename> have? ");
         // focus on the input prompt
         promptField.requestFocus();
     }
@@ -377,7 +397,6 @@ public class LLMWindow extends Application {
             try {
 
                 // forward to LLM
-                //String response = agent.run(userinput);
                 String response = pipline.generateSQL(userinput);
 
                 // UI update as soon as the response is available
@@ -422,7 +441,7 @@ public class LLMWindow extends Application {
         }
 
         final Text t = new Text(formattedMessage);
-        t.setFont(Font.font("Inter Medium", 16));
+        t.setFill(Color.GREEN);
         if (sender.startsWith(agent_emoji)) {
             t.setFill(Color.BLUE);
             // create Hyperlink
@@ -430,7 +449,6 @@ public class LLMWindow extends Application {
             link1.setOnAction(e -> {
                 // Open SQL-Analyzer
                 String sql = t.getText();
-                System.out.println(">>> " + sql.indexOf(":"));
                 if (sql.indexOf("SELECT") != -1) {
                     sql = sql.substring(sql.indexOf("SELECT"), sql.length());
                 }
@@ -440,7 +458,6 @@ public class LLMWindow extends Application {
             outputArea.getChildren().addAll(t,link1,nl);
         }
         else {
-            t.setFill(Color.BLACK);
             outputArea.getChildren().add(t);
         }
 
@@ -518,28 +535,6 @@ public class LLMWindow extends Application {
         }).start();
     }
 
-    /**
-     * Apply CSS Styling
-     */
-    private void applyStyling(Scene scene) {
-        scene.getRoot().setStyle(
-                "-fx-background-color: #f5f5f5;"
-        );
-
-        outputArea.setStyle(
-                "-fx-control-inner-background: white;" +
-                "-fx-border-color: #cccccc;" +
-                "-fx-border-radius: 5;" +
-                "-fx-background-radius: 5;"
-        );
-
-        promptField.setStyle(
-                "-fx-background-radius: 5;" +
-                "-fx-border-color: #cccccc;" +
-                "-fx-border-radius: 5;"
-        );
-    }
-
     public void show(){
         Platform.runLater(() -> {
          if(primaryStage != null) {
@@ -558,9 +553,6 @@ public class LLMWindow extends Application {
         /* Create a RAG-Pipline object */
 
         pipline = new RAGPipeline(model_path);
-        System.out.println("path to LLM: " + model_path);
-        //"/Users/pawel/llm_models/forensic-sqlite-llama-3.2-3b-Q4_K_M.gguf");
-
         String dbname = db_node.getValue().name;
 
         /* Check, if InMemory DB already exists */
@@ -573,7 +565,7 @@ public class LLMWindow extends Application {
             mdb = parent.createInMemoryDB(db_node.getValue());
         }
 
-        /* handover the connection objet to retrieve the database schema */
+        /* handover the connection object to retrieve the database schema */
         pipline.initializeRetriever(mdb.getConnectionObject());
     }
 

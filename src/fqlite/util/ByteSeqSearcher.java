@@ -7,16 +7,16 @@ import fqlite.base.BigByteBuffer;
 /**
  * An efficient byte buffer searching class based on the Knuth-Morris-Pratt algorithm.
  * For more on the algorithm works see: 
+ *
  * <a href="http://www.inf.fh-flensburg.de/lang/algorithmen/pattern/kmpen.htm">...</a>.
+ *
+ * @author pawel
  */
 public class ByteSeqSearcher{
 
 
 	    private byte[] pattern_;
 	    private int[] borders_;
-
-	    // An upper bound on pattern length for searching. Results are undefined for longer patterns.
-	    public static final int MAX_PATTERN_LENGTH = 2048;
 
 	    public ByteSeqSearcher(byte[] pattern)
 	    {
@@ -78,7 +78,6 @@ public class ByteSeqSearcher{
 	            // following the pattern match.
 	            if (j == pattern_.length)
 	            {
-	            	//System.out.println("MATCH" + buffer.position());
 	                return buffer.position();
 	            }
 	        }

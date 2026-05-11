@@ -40,18 +40,18 @@ public class SimpleSQLiteParser {
 
 	/* INT */
 	static String[] inttypes = { "INT", "INTEGER", "INTUNSIGNED", "INTSIGNED", "LONG", "TINYINT", "SMALLINT", "MEDIUMINT", "BIGINT",
-			"UNSIGNEDBIGINT", "INT2", "INT8"};
+			"UNSIGNEDBIGINT", "INT2", "INT8", "int", "integer", "intunsigned", "intsigned", "long", "tinyint", "smallint", "mediumint", "bigint"};
 	/* TEXT */
 	static String[] texttypes = { "TEXT", "CHARACTER", "CLOB", "VARCHAR", "VARYINGCHARACTER", "NCHAR",
-			"NATIVE CHARACTER", "NVARCHAR" };
+			"NATIVE CHARACTER", "NVARCHAR", "text", "character", "clob", "varchar", "varyingcharacter", "nchar"};
 	/* BLOB */
-	static String[] blobtype = { "BLOB" };
+	static String[] blobtype = { "BLOB", "blob" };
 	
 	/* REAL */
-	static String[] realtype = { "REAL", "DOUBLE", "DOUBLEPRECISION", "FLOAT" };
+	static String[] realtype = { "REAL", "DOUBLE", "DOUBLEPRECISION", "FLOAT", "real", "double", "float" };
 
 	/* could by any of the above STORAGE class */
-	static String[] numerictype = { "NUMERIC", "DECIMAL", "BOOLEAN", "DATE", "DATETIME" };
+	static String[] numerictype = { "NUMERIC", "DECIMAL", "BOOLEAN", "DATE", "DATETIME", "numeric", "decimal", "boolean", "date", "datetime"};
 
 	String tablename = null;
 	String modulname = null;
@@ -160,15 +160,17 @@ public class SimpleSQLiteParser {
         		tablename = trim(tablename);
         		if (tablename.isEmpty())
         			tablename = "<no name>";
-        		System.out.println("Tablename "  + tablename);
+        		//System.out.println("Tablename "  + tablename);
         		
         	}
         	
         	
         	@Override public void enterModule_name(SQLiteParser.Module_nameContext ctx) 
         	{
-        		 modulname = ctx.getText();
+        		 modulname = ctx.getText().toLowerCase();
          		 System.out.println(" name " + modulname);
+
+
          		 if (modulname.equals("fts4")|| modulname.equals("fts3"))
          		 {
          			 System.out.println("Found FreeTextSearch Module (fts3/4)");
@@ -452,12 +454,12 @@ public class SimpleSQLiteParser {
         	
         	@Override public void enterKeyword(SQLiteParser.KeywordContext ctx)
         	{
-        		System.out.println("Enter keyword ");
+        		//System.out.println("Enter keyword ");
         	}
         	
         	@Override public void exitKeyword(SQLiteParser.KeywordContext ctx)
         	{
-        		System.out.println("Exit keyword ");
+        		//System.out.println("Exit keyword ");
             }
         	
         

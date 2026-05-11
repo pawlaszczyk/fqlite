@@ -4,11 +4,13 @@ import java.nio.ByteBuffer;
 import java.util.*;
 
 import fqlite.descriptor.AbstractDescriptor;
+import fqlite.descriptor.IndexDescriptor;
 import fqlite.descriptor.TableDescriptor;
 import fqlite.log.AppLog;
 import fqlite.pattern.SerialTypeMatcher;
 import fqlite.types.CarverTypes;
 import fqlite.util.Auxiliary;
+import fqlite.util.SQLitePageAnalyzer;
 import javafx.collections.FXCollections;
 import javafx.collections.ObservableList;
 
@@ -30,7 +32,6 @@ public class RecoveryTask implements Runnable {
 	public int pagenumber;
     private final Job job;
 	private final Auxiliary ct;
-    private final StringBuffer firstcol = new StringBuffer();
     private boolean freeList;
     
 	/**
@@ -68,7 +69,10 @@ public class RecoveryTask implements Runnable {
 		try {
 			
 			AppLog.debug("Offset in recover()::" + offset);
-			
+			System.out.println("recover() " + pagenumber);
+			if(pagenumber==31)
+				System.out.println("bin da.");
+
 			/* read the db page into buffer */
 			buffer = job.readDBPageWithOffset(offset, pagesize);
 			/* convert byte array into a string representation */
@@ -220,11 +224,14 @@ public class RecoveryTask implements Runnable {
             //String rc;
             LinkedList<String> record;
 
-            /*
+
+			//SQLitePageAnalyzer.parseFreeBlocks(buffer,job.ps);
+
+
+			/*
 			 * scan of Freeblock list 
 			 */
 			if (fbstart > pageheaderend  && fbstart <  job.ps) {
-			
 		    	boolean goon = false;
 
                 do {
@@ -262,6 +269,9 @@ public class RecoveryTask implements Runnable {
                         byte[] slice = Arrays.copyOfRange(freeblock, 0, (columns - 1));
                         int data_length = Auxiliary.computePayloadLengthByte(slice, 0);
 
+						if (data_length == 0) {
+							break;
+						}
                         leave:
                         do {
                             boolean addfirstcolumn = true;
@@ -289,8 +299,9 @@ public class RecoveryTask implements Runnable {
                                     recover.put(pos + 3, (byte) 0);  // first column is 00
                                 recover.put(pos + 4, freeblock); // the freeblock
 
+                                DataRow dr = ct.readRecord(pos, recover, pagenumber, null, Integer.MAX_VALUE, withoutROWID, Global.REGULAR_DB_FILE, -1);
 
-                                record = ct.readRecord(pos, recover, pagenumber, null, Integer.MAX_VALUE, withoutROWID, Global.REGULAR_DB_FILE, -1);
+								record = dr.line();
 
                                 // update status column -> this is a dropped record
                                 record.set(3, Global.DELETED_RECORD_IN_PAGE);
@@ -302,7 +313,7 @@ public class RecoveryTask implements Runnable {
                                 /* add record to result set */
                                 if (!record.isEmpty()) {
                                     visit.set(fbstart,fbstart + 4 + data_length);
-                                    updateResultSet(record);
+                                    updateResultSet(dr);
                                 }
 
                                 /* only if there are at least 6 bytes remain -> go for an additional round */
@@ -379,16 +390,18 @@ public class RecoveryTask implements Runnable {
 				
 					
 
-				record = ct.readRecord(celloff, buffer, pagenumber, visit, Integer.MAX_VALUE, withoutROWID,Global.REGULAR_DB_FILE,-1);
-				
-				
+				DataRow row = ct.readRecord(celloff, buffer, pagenumber, visit, Integer.MAX_VALUE, withoutROWID,Global.REGULAR_DB_FILE,-1);
+
+
 				// add new line to output
-				if (null != record && record.size() > 0) {
-					
+				if (null != row && row.line().size() > 0) {
+
+					record = row.line();
+
+
 					int p;
 					
 					// check for fts3/4 tables
-
 					if ((p = record.getFirst().indexOf("_content")) > 0)
 					{	
 						String rc = record.getFirst();
@@ -420,8 +433,9 @@ public class RecoveryTask implements Runnable {
 									
 									ftsrecord.add(record.get(ii));
 								}
-								
-	                            updateResultSet(ftsrecord);
+
+								DataRow ftsrow = new DataRow(ftsrecord,row.hexdump());
+	                            updateResultSet(ftsrow);
 
 							}
 						}
@@ -446,8 +460,7 @@ public class RecoveryTask implements Runnable {
 						    int endofprefix = data.indexOf("] ");
 				            if (endofprefix > 0)
 				            	data = data.substring(endofprefix+2);
-				            System.out.println("data length " + data.length());
-				            
+
 							/* transform String data into a byte array */
 							byte[] binary = Auxiliary.decode(data);
 							ByteBuffer bf = ByteBuffer.wrap(binary);
@@ -455,7 +468,12 @@ public class RecoveryTask implements Runnable {
 							bf.rewind();
 							
 							/* skip the first two bytes */
-							bf.getShort();
+							try{
+								bf.getShort();
+							}catch(Exception e){
+								System.out.println("readRecord() BufferUnderflow.");
+							}
+
 							/* first get the total number of entries for this rtree branch */
                             int entries = bf.getShort();
 					
@@ -464,13 +482,14 @@ public class RecoveryTask implements Runnable {
                             /* create a new line for every data row */ 
                             while(entries>0)
                             {
+								System.out.println("inside while()");
                             	LinkedList<String> rtreerecord = new LinkedList<>();
                     			
                             	rtreerecord.add(tbln + "");  // start a new row for the virtual component 
-                            	rtreerecord.add("");
-                            	rtreerecord.add("");
-                            	rtreerecord.add("");
-                            	rtreerecord.add("");
+                            	rtreerecord.add("".intern());
+                            	rtreerecord.add("".intern());
+                            	rtreerecord.add("".intern());
+                            	rtreerecord.add("".intern());
                             	
                             	// The first column is always a 64-bit signed integer primary key.
                             	try {
@@ -486,8 +505,9 @@ public class RecoveryTask implements Runnable {
                             	int number = tds.columnnames.size() - 1;
 
                             	while (number > 0)
-                            	{	
-                            		try {
+                            	{
+									System.out.println("inside while2()");
+									try {
                             			if (bf.limit() - bf.position() >= 4)
                             			{
                             				float rv = bf.getFloat();
@@ -496,13 +516,13 @@ public class RecoveryTask implements Runnable {
                             			}
                             			number--;
                             		}catch(Exception err){
-                            			System.out.println(" Fehler " + number);
+                            			System.out.println(" Error " + number);
                             		}
                             	}
                             	
 	                            entries--;
-	                            updateResultSet(rtreerecord);
-	                           
+	                            DataRow rtreerow = new DataRow(rtreerecord,row.hexdump());
+								updateResultSet(rtreerow);
 	                            
                             }	
 							
@@ -511,14 +531,9 @@ public class RecoveryTask implements Runnable {
 						
 					}
 					
-					/* if record resides inside a free page -> add a flag char to document this */
-					if(freeList)
-					{  
-					   String secondcol = record.get(3);
-					   secondcol = Global.FREELIST_ENTRY + secondcol;
-					   record.set(3, secondcol);
-					}
-					updateResultSet(record);
+
+					DataRow freelist = new DataRow(record,row.hexdump());
+					updateResultSet(freelist);
 				}
 
 			} // end of for - cell pointer
@@ -563,24 +578,36 @@ public class RecoveryTask implements Runnable {
 
 		return 0;
 	}
-	
-	
-	
-	
-	private void updateResultSet(LinkedList<String> line) 
+
+
+	/**
+	 *
+	 * @param row
+	 */
+	private void updateResultSet(DataRow row)
 	{
-		// entry for table name already exists  
-		if (job.resultlist.containsKey(line.getFirst()))
+		int empty_columns = 0;
+
+			// entry for table name already exists
+		if (job.resultlist.containsKey(row.line().getFirst()))
 		{
-			     ObservableList<ObservableList<String>> tablelist = job.resultlist.get(line.getFirst());
-			     tablelist.add(FXCollections.observableList(line));  // add row 
+			     ObservableList<ObservableList<String>> tablelist = job.resultlist.get(row.line().getFirst());
+			     tablelist.add(FXCollections.observableList(row.line()));  // add row
+
+			      // save the original hex-values of a table row separately to a different list
+			      ObservableList<ObservableList<byte[]>> hexlist = job.hexdumplist.get(row.line().getFirst());
+			  	  hexlist.add(FXCollections.observableList(row.hexdump()));
 		}
 		
-		// create a new data set since the table name occurs for the first time
+		// create a new dataset since the table name occurs for the first time
 		else {
 		          ObservableList<ObservableList<String>> tablelist = FXCollections.observableArrayList();
-				  tablelist.add(FXCollections.observableList(line));  // add row 
-				  job.resultlist.put(line.getFirst(),tablelist);  	
+				  tablelist.add(FXCollections.observableList(row.line()));  // add row
+				  job.resultlist.put(row.line().getFirst(),tablelist);
+
+				  ObservableList<ObservableList<byte[]>> hexlist = FXCollections.observableArrayList();
+				  hexlist.add(FXCollections.observableList(row.hexdump()));
+				  job.hexdumplist.put(row.line().getFirst(),hexlist);
 		}
 	}
 
@@ -663,10 +690,6 @@ public class RecoveryTask implements Runnable {
 	 */
 	public void carve(String content, Carver crv) {
 
-		/* if file is bigger than 5 MB skip intense scan */
-		//if(job.size > 5242880)  //1024*1024)// 5242880)
-		//	return;
-		
 		Carver c = crv;
 		
 		if (null == c)
@@ -675,7 +698,6 @@ public class RecoveryTask implements Runnable {
 			/* start carving on the complete page */
 			c = new Carver(job, buffer, content, visit, pagenumber);
 
-
 		/* try to get component schema for the current page, if possible */
 		AbstractDescriptor tdesc = null;
 		if (job.pages.length > pagenumber) {
@@ -683,6 +705,8 @@ public class RecoveryTask implements Runnable {
             if (ad instanceof TableDescriptor) {
                 tdesc = (TableDescriptor) ad;
             }
+			else if( ad instanceof IndexDescriptor)
+				tdesc = (IndexDescriptor) ad;
         }
 		List<AbstractDescriptor> tab = new ArrayList<AbstractDescriptor>();//tables;
 		AppLog.debug(" tables :: " + tables.size());
@@ -733,27 +757,14 @@ public class RecoveryTask implements Runnable {
 				if(tdesc != null && tdesc.serialtypes != null && tdesc.serialtypes.size()>0 && tdesc.serialtypes.get(0).equals("BLOB"))
 					continue;
 				
-				if(tdesc != null && tdesc.serialtypes != null){
-					if (tdesc.serialtypes.size()>1 && tdesc.serialtypes.size()<4){
-						if (Objects.equals(tdesc.serialtypes.get(1), "BLOB") || Objects.equals(tdesc.serialtypes.get(1), "TEXT")){
-							continue;
-						}
-					}
-					
-				}
-				
+
 				AppLog.debug("pagenumber :: " + pagenumber + " component size :: " + tab.size());
 				AppLog.debug("n " + n);
 				
 				
-				if( pagenumber == 18 && tab.size() == 78 && n == 52){
-					System.out.println("Stop here.");
-				}
-							
+
 				/* access pattern for a particular component */
 				String tablename = tab.get(n).getName();
-				if (tablename.startsWith("fqlite_freelist"))
-					continue;
 				/* create matcher object for constraint check */
 				SerialTypeMatcher stm = new SerialTypeMatcher(buffer);
 	

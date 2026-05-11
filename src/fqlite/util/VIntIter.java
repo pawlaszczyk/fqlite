@@ -4,6 +4,8 @@ package fqlite.util;
 /**
  * This class is a wrapper class.
  * It implements a simple iterator for variable integer values.
+ *
+ * @author pawel
  */
 public class VIntIter {
 

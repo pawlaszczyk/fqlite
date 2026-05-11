@@ -5,328 +5,390 @@ import java.io.IOException;
 import java.io.RandomAccessFile;
 import java.nio.BufferUnderflowException;
 import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 import java.nio.channels.FileChannel;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.List;
+import java.util.LinkedHashMap;
+import java.util.Map;
 
 /**
- * 
- * BigByteBuffer allows mmaping files larger than an Integer.MAX_VALUE bytes.
- * 
+ * BigByteBuffer with streaming / demand-paging support.
+ *
+ * Instead of mapping the entire file into memory at once, only the pages that
+ * are actually touched are mapped. Evicted pages are unmapped immediately so
+ * the JVM can release the native memory.
+ *
+ * Design parameters (tuneable via constructor overloads):
+ *   PAGE_SIZE   – how many bytes one mmap-window covers  (default 8 MiB)
+ *   MAX_PAGES   – how many windows stay resident at once  (default 8)
+ *
+ * Memory ceiling ≈ PAGE_SIZE × MAX_PAGES  (default ≈ 64 MiB).
+ *
+ * Performance notes:
+ *   • Sequential reads hit the same page many times → effectively zero overhead.
+ *   • Random reads across MAX_PAGES distinct windows are served from cache.
+ *   • Only cross-page reads (a single logical read spanning two windows) require
+ *     a slow-path copy; all other reads are a single native buffer.get().
+ *
+ * Lifecycle: BigByteBuffer owns the RandomAccessFile it opens internally.
+ * If a RandomAccessFile is passed in by the caller, BigByteBuffer takes
+ * ownership of it as well — do NOT close the RAF externally afterwards.
+ * Call {@link #close()} when done to release all resources.
  */
 public class BigByteBuffer {
 
-	
-	private static final int OVERLAP = Integer.MAX_VALUE / 2;
-	private final List<ByteBuffer> buffers;
-	private long pos = 0;
-	private long limit = 0;
-	private long cap = 0;
-	private long mark = -1;
+	// -----------------------------------------------------------------------
+	// Tuneable defaults
+	// -----------------------------------------------------------------------
+
+	/** Default page size: 8 MiB — large enough to amortise mmap overhead,
+	 *  small enough to keep per-page cost low. */
+	public static final int DEFAULT_PAGE_SIZE = 8 * 1024 * 1024;
+
+	/** Default number of resident pages (LRU cache capacity). */
+	public static final int DEFAULT_MAX_PAGES = 8;
+
+	// -----------------------------------------------------------------------
+	// State
+	// -----------------------------------------------------------------------
 
 	/**
-	 * Retrieves the capacity of the buffer.
-	 *
-	 * @return the capacity of the buffer
+	 * Kept alive for the entire lifetime of this buffer.
+	 * Closing the RAF would also close its FileChannel, making all
+	 * subsequent mmap calls fail with "channel not open".
+	 * Null only when constructed from a plain ByteBuffer.
 	 */
-	public final long capacity() {
-		return cap;
+	private final RandomAccessFile raf;
+	private final FileChannel      channel;
+	private final long             fileLength;
+	private final int              pageSize;
+
+	/** LRU page cache: pageIndex → mapped ByteBuffer. */
+	private final LinkedHashMap<Integer, ByteBuffer> pageCache;
+
+	private long pos   = 0;
+	private long limit = 0;
+	private long cap   = 0;
+	private long mark  = -1;
+
+	// -----------------------------------------------------------------------
+	// Constructors
+	// -----------------------------------------------------------------------
+
+	/**
+	 * Opens {@code filename} and memory-maps it on demand.
+	 * BigByteBuffer owns the file handle — call {@link #close()} when done.
+	 */
+	public BigByteBuffer(String filename) throws IOException {
+		this(new RandomAccessFile(new File(filename), "r"),
+				DEFAULT_PAGE_SIZE, DEFAULT_MAX_PAGES);
 	}
 
 	/**
-     * Clears the buffer.
-     */
+	 * Takes ownership of {@code file}.
+	 * Do NOT close {@code file} externally; call {@link #close()} instead.
+	 */
+	public BigByteBuffer(RandomAccessFile file) throws IOException {
+		this(file, DEFAULT_PAGE_SIZE, DEFAULT_MAX_PAGES);
+	}
+
+	/**
+	 * Takes ownership of {@code file} with custom paging parameters.
+	 *
+	 * @param file      the file to read — BigByteBuffer takes ownership
+	 * @param pageSize  bytes per mmap window (e.g. {@code 8 * 1024 * 1024})
+	 * @param maxPages  maximum number of windows kept in memory at once
+	 */
+	public BigByteBuffer(RandomAccessFile file, int pageSize, int maxPages) throws IOException {
+		if (pageSize <= 0) throw new IllegalArgumentException("pageSize must be > 0");
+		if (maxPages <= 0) throw new IllegalArgumentException("maxPages must be > 0");
+
+		fileLength = file.length();
+		if (fileLength == 0) throw new IllegalArgumentException("File is empty");
+
+		// Hold the RAF open — closing it would also close channel, breaking mmap.
+		this.raf      = file;
+		this.channel  = file.getChannel();
+		this.pageSize = pageSize;
+		this.limit    = this.cap = fileLength;
+
+		final int mp = maxPages;
+		this.pageCache = new LinkedHashMap<>(maxPages * 2, 0.75f, /*accessOrder=*/true) {
+			@Override
+			protected boolean removeEldestEntry(Map.Entry<Integer, ByteBuffer> eldest) {
+				if (size() > mp) {
+					tryUnmap(eldest.getValue());
+					return true;
+				}
+				return false;
+			}
+		};
+	}
+
+	/**
+	 * Wraps a plain {@link ByteBuffer} (used for testing / small in-memory buffers).
+	 * No file I/O is involved; {@link #close()} is a no-op.
+	 */
+	public BigByteBuffer(ByteBuffer buffer) {
+		this.raf        = null;
+		this.channel    = null;
+		this.fileLength = buffer.limit();
+		this.pageSize   = Integer.MAX_VALUE;   // single "page" = entire buffer
+		this.limit      = this.cap = fileLength;
+
+		this.pageCache  = new LinkedHashMap<>(2, 0.75f, true);
+		this.pageCache.put(0, buffer.duplicate());
+	}
+
+	// -----------------------------------------------------------------------
+	// Static wrap helpers (preserve original API surface)
+	// -----------------------------------------------------------------------
+
+	public static BigByteBuffer wrap(byte[] array) {
+		return new BigByteBuffer(ByteBuffer.wrap(array));
+	}
+
+	public static BigByteBuffer wrap(byte[] array, int offset, int length) {
+		// slice() resets position to 0 and limit to length — matches BigByteBuffer semantics.
+		ByteBuffer bb = ByteBuffer.wrap(array, offset, length).slice();
+		return new BigByteBuffer(bb);
+	}
+
+	// -----------------------------------------------------------------------
+	// Buffer-state API (mirrors java.nio.Buffer)
+	// -----------------------------------------------------------------------
+
+	public final long capacity()        { return cap;   }
+	public final long limit()           { return limit; }
+	public final long position()        { return pos;   }
+	public final long remaining()       { return limit - pos; }
+	public final boolean hasRemaining() { return pos < limit; }
+
 	public final void clear() {
 		limit = cap;
-		pos = 0;
-		mark = -1;
-    }
+		pos   = 0;
+		mark  = -1;
+	}
 
-	/**
-	 * Flips the buffer.
-	 *
-	 * @return this buffer
-	 */
 	public final BigByteBuffer flip() {
 		limit = pos;
-		pos = 0;
-		mark = -1;
+		pos   = 0;
+		mark  = -1;
 		return this;
 	}
 
-	/**
-	 * Retrieves the current limit of the buffer.
-	 *
-	 * @return the limit of the buffer
-	 */
-	public final long limit() {
-		return limit;
-	}
-
-	/**
-	 * Sets this buffer's limit.
-	 * 
-	 * @param newLimit The new limit value; must be non-negative and no larger than
-	 *                 this buffer's capacity.
-	 *
-	 * @return this buffer
-	 *
-	 * @exception IllegalArgumentException If the preconditions on newLimit do not
-	 *                                     hold.
-	 */
 	public final BigByteBuffer limit(long newLimit) {
-		if ((newLimit < 0) || (newLimit > cap))
-			throw new IllegalArgumentException();
-		if (newLimit < mark)
-			mark = -1;
-		if (pos > newLimit)
-			pos = newLimit;
+		if (newLimit < 0 || newLimit > cap) throw new IllegalArgumentException();
+		if (newLimit < mark) mark = -1;
+		if (pos > newLimit)  pos  = newLimit;
 		limit = newLimit;
 		return this;
-
 	}
 
-	/**
-	 * Sets this buffer's mark at its position.
-	 *
-	 * @return this buffer
-	 */
-	private final BigByteBuffer mark() {
-		mark = pos;
-		return this;
-	}
-
-	/**
-	 * Retrieves the current position of this buffer.
-	 *
-	 * @return the current position of this buffer
-	 */
-	public final long position() {
-		return pos;
-	}
-
-	/**
-	 * Sets this buffer's position. If the mark is defined and larger than the new
-	 * position, then it is discarded.
-	 * 
-	 * @param newPosition The new position value; must be non-negative and no larger
-	 *                    than the current limit.
-	 *
-	 * @return this buffer
-	 *
-	 * @exception IllegalArgumentException If the preconditions on newPosition do
-	 *                                     not hold
-	 */
 	public final BigByteBuffer position(long newPosition) {
-		if ((newPosition < 0) || (newPosition > limit))
-		{	
+		if (newPosition < 0 || newPosition > limit) {
 			System.err.println(" new Position is " + newPosition);
 			throw new IllegalArgumentException();
 		}
-		if (newPosition <= mark)
-			mark = -1;
-
+		if (newPosition <= mark) mark = -1;
 		pos = newPosition;
 		return this;
 	}
 
+	// -----------------------------------------------------------------------
+	// Read API
+	// -----------------------------------------------------------------------
 
 	/**
-	 * mmap the file and return a BigByteBuffer for it.
-	 * 
-	 * @param filename the file to mmap
-	 * @throws java.io.IOException if there is an error reading the file
+	 * Returns the byte at the current position and advances position by 1.
 	 */
-	public BigByteBuffer(String filename) throws IOException {
-		this(new RandomAccessFile(new File(filename), "r"));
-	}
-	
-
-	/**
-	 * mmap the file and return a BigByteBuffer for it.
-	 * 
-	 * @param file the file to mmap
-	 * @throws java.io.IOException if there is an error reading the file
-	 */
-	public BigByteBuffer(RandomAccessFile file) throws IOException {
-		long length = file.length();
-
-		if (length == 0) {
-			throw new IllegalArgumentException("File is empty");
-		}
-
-		buffers = new ArrayList<ByteBuffer>();
-		for (long i = 0; i < length; i += OVERLAP) {
-			buffers.add(file.getChannel().map(FileChannel.MapMode.READ_ONLY, i, Math.min(length - i, Integer.MAX_VALUE)));
-		}
-		
-		limit = cap = length;
-		pos = 0;
-		mark = -1;
-	}
-	
-	private BigByteBuffer(byte[] array, int offset, int length){
-
-		pos=0;
-		limit = cap = length;
-		ByteBuffer bb = ByteBuffer.wrap(array, offset, length);
-		buffers = new ArrayList<>();
-		buffers.add(bb);
-	}
-
-	private BigByteBuffer(byte[] array){
-
-		pos=0;
-		limit = cap = array.length;
-		ByteBuffer bb = ByteBuffer.wrap(array);
-		buffers = new ArrayList<ByteBuffer>();
-		buffers.add(bb);
-	}
-	
-
-	/**
-	 * Wrap a ByteBuffer. Used for testing.
-	 * 
-	 * @param buffer the buffer to wrap
-	 */
-	public BigByteBuffer(ByteBuffer buffer) {
-		limit = cap = buffer.limit();
-		pos = 0;
-		buffers = Arrays.asList(buffer);
-	}
-
-    /**
-     * Returns the byte at the current position and increases the position by 1.
-     *
-     * @return the byte at the current position.
-     * @exception BufferUnderflowException
-     *                if the position is equal or greater than limit.
-     */
-	public byte get(){
-		if (pos >= limit){
-			throw new BufferUnderflowException();
-		}	
-		ByteBuffer buffer = buffers.get((int) (pos / OVERLAP));
-		buffer.position((int) (pos % OVERLAP));
-		byte b = buffer.get();
-		pos++; 
+	public byte get() {
+		checkUnderflow(1);
+		byte b = readByteAt(pos);
+		pos++;
 		return b;
 	}
-	
+
 	/**
-     * Returns the byte at the given position and increases the position by 1.
-     *
-     * @return the byte at the current position.
-     * @exception BufferUnderflowException
-     *                if the position is equal to or greater than the limit.
-     */
-    
-	public byte get(long position){
+	 * Seeks to {@code position} then returns the byte there, advancing by 1.
+	 */
+	public byte get(long position) {
 		position(position);
 		return get();
 	}
-	
-	
-	/**
-     * Returns a sliced buffer that shares its content with this buffer.
-     * <p>
-     * The sliced buffer's capacity will be this buffer's
-     * {@code remaining()}, and its zero position will correspond to
-     * this buffer's current position. The new buffer's position will be 0,
-     * The limit will be its capacity, and its mark is cleared. The new buffer's
-     * read-only property and byte order are the same as this buffer's.
-     * <p>
-     * The new buffer shares its content with this buffer, which means either
-     * buffer's change of content will be visible to the other. The two buffers
-     * position, limit and mark are independent.
-     *
-     * @return a sliced buffer that shares its content with this buffer.
-     */
-    public ByteBuffer slice(){
-    	// TODO: Overlapping buffers
-    	ByteBuffer buffer = buffers.get((int) (pos / OVERLAP));
-    	buffer.position((int) (pos % OVERLAP));
-    	return buffer.slice();
-    }
-    
-    /**
-     * Reads bytes from the current position into the specified byte array and
-     * increases the position by the number of bytes read.
-     * <p>
-     * Calling this method has the same effect as
-     * {@code get(dst, 0, dst.length)}.
-     *
-     * @param dst
-     *            the destination byte array.
-     * @return {@code this}
-     * @exception BufferUnderflowException
-     *                if {@code dst.length} is greater than {@code remaining()}.
-     */
-    public ByteBuffer get(byte[] dst) {
-    	// TODO: Overlapping buffers
-    	ByteBuffer buffer = buffers.get((int) (pos / OVERLAP));
-    	buffer.position((int) (pos % OVERLAP));
-    	pos+= dst.length;
-    	return buffer.get(dst, 0, dst.length);
-    }
-    
-    
-    /**
-      * Wraps a <code>byte</code> array into a <code>ByteBuffer</code>
-      * object.
-      *
-      * @exception IndexOutOfBoundsException If the preconditions on the offset
-      * and length parameters do not hold
-      */
-    public static BigByteBuffer wrap(byte[] array, int offset, int length)
-    {
-    	return new BigByteBuffer(array,offset,length);
-    }
-    
-    public static BigByteBuffer wrap(byte[] array)
-    {
-    	return new BigByteBuffer(array);
-    }
-    
-    
-    /**
-     * Returns the int at the current position and increases the position by 4.
-     * <p>
-     * The 4 bytes starting at the current position are composed into an int
-     * according to the current byte order and returned.
-     *
-     * @return the int at the current position.
-     * @exception BufferUnderflowException
-     *                if the position is greater than {@code limit - 4}.
-     */
-    public int getInt(long position){
-    	// TODO: Overlapping buffers
-    	this.pos = position;
-    	ByteBuffer buffer = buffers.get((int) (position / OVERLAP));
-    	long pp = position%OVERLAP;
-        buffer.position((int)pp);
-    	pos = position + 4;
-    	return buffer.getInt();
-    }
-    
-    
-    public ByteBuffer read(ByteBuffer b,long position){
-    	
-    	//System.out.println(">>> position read()" + position);
-    	this.pos = position;
-    	ByteBuffer buffer = buffers.get((int) (pos / OVERLAP));
-        int howmany = b.capacity();
-        byte[] dst = new byte[howmany];
-        long pp = pos%OVERLAP;
-        buffer.position((int)pp);
-        buffer.get(dst);
-        b.position(0);
-        b.put(dst);
-        b.limit(b.capacity());
-        b.position(0);
-        return b;
-        
-    }
 
+	/**
+	 * Reads {@code dst.length} bytes from the current position into {@code dst}.
+	 */
+	public BigByteBuffer get(byte[] dst) {
+		return get(dst, 0, dst.length);
+	}
+
+	/**
+	 * Reads {@code length} bytes from the current position into {@code dst}
+	 * starting at {@code offset}.
+	 */
+	public BigByteBuffer get(byte[] dst, int offset, int length) {
+		if (length > remaining())
+			throw new BufferUnderflowException();
+
+		int written = 0;
+		while (written < length) {
+			int        pageIdx = (int) (pos / pageSize);
+			int        pageOff = (int) (pos % pageSize);
+			ByteBuffer page    = getPage(pageIdx);
+			int        avail   = Math.min(page.capacity() - pageOff, length - written);
+
+			page.position(pageOff);
+			page.get(dst, offset + written, avail);
+
+			pos     += avail;
+			written += avail;
+		}
+		return this;
+	}
+
+	/**
+	 * Returns the big-endian {@code int} at {@code position} and advances by 4.
+	 */
+	public int getInt(long position) {
+		this.pos = position;
+		checkUnderflow(4);
+
+		int        pageIdx = (int) (pos / pageSize);
+		int        pageOff = (int) (pos % pageSize);
+		ByteBuffer page    = getPage(pageIdx);
+		int        avail   = page.capacity() - pageOff;
+
+		if (avail >= 4) {
+			// Fast path: all 4 bytes on the same page.
+			page.position(pageOff);
+			pos += 4;
+			return page.getInt();
+		} else {
+			// Slow path: int straddles a page boundary — read byte by byte.
+			byte[] tmp = new byte[4];
+			get(tmp, 0, 4);   // advances pos correctly
+			return ((tmp[0] & 0xFF) << 24)
+				   | ((tmp[1] & 0xFF) << 16)
+				   | ((tmp[2] & 0xFF) <<  8)
+				   |  (tmp[3] & 0xFF);
+		}
+	}
+
+	/**
+	 * Returns a {@link ByteBuffer} slice starting at the current position.
+	 * <p>
+	 * The slice is backed by the mmap window that is currently resident in the
+	 * LRU cache. It remains valid as long as that page is not evicted. Callers
+	 * that need a long-lived view should copy the data out explicitly.
+	 */
+	public ByteBuffer slice() {
+		int        pageIdx = (int) (pos / pageSize);
+		int        pageOff = (int) (pos % pageSize);
+		ByteBuffer page    = getPage(pageIdx);
+		page.position(pageOff);
+		return page.slice();
+	}
+
+	/**
+	 * Reads {@code b.capacity()} bytes from {@code position} into {@code b},
+	 * then rewinds {@code b} to position 0.
+	 */
+	public ByteBuffer read(ByteBuffer b, long position) {
+		this.pos = position;
+		int    howmany = b.capacity();
+		byte[] dst     = new byte[howmany];
+		get(dst, 0, howmany);
+		b.clear();
+		b.put(dst);
+		b.flip();
+		return b;
+	}
+
+	// -----------------------------------------------------------------------
+	// Internal paging
+	// -----------------------------------------------------------------------
+
+	/**
+	 * Returns the cached page for {@code pageIndex}, mapping it from the
+	 * FileChannel on a cache miss.
+	 */
+	private ByteBuffer getPage(int pageIndex) {
+		ByteBuffer page = pageCache.get(pageIndex);
+		if (page != null) return page;
+
+		long pageStart = (long) pageIndex * pageSize;
+		long mapSize   = Math.min(fileLength - pageStart, pageSize);
+
+		try {
+			page = channel.map(FileChannel.MapMode.READ_ONLY, pageStart, mapSize);
+			page.order(ByteOrder.BIG_ENDIAN);   // SQLite stores integers big-endian
+		} catch (IOException e) {
+			throw new RuntimeException(
+					"Failed to map page " + pageIndex + " at offset " + pageStart
+					+ ". Ensure the RandomAccessFile was not closed externally "
+					+ "— BigByteBuffer owns the file handle; call close() on BigByteBuffer instead.", e);
+		}
+
+		pageCache.put(pageIndex, page);   // LRU eviction fires inside removeEldestEntry
+		return page;
+	}
+
+	private byte readByteAt(long position) {
+		int        pageIdx = (int) (position / pageSize);
+		int        pageOff = (int) (position % pageSize);
+		ByteBuffer page    = getPage(pageIdx);
+		return page.get(pageOff);
+	}
+
+	private void checkUnderflow(int needed) {
+		if (pos + needed > limit)
+			throw new BufferUnderflowException();
+	}
+
+	// -----------------------------------------------------------------------
+	// Best-effort unmap
+	// -----------------------------------------------------------------------
+
+	/**
+	 * Attempts to force-unmap a MappedByteBuffer via the internal Cleaner so
+	 * that native memory is released before the next GC cycle.
+	 * Silently ignored on JDK versions that restrict reflective access.
+	 */
+	private static void tryUnmap(ByteBuffer buffer) {
+		if (!buffer.isDirect()) return;
+		try {
+			java.lang.reflect.Method cleanerMethod =
+					buffer.getClass().getMethod("cleaner");
+			cleanerMethod.setAccessible(true);
+			Object cleaner = cleanerMethod.invoke(buffer);
+			if (cleaner != null) {
+				java.lang.reflect.Method cleanMethod =
+						cleaner.getClass().getMethod("clean");
+				cleanMethod.setAccessible(true);
+				cleanMethod.invoke(cleaner);
+			}
+		} catch (Exception ignored) {
+			// JDK 9+ without --add-opens, or non-Sun JVM: let GC handle it.
+		}
+	}
+
+	// -----------------------------------------------------------------------
+	// Resource management
+	// -----------------------------------------------------------------------
+
+	/**
+	 * Releases all cached pages, closes the FileChannel, and closes the
+	 * underlying RandomAccessFile.
+	 * <p>
+	 * The buffer must not be used after this call.
+	 */
+	public void close() throws IOException {
+		for (ByteBuffer buf : pageCache.values()) {
+			tryUnmap(buf);
+		}
+		pageCache.clear();
+		if (channel != null) channel.close();
+		if (raf     != null) raf.close();
+	}
 }

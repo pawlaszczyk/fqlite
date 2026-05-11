@@ -4,7 +4,7 @@ import java.util.*;
 
 import fqlite.base.GUI;
 import fqlite.log.AppLog;
-import fqlite.types.FileTypes;
+import fqlite.types.FileType;
 import javafx.application.Platform;
 import javafx.beans.property.SimpleStringProperty;
 import javafx.beans.value.ObservableValue;
@@ -12,17 +12,8 @@ import javafx.collections.FXCollections;
 import javafx.collections.ObservableList;
 import javafx.event.EventHandler;
 import javafx.scene.Scene;
-import javafx.scene.control.Button;
-import javafx.scene.control.ContextMenu;
-import javafx.scene.control.Label;
-import javafx.scene.control.MenuItem;
-import javafx.scene.control.SelectionMode;
-import javafx.scene.control.Tab;
-import javafx.scene.control.TabPane;
-import javafx.scene.control.TableColumn;
-import javafx.scene.control.TablePosition;
+import javafx.scene.control.*;
 import javafx.scene.control.TableColumn.CellDataFeatures;
-import javafx.scene.control.TableView;
 import javafx.scene.image.ImageView;
 import javafx.scene.input.ClipboardContent;
 import javafx.scene.input.KeyCode;
@@ -50,15 +41,6 @@ public class DBPropertyPanel extends StackPane{
 		this.info = info;
 		this.gui = gui;
 		VBox base = new VBox();
-		
-		//String s = Objects.requireNonNull(GUI.class.getResource("/gray_schema32_old.png")).toExternalForm();
-		//Button btnSchema = new Button("Show Schema Info");
-		//ImageView iv = new ImageView(s);
-		//btnSchema.setGraphic(iv);
-		//btnSchema.setOnAction(e->showColumnInfo());
-		//this.columnBtn.setToolTipText("Show Schema Information with Standard Webbrowser");        
-		StackPane head = new StackPane();
-		//head.getChildren().add(btnSchema);
 		base.getChildren().addAll(tabpane,new Label(fname));
 	    tabpane.setPrefHeight(4000);
 		VBox.setVgrow(tabpane,Priority.ALWAYS);
@@ -71,18 +53,11 @@ public class DBPropertyPanel extends StackPane{
 	@SuppressWarnings("unchecked")
 	public void initHeaderTable(String[][] data)
 	{
-		
-	    javafx.scene.control.TextArea headerinfo = new javafx.scene.control.TextArea();
-	    headerinfo.setEditable(false);
-	    headerinfo.setStyle("-fx-font-alignment: center");
-	    headerinfo.setText(info.toString());
-	    StackPane sp =  new StackPane();
-	    sp.getChildren().add(headerinfo);
-		Tab headerinfotab = new Tab("File Info",sp);
-        tabpane.getTabs().add(headerinfotab);
-	
-        
-        String[] column ={"Offset", "Property", "Value"};
+		ScrollPane fileInfoPanel = info.getPanel();
+		Tab headerinfotab = new Tab("File Info", fileInfoPanel);
+		tabpane.getTabs().add(headerinfotab);
+
+		String[] column ={"Offset", "Property", "Value"};
 		
 		TableView table = new TableView<>();
 		table.getSelectionModel().setSelectionMode(
@@ -143,7 +118,7 @@ public class DBPropertyPanel extends StackPane{
 	
         String str = "<!DOCTYPE html>" + "<html>"
         		+ " <head> "
-        		+ "<title>" + info.filename +" - Schema Information</title>"
+        		+ "<title>" + info.file.getFileName() +" - Schema Information</title>"
         		+ " <style type=\"text/css\">\n"
         		+ "  table, td, tr { border:1px solid black;}\n"
         		+ " </style>"
@@ -156,7 +131,7 @@ public class DBPropertyPanel extends StackPane{
             
                 + " </head>"
                 + " <body>"                
-                + "<h1>Schema Information for database: " + info.filename + "</h1>";	
+                + "<h1>Schema Information for database: " + info.file.getFileName() + "</h1>";
         
         
         str += "<a id=\"top\"></a>";
@@ -281,17 +256,7 @@ public class DBPropertyPanel extends StackPane{
          columnStr = str;
 	}
 	
-	public void showColumnInfo()
-	{
- 	    
-	    Stage secondStage = new Stage();
-        Scene scene = new Scene(new SchemaBrowser(columnStr),750,500, javafx.scene.paint.Color.web("#666970"));			
-	    System.out.println(columnStr);
-        secondStage.setTitle("Schema Info");
-        secondStage.setScene(scene);
-        secondStage.show();
-	}
-	
+
 	@SuppressWarnings("unchecked")
 	public void initPagesTable(String[][] data)
 	{
@@ -328,9 +293,7 @@ public class DBPropertyPanel extends StackPane{
 			        });
 				}
 				
-               // col.setSortable(false);
-					
-				
+
 				switch(i)
 				{
 					case 0:   col.prefWidthProperty().bind(table.widthProperty().multiply(0.08));
@@ -351,7 +314,7 @@ public class DBPropertyPanel extends StackPane{
 			fillTable(table,data,true);
 		
 		// add handler for offset selection -> this will automatically open the hex-viewer
-				setOnClickOffset(table);
+		setOnClickOffset(table);
 				
 			
 				
@@ -366,8 +329,7 @@ public class DBPropertyPanel extends StackPane{
 	@SuppressWarnings("unchecked")
 	public void initSchemaTable(String[][] data)
 	{
-		
-		
+
 		String[] column ={"No.", "Type", "Tablename", "Root", "SQL-Statement", "Virtual", "ROWID"};
 		
 		TableView table = new TableView<>();
@@ -467,9 +429,6 @@ private ContextMenu createContextMenu(TableView<String> table){
 		
 		final ContextMenu contextMenu = new ContextMenu();
 
-		
-		
-		
 		table.setOnMouseClicked(new EventHandler<javafx.scene.input.MouseEvent>() {
 			
 			@Override
@@ -564,7 +523,6 @@ private ContextMenu createContextMenu(TableView<String> table){
             ObservableList<String> hl = (ObservableList<String>) table.getItems().get(pos.getRow());
             sb.append(hl.toString() + "\n");
         }
-	    System.out.println("Write value to clipboard " + sb.toString());
 	    content.putString(sb.toString());
 	    clipboard.setContent(content);
 	
@@ -646,9 +604,7 @@ private ContextMenu createContextMenu(TableView<String> table){
 				       
 					// get the actual value of the currently selected cell
 				    ObservableValue off =  toff.getCellObservableValue(row);
-				      
-				    System.out.println("Bin drin " + off);
-					   
+
 					   if (col.getText().equals("offset"))
 					   {
 						   if(row >= 0)
@@ -658,11 +614,11 @@ private ContextMenu createContextMenu(TableView<String> table){
 							   						   
 							   String model = null;
 							   
-							   if (no.type == FileTypes.SQLiteDB)
+							   if (no.type == FileType.SQLiteDB)
 								model = no.job.path;
-							   else if (no.type == FileTypes.WriteAheadLog)
+							   else if (no.type == FileType.WriteAheadLog)
 								model = no.job.wal.path;
-						       else if (no.type == FileTypes.RollbackJournalLog)
+						       else if (no.type == FileType.RollbackJournalLog)
 						    	model = no.job.rol.path;
 							   
 											   

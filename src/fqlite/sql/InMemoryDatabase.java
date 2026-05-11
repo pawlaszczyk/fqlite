@@ -74,42 +74,7 @@ public class InMemoryDatabase {
         this.stage = stage;
     }
 
-    /**
-     * The freelist has to be created separately since it is not part
-     * of the original database schema.
-     * @param tdefault table information object
-     * @param isWAL is write-ahead log
-     * @return the final CREATE TABLE statement for the freelist
-     */
-    private static String createFREEList(TableDescriptor tdefault,boolean isWAL) {
 
-        StringBuilder sql = new StringBuilder();
-        sql.append("CREATE TABLE IF NOT EXISTS fqlite_freelist ("+ Global.col_no +" INT, "+ Global.col_status +" VARCHAR(5), "+ Global.col_offset +" BIGINT, "+ Global.col_pll +" VARCHAR(10), "+ Global.col_rowid+" BIGINT, ");
-
-        if(isWAL)
-            sql.append(" " + Global.col_commit + " VARCHAR(5), " + Global.col_dbpage +  " INT, " + Global.col_walframe + " INT, " + Global.col_salt1 +  " INT, " + Global.col_salt2 + " INT, ");
-
-        int i = -1;
-
-        for (String c: tdefault.columnnames){
-
-            i++;
-            // skip some of the internal fields (e.g. Commit Column is replaced during export with FQLite_Commit)
-            if( i < 5)
-                continue;
-
-            sql.append(" ")
-                    .append(c)
-                    .append(" ")
-                    .append("TEXT,");
-
-        }
-        // remove last comma
-        sql.deleteCharAt(sql.length()-1);
-
-        sql.append(")");
-        return sql.toString();
-    }
 
     /**
      * This method is used to extend the original sql-statement by some fqlite columns.
@@ -152,7 +117,7 @@ public class InMemoryDatabase {
     ///
     /// @param tables a list with all table descriptor objects inside.
     /// @throws SQLException in case of an error during the creation process.
-    public void createDatabaseAndSchema(List<TableDescriptor> tables, TableDescriptor tdefault, String path, boolean isWAL) throws SQLException {
+    public void createDatabaseAndSchema(List<TableDescriptor> tables, String path, boolean isWAL) throws SQLException {
 
         Statement statement = null;
 
@@ -170,16 +135,25 @@ public class InMemoryDatabase {
 
                 String stm;
 
-                stm = createTableSql(desc.tblname,desc.columnnames,desc.sqltypes, isWAL);
+                if (desc.sql.contains("CREATE VIRTUAL TABLE"))
+                {
+                   // We skip the CREATE VIRTUAL TABLE statement since the tables have already been created.
+                   // For fts4 we would also need the tokenizer. Normally this is not available in the forensic context.
+                   continue;
 
-                stm = stm.replace("CREATE TABLE", "CREATE TABLE IF NOT EXISTS");
+                }
+                else {
+
+                    stm = createTableSql(desc.tblname, desc.columnnames, desc.sqltypes, isWAL);
+
+                    stm = stm.replace("CREATE TABLE", "CREATE TABLE IF NOT EXISTS");
+                }
+
+                System.out.println("statement‚ " + stm);
+
                 boolean result = statement.execute(stm);
 
             }
-
-            // create table fqlite_freelist
-            String freelist = createFREEList(tdefault,isWAL);
-            statement.executeUpdate(freelist);
 
         } catch (Exception e) {
             AppLog.error(e.getMessage());
@@ -204,7 +178,7 @@ public class InMemoryDatabase {
     /// @param tableName name of the table
     /// @param rows a list of rows
     /// @throws SQLException in case something went wrong
-    public void insertRows(BLOBCache cache, String dbname, String tableName, List<TableDescriptor> tables, TableDescriptor tdefault, ObservableList<ObservableList<String>> rows, boolean isWAL) throws SQLException {
+    public void insertRows(BLOBCache cache, String dbname, String tableName, List<TableDescriptor> tables, ObservableList<ObservableList<String>> rows, boolean isWAL) throws SQLException {
         if (rows == null || rows.isEmpty()) {
             return;
         }
@@ -212,20 +186,20 @@ public class InMemoryDatabase {
         TableDescriptor desc = null;
         List<String> colNames = null;
 
-        if (tableName.startsWith("fqlite_freelist")) {
-            desc = tdefault;
-            colNames = desc.columnnames.subList(5,desc.columnnames.size()-1);
-        }
-        else {
-            // first we have to find the correct TableDescriptor object from the list
-            for (TableDescriptor d: tables) {
-                if (d.tblname.equals(tableName)) {
-                    desc = d;
-                    colNames = desc.columnnames;
-                    break;
-                }
+
+        // first we have to find the correct TableDescriptor object from the list
+        for (TableDescriptor d: tables) {
+            if (d.tblname.equals(tableName)) {
+
+                // skip virtual tables
+                if(d.isVirtual())
+                    return;
+                desc = d;
+                colNames = desc.columnnames;
+                break;
             }
         }
+
 
         if (null == desc)
             return;
@@ -289,11 +263,13 @@ public class InMemoryDatabase {
                     // BLOB handling is different
                     if (record.get(pos).startsWith("[BLOB-")) {
                         String key = "BLOB";
-                        //String key = getBLOBKey(cvalue,dbname,record.get(5));
-                        //   BLOBElement b = cache.get(key);
-                           // write byte-array to statement
-                        //   preparedStatement.setBytes(j,b.binary);
-                        preparedStatement.setString(j,key);
+                        if(j == 38)
+                            System.out.println("Stopppp");
+                        try {
+                            preparedStatement.setString(j, key);
+                        }catch(SQLException e){
+                          System.out.println("Error" + e.getMessage());
+                        }
                     } else {
                         // for all remaining data types
                         switch (pos) {
@@ -386,7 +362,8 @@ public class InMemoryDatabase {
             // Execute SELECT
             return pstmt.executeQuery();
 
-        } catch (SQLException e) {
+        }
+        catch (SQLException e) {
             if (e.getMessage().contains("syntax error")) {
                 showErrorSELECT(stage,e.getMessage());
             } else if (e.getMessage().contains("no such table")) {
@@ -394,7 +371,7 @@ public class InMemoryDatabase {
             } else {
                 showErrorDatabase(stage,e.getMessage());
             }
-            e.printStackTrace();
+            //e.printStackTrace();
         }
 
         return null;

@@ -102,7 +102,7 @@ public class SQLiteDatabaseCreator {
     ///
     /// @param tables a list with all table descriptor objects inside.
     /// @throws SQLException in case of an error during the creation process.
-    public void createDatabaseAndSchema(List<TableDescriptor> tables, TableDescriptor tdefault, String path, boolean isWAL) throws SQLException {
+    public void createDatabaseAndSchema(List<TableDescriptor> tables, String path, boolean isWAL) throws SQLException {
         Connection connection = null;
         Statement statement = null;
 
@@ -123,6 +123,9 @@ public class SQLiteDatabaseCreator {
             for(TableDescriptor desc : tables) {
                 if (desc.sql.isEmpty() || desc.tblname.startsWith("sqlite_"))
                     continue;
+                if (desc.isVirtual()) {
+                    continue;
+                }
 
                 String stm = createTableSql(desc.tblname,desc.columnnames,desc.sqltypes, isWAL);
 
@@ -130,9 +133,6 @@ public class SQLiteDatabaseCreator {
                 int rowcnt = statement.executeUpdate(stm);
             }
 
-            // create table fqlite_freelist
-            String freelist = createFREEList(tdefault,isWAL);
-            statement.executeUpdate(freelist);
 
             // close all
             statement.close();
@@ -169,7 +169,7 @@ public class SQLiteDatabaseCreator {
     /// @param tableName name of the table
     /// @param rows a list of rows
     /// @throws SQLException in case something went wrong
-    public void insertRows(BLOBCache cache, String dbname, String tableName, List<TableDescriptor> tables, TableDescriptor tdefault, ObservableList<ObservableList<String>> rows, boolean isWAL) throws SQLException {
+    public void insertRows(BLOBCache cache, String dbname, String tableName, List<TableDescriptor> tables, ObservableList<ObservableList<String>> rows, boolean isWAL) throws SQLException {
         if (rows == null || rows.isEmpty()) {
             return;
         }
@@ -177,20 +177,18 @@ public class SQLiteDatabaseCreator {
         TableDescriptor desc = null;
         List<String> colNames = null;
 
-        if (tableName.startsWith("fqlite_freelist")) {
-            desc = tdefault;
-            colNames = desc.columnnames.subList(5,desc.columnnames.size()-1);
-        }
-        else {
-            // first we have to find the correct TableDescriptor object from the list
-            for (TableDescriptor d: tables) {
-                if (d.tblname.equals(tableName)) {
-                    desc = d;
-                    colNames = desc.columnnames;
-                    break;
-                }
+
+        // first we have to find the correct TableDescriptor object from the list
+        for (TableDescriptor d: tables) {
+            if (d.tblname.equals(tableName)) {
+                if(d.isVirtual())
+                    return;
+                desc = d;
+                colNames = desc.columnnames;
+                break;
             }
         }
+
 
         if (null == desc)
             return;
@@ -335,27 +333,32 @@ public class SQLiteDatabaseCreator {
 
     private String getBLOBKey(String cellValue, String dbname, String off) {
 
-        String type = "";
-        String number = "";
 
-        //  Try to determine the type of BLOB for the file extension
-        if (cellValue.startsWith("[BLOB-")) {
-            int from = cellValue.indexOf("BLOB-");
-            int to = cellValue.indexOf("]");
-            number = cellValue.substring(from + 5, to);
-            int start = cellValue.indexOf("<");
-            int end = cellValue.indexOf(">");
+        int from = cellValue.indexOf("-");
+        int to = cellValue.indexOf("]");
 
-            /* extract the BLOB type information from cell value */
-            if (end > 0) {
-                type = cellValue.substring(start + 1, end);
+        int number = Integer.parseInt(cellValue.substring(from+1, to));
+
+        long hash = -1;
+        if (off.length() > 2) {
+            try {
+                hash = Long.parseLong(off);
+            } catch (NumberFormatException e) {
+                System.out.println("Number format exception: compute hash failed ");
             }
+        } else {
+            hash = 0;
         }
 
-        if(type.isEmpty() || type.equals("java"))
-            type = "bin";
 
-        return GUI.baseDir + Global.separator + dbname + "_" + off + "-" + number + "." + type;
+        if (from > 0 && to > 0) {
 
+            String base = hash + "-" + number;
+
+            return base;
+
+        }
+
+        return null;
     }
 }

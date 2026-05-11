@@ -35,8 +35,17 @@ public class ImportDBTask {
           System.out.println("DB Import Done!");
           Platform.runLater(new Runnable() {
                 public void run() {
-                  String s = Objects.requireNonNull(GUI.class.getResource("/green_database24.png")).toExternalForm();
+                  //green_database24.png
+                  String s = Objects.requireNonNull(GUI.class.getResource("/icon24_db.png")).toExternalForm();
                   ImageView iv = new ImageView(s);
+                  iv = new ImageView(s);
+                  //SVGHelper svg = SVGHelper.getInstance();
+                  //ImageView iv = svg.load("/icon24_db.png",24,24);
+                  //iv.smoothProperty().setValue(true);
+                  iv.setCache(true);
+                  iv.preserveRatioProperty().setValue(true);
+                  iv.setFitHeight(24);
+                  iv.setFitWidth(24);
                   job.dbNode.setGraphic(iv);
                   job.updatePropertyPanel();
 
@@ -46,8 +55,10 @@ public class ImportDBTask {
             rol.ps = ImportDBTask.this.job.ps;
             rol.parse();
             rol.output();
-            String s2 = Objects.requireNonNull(GUI.class.getResource("/green_journal24.png")).toExternalForm();
+            String s2 = Objects.requireNonNull(GUI.class.getResource("/icon24_rb.png")).toExternalForm();
             ImageView iv2 = new ImageView(s2);
+            iv2.setFitWidth(24);
+            iv2.setFitHeight(24);
             if (ImportDBTask.this.job.rjNode != null)
               ImportDBTask.this.job.rjNode.setGraphic(iv2); 
             ImportDBTask.this.job.rol = rol;
@@ -59,8 +70,12 @@ public class ImportDBTask {
             ImportDBTask.this.job.wal = wal;
             wal.parse();
             wal.output();
-            String s3 = Objects.requireNonNull(GUI.class.getResource("/green_archive24.png")).toExternalForm();
+            // /green_archive24.png"
+            String s3 = Objects.requireNonNull(GUI.class.getResource("/icon24_wal.png")).toExternalForm();
             ImageView iv3 = new ImageView(s3);
+            iv3.setFitWidth(24);
+            iv3.setFitHeight(20);
+
             if (ImportDBTask.this.job.walNode != null)
               ImportDBTask.this.job.walNode.setGraphic(iv3); 
             ImportDBTask.this.job.updateWALPanel();

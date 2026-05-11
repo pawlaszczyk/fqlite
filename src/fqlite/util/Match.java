@@ -1,5 +1,9 @@
 package fqlite.util;
 
+/**
+ * This class represents a match of the header signature.
+ * It is used during data recovery process.
+ */
 public class Match
 {
 	 public Match(String match,int begin, int end)

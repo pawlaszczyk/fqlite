@@ -4,6 +4,8 @@ import java.util.Iterator;
 import fqlite.base.Job;
 import fqlite.descriptor.IndexDescriptor;
 import fqlite.descriptor.TableDescriptor;
+import fqlite.types.FileType;
+import javafx.application.Platform;
 import javafx.beans.property.ObjectProperty;
 import javafx.beans.property.SimpleObjectProperty;
 import javafx.collections.ObservableList;
@@ -85,7 +87,6 @@ public class TooltippedTableCell<S, T> extends TableCell<S, T> {
 	        	Iterator<TableDescriptor> tbls = job.headers.iterator();
 	        	while(tbls.hasNext()){
 	        		TableDescriptor td = tbls.next();
-	        		
 	        		if(td.tblname.equals(tablename)) {
 		        		coltype = td.getSqlTypeForColumn(this.getTableColumn().getText());
 		            	
@@ -137,22 +138,17 @@ public class TooltippedTableCell<S, T> extends TableCell<S, T> {
         		if (hl.get(5)== null || hl.get(5).trim().equals(""))
         			return;
         		hash = Long.parseLong(hl.get(5));
-	
+
         	}
+
+			final String output = s;
+			Platform.runLater(() -> {
         	
-        	
-        	
-        	if(true) {
-        		synchronized(this) {
-        	
-		        
-        			ctt.addCellText(tablename,hash,job,coltype,s,this,cell,converter);
+		         	ctt.addCellText(tablename,hash,job,coltype,output,this,cell,converter);
         			/* there is one tooltip object for the complete table */
         			cell.setTooltip(ctt);
-        			cell.setText(s);  
-        		}
-		        return;
-        	}
+					cell.setText(output);
+        	});
         	
         }
     }
@@ -206,6 +202,7 @@ public class TooltippedTableCell<S, T> extends TableCell<S, T> {
     	
     	super.updateItem(item, empty);
         updateItem(this, getConverter());
+
     }
     
     

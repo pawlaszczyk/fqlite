@@ -8,7 +8,7 @@ FQLite is a tool to find and restore deleted records in SQLite databases. It the
 
 
 <p align="center">
-  <img width="95%" height="95%" src="img/fqlite_mainscreen.jpg?raw=true" alt="FQLite Screenshot"/>
+  <img width="95%" height="95%" src="img/fqlite_screenshot.png?raw=true" alt="FQLite Screenshot"/>
 </p>
 
 
@@ -67,11 +67,19 @@ http://dx.doi.org/10.13140/RG.2.2.20276.92800
 
 An overview article highlighting the technical background of FQLite can be retrieved from 
 
-https://conceptechint.net/index.php/CFATI/article/view/17/6
-
 D. Pawlaszczyk, C. Hummert: (2021). 
 Making the Invisible Visible – Techniques for Recovering Deleted SQLite Data Records. 
 International Journal of Cyber Forensics and Advanced Threat Investigations,
+https://conceptechint.net/index.php/CFATI/article/view/17/6
+
+
+An overview article highlighting the new AI-Assistant of FQLite can be retrieved from
+
+Dirk Pawlaszczyk, Ronny Bodach, Philipp Engler, Jan Kolouch, Michael Spranger, Christian Hummert, Dirk Labudde,
+AI-based automated SQL query generation for SQLite databases in Mobile forensics,
+Forensic Science International: Digital Investigation,
+Volume 57, 2026, 302100, ISSN 2666-2817,
+https://doi.org/10.1016/j.fsidi.2026.302100
 
 
 ### Prerequisites
