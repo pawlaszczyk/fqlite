@@ -163,10 +163,7 @@ runtime {
         installerOptions += ['--resource-dir', "resources"]
         imageOptions += [
                 '--java-options', '-XX:+UseZGC',
-                '-Xms32m',
-                '-Xmx4G',
-                '-XX:G1PeriodicGCInterval=10000',  
-                '-XX:GCTimeRatio=4'
+                '-Xmx4G'
         ]
 
         if (currentOs.windows) {
