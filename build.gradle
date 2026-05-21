@@ -9,14 +9,14 @@ plugins {
 
 
 group 'hswm.fqlite'
-version '4.21'
+version '4.1'
 
 def protocversion = "27.4"
 
 def currentOs = org.gradle.internal.os.OperatingSystem.current()
 
 application {
-   mainClass.set("fqlite.base.FQLite")
+   mainClass.set("fqlite.base.JARStarter")
 }
  
 
@@ -161,16 +161,9 @@ runtime {
 
     jpackage {
         installerOptions += ['--resource-dir', "resources"]
-
-        // JVM-Args für die installierte Anwendung
-        // imageOptions += [
-        //        '--java-options', '-XX:+UseZGC',
-        //        '-XX:+ZGenerational',
-        //        '-Xms32m',
-        //        '-Xmx4G',
-        //        '-XX:G1PeriodicGCInterval=10000',  // GC alle 10s wenn idle
-        //        '-XX:GCTimeRatio=4'
-        //]
+        imageOptions += [
+                '--java-options', '-XX:+UseZGC'
+        ]
 
         if (currentOs.windows) {
             installerOptions += ['--win-per-user-install', '--win-dir-chooser', '--win-menu', '--win-shortcut']
