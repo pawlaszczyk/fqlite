@@ -26,13 +26,15 @@ FQLite allows you to:
 * support a forensically sound investigation of database files
 * support for decoding of bplist, protobuf and BASE64 encoded cell values
 * automatic detection of different BLOB types like .png, .bmp, .gif, .jpeg, .tiff, .heic, .pdf
-* analysing BLOB formats like Google protobuf, AVRO, Apple plist, Thrift,... 
+* analyzing BLOB formats like Google protobuf, AVRO, Apple plist, Thrift,... 
 * integrated SQL-Analyser 
 * HTML-export functionality (since. 4.0)
 * Displaying database PRAGMA values
 * Export recovered data into a new SQLite database 
 * Text-to-SQL generation with AI-based Assistant (since 4.0)
-* Graphic SQL-Schema analyser (based on Mermaid.js)
+* Graphic SQL-Schema analyzer (based on Mermaid.js)
+* Export recovered data to CASE/UCO JSON-LD format
+* white and black theme support
 
 Some features:
 

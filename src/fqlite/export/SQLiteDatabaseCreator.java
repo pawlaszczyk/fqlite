@@ -331,7 +331,7 @@ public class SQLiteDatabaseCreator {
         }
     }
 
-    private String getBLOBKey(String cellValue, String dbname, String off) {
+    public static String getBLOBKey(String cellValue, String dbname, String off) {
 
 
         int from = cellValue.indexOf("-");

@@ -44,9 +44,8 @@ public class RollbackJournalReader{
 	public AsynchronousFileChannel file;
 
 	/* this is a multi-threaded program -> all data are saved to the list first*/
-	ConcurrentHashMap<String,ObservableList<ObservableList<String>>> resultlist = new ConcurrentHashMap<>();
+    public ConcurrentHashMap<String,ObservableList<ObservableList<String>>> resultlist = new ConcurrentHashMap<>();
 	public ConcurrentHashMap<String,ObservableList<ObservableList<byte[]>>> hexdumplist = new ConcurrentHashMap<>();
-
 
 	/* This buffer holds RollbackJournal-file in RAM */
 	ByteBuffer rollbackjournal;
@@ -98,7 +97,10 @@ public class RollbackJournalReader{
 
 	/* file pointer */
 	int journalpointer = 0;
-	
+
+
+	Map<Long, RollbackjournalAnalyzer.SchemaEntry> pageOwner;
+	List<RollbackjournalAnalyzer.PageRecord> records;
 
 	/**
 	 * Constructor.
@@ -118,9 +120,10 @@ public class RollbackJournalReader{
 	 * 
 	 * @return
 	 */
-	public void parse() {
+	public void parse() throws IOException {
 		Path p = Paths.get(path);
 
+		RollbackjournalAnalyzer.analyzeJournal(this);
 		
 		/*
 		 * We have to do this before we open the database because of the concurrent
@@ -201,8 +204,7 @@ public class RollbackJournalReader{
 		}
 		else 
 		{
-				AppLog.info("This file does not contain a valid header.");
-				
+			AppLog.info("This file does not contain a header. It is a hot journal file (still active). ");
 		}
 		
 		pagecount = Integer.toUnsignedLong(header.getInt());
@@ -228,48 +230,60 @@ public class RollbackJournalReader{
 
 		visit = new BitSet(ps);
 
-		
-		
-		boolean next = false;
-		int numberofpages = 0;
-		do
-		{
-			rollbackjournal.position(journalpointer);
-			/* get the page number of the journal page in main db */
-			
-		    pagenumber_maindb = rollbackjournal.getInt();
-			AppLog.debug("pagenumber of journal-entry " + pagenumber_maindb);
-			
-			//* offset of the journal page -> save it */
-			int pageoffset = rollbackjournal.position();
-			
-			/* now we can read the page - it follows immediately after the frame header */
-	
+		int i = 0;
+		for(RollbackjournalAnalyzer.PageRecord r: records){
+
+			long offset = r.recordOffset();
+			long page = r.pageNumber();
+
 			/* read the db page into buffer */
-			buffer = readPage();
-	
-			numberofpages++;
-			pagenumber_rol = numberofpages;
-			
-			analyzePage(pagenumber_maindb,pageoffset); // we need the original page number to compute the offset for the diff between journal and database
-			
-			/* set pointer to next journal record  -> currentpos + 4 Byte for the page number in mainDB + pagesize + 4 Byte for Checksum */ 
-			journalpointer += (4 + ps + 4);
-			
-			//System.out.println(" Position in RollbackJournal-file " + journalpointer + " " );
-			
-			/*  More pages to analyse? */
-			if(journalpointer + ps  <= size)
-			{
-				next = true;
-			}
-			else
-				next = false;
-			
-		}while(next);
+			buffer = readPage((int)offset+4);
+
+			analyzePage(i, (int)page,(int)offset + 4); // we need the original page number to compute the offset for the diff between journal and database
+			i++;
+		}
+		
+//		boolean next = false;
+//		int numberofpages = 0;
+//		do
+//		{
+//			rollbackjournal.position(journalpointer);
+//			/* get the page number of the journal page in main db */
+//
+//		    pagenumber_maindb = rollbackjournal.getInt();
+//			AppLog.debug("pagenumber of journal-entry " + pagenumber_maindb);
+//			System.out.println(String.format("pagenumber of journal-entry " + pagenumber_maindb));
+//
+//			//* offset of the journal page -> save it */
+//			int pageoffset = rollbackjournal.position();
+//
+//			/* now we can read the page - it follows immediately after the frame header */
+//
+//			/* read the db page into buffer */
+//			buffer = readPage();
+//
+//			numberofpages++;
+//			pagenumber_rol = numberofpages;
+//
+//			analyzePage(pagenumber_maindb,pageoffset); // we need the original page number to compute the offset for the diff between journal and database
+//
+//			/* set pointer to next journal record  -> currentpos + 4 Byte for the page number in mainDB + pagesize + 4 Byte for Checksum */
+//			journalpointer += (4 + ps + 4);
+//
+//			//System.out.println(" Position in RollbackJournal-file " + journalpointer + " " );
+//
+//			/*  More pages to analyse? */
+//			if(journalpointer + ps  <= size)
+//			{
+//				next = true;
+//			}
+//			else
+//				next = false;
+//
+//		}while(next);
 
 		AppLog.info("Lines after RollbackJournal-file recovery: " + output.size());
-		AppLog.info("Number of pages in RollbackJournal-file" + numberofpages);
+		AppLog.info("Number of pages in RollbackJournal-file" + records.size());
 	
 	}
 	
@@ -303,9 +317,10 @@ public class RollbackJournalReader{
 	 * 
 	 * @return int success
 	 */
-	public int analyzePage(int originalpagenumber,int pageoffset) {
+	public int analyzePage(int page, int originalpagenumber,int pageoffset) {
 
 		withoutROWID = false;
+		pagenumber_maindb = originalpagenumber;
 		
 		/* convert byte array into a string representation */
 		String content = Auxiliary.bytesToHex2(buffer);
@@ -315,7 +330,6 @@ public class RollbackJournalReader{
 
 		/* check type of the page by reading the first two bytes */
 		int type = Auxiliary.getPageType(content);
-
 		/* mark bytes as visited */
 		visit.set(0, 2);
 
@@ -439,13 +453,33 @@ public class RollbackJournalReader{
 			}
 			last = celloff;
 				String hls = Auxiliary.Int2Hex(celloff); 
-				AppLog.debug(pagenumber_rol + " -> " + celloff + " " + "0" + hls);
+
+				AppLog.debug(page + " -> " + celloff + " " + "0" + hls);
 			hls.trim();
 			
             LinkedList<String> record = null;
-			
+
+			String tname = null;
+
+//			RollbackjournalAnalyzer.SchemaEntry e = pageOwner.get((long)page);
+
+			for (RollbackjournalAnalyzer.PageRecord re : records){
+				if (re.pageNumber()== pagenumber_maindb){
+					tname = re.ownerName();
+				}
+			}
+
+			if (tname == null) {
+				tname = "unkown";
+			}
+//			else {
+//				tname = e.name();
+//			}
+
 			try {
-				DataRow r = ct.readRecord(celloff, buffer, pagenumber_maindb, visit, Integer.MAX_VALUE, withoutROWID, Global.ROLLBACK_JOURNAL_FILE, pageoffset + celloff);
+				DataRow r = ct.readRecord(celloff, buffer, pagenumber_maindb, visit, Integer.MAX_VALUE, withoutROWID, Global.ROLLBACK_JOURNAL_FILE, pageoffset + celloff, tname);
+				if (r == null)
+					return -1;
 				record = r.line();
 
 				// add new line to output
@@ -454,8 +488,8 @@ public class RollbackJournalReader{
 					updateResultSet(r);
 				}
 
-			} catch (IOException e) {
-				e.printStackTrace();
+			} catch (IOException err) {
+				err.printStackTrace();
 			}
 
 
@@ -532,6 +566,18 @@ public class RollbackJournalReader{
 		
 		ByteBuffer content = ByteBuffer.wrap(page);
 		
+		return content;
+	}
+
+	protected ByteBuffer readPage(int offset) {
+
+		byte [] page = new byte[ps];
+
+		rollbackjournal.position(offset);
+		rollbackjournal.get(page);
+
+		ByteBuffer content = ByteBuffer.wrap(page);
+
 		return content;
 	}
 

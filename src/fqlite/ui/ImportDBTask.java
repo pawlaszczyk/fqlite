@@ -10,6 +10,7 @@ import javafx.concurrent.Task;
 import javafx.scene.control.TreeItem;
 import javafx.scene.image.ImageView;
 
+import java.io.IOException;
 import java.util.Objects;
 
 public class ImportDBTask {
@@ -53,8 +54,14 @@ public class ImportDBTask {
             String rjpath = String.valueOf(ImportDBTask.this.job.path) + "-journal";
             RollbackJournalReader rol = new RollbackJournalReader(rjpath, ImportDBTask.this.job);
             rol.ps = ImportDBTask.this.job.ps;
-            rol.parse();
-            rol.output();
+
+              try {
+                  rol.parse();
+              } catch (IOException e) {
+                  throw new RuntimeException(e);
+              }
+
+              rol.output();
             String s2 = Objects.requireNonNull(GUI.class.getResource("/icon24_rb.png")).toExternalForm();
             ImageView iv2 = new ImageView(s2);
             iv2.setFitWidth(24);

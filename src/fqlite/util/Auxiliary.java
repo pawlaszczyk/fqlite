@@ -86,6 +86,22 @@ public class Auxiliary {
     /** MAC_EPOCH_OFFSET: seconds between 1970-01-01 and 2001-01-01 */
     private static final long MAC_EPOCH_OFFSET = 978_307_200L;
 
+    /**
+     * WEBKIT_EPOCH_OFFSET: seconds between 1601-01-01 (Windows / WebKit epoch)
+     * and the Unix epoch 1970-01-01.
+     * Used by Chromium / WebKit to store timestamps as microseconds since 1601-01-01.
+     */
+    private static final long WEBKIT_EPOCH_OFFSET = 11_644_473_600L;
+
+    /**
+     * WebKit / Chrome timestamp in microseconds since 1601-01-01.
+     * Valid range 2010–2050 expressed in that epoch:
+     *   lower = UNIX_MIN_SECONDS + WEBKIT_EPOCH_OFFSET (in µs)
+     *   upper = UNIX_MAX_SECONDS + WEBKIT_EPOCH_OFFSET (in µs)
+     */
+    static final long WEBKIT_MIN_DATE = (UNIX_MIN_SECONDS + 11_644_473_600L) * 1_000_000L;
+    static final long WEBKIT_MAX_DATE = (UNIX_MAX_SECONDS + 11_644_473_600L) * 1_000_000L;
+
     /** Shared timestamp formatter (thread-safe, immutable) */
     static final DateTimeFormatter TIMESTAMP_FORMATTER =
             DateTimeFormatter.ofPattern("MM/dd/yyyy - HH:mm:ss Z");
@@ -368,14 +384,14 @@ public class Auxiliary {
                     return null;
                 }
 
-          //      buffer.position(m.end - headerlength - 4);
-          //      byte[] beforeheader = new byte[4];
-          //      buffer.get(beforeheader);
+                //      buffer.position(m.end - headerlength - 4);
+                //      byte[] beforeheader = new byte[4];
+                //      buffer.get(beforeheader);
 
-          //      int[] values = readVarInt(beforeheader);
-          //      if (values != null && values.length > 0) {
-          //          rowid = values[values.length - 1];
-          //      }
+                //      int[] values = readVarInt(beforeheader);
+                //      if (values != null && values.length > 0) {
+                //          rowid = values[values.length - 1];
+                //      }
 
                 m.match = m.match.replace("RI", "");
                 buffer.position(m.end);
@@ -556,9 +572,9 @@ public class Auxiliary {
             //System.out.println(record);
 
             if ((record.size() - columns.size()) < 2) {
-                 repeat = true;
-                 round++;
-                 continue;
+                repeat = true;
+                round++;
+                continue;
             }
             else {
                 // successful recovery -> number of columns does match to the number of fields
@@ -629,7 +645,7 @@ public class Auxiliary {
      */
     public DataRow readRecord(int cellstart, ByteBuffer buffer, int pagenumber_db,
                               BitSet bs, int maxlength, boolean withoutROWID,
-                              int filetype, long offset) throws IOException {
+                              int filetype, long offset, String tblname) throws IOException {
 
         LinkedList<String> record = new LinkedList<>();
         LinkedList<byte[]> hexdump = new LinkedList<>();
@@ -640,40 +656,72 @@ public class Auxiliary {
 
         buffer.position(0);
 
-        //TableDescriptor   td = null;
         AbstractDescriptor td = null;
-        AbstractDescriptor ad = null;
+
+        if(tblname != null && tblname.equals("room_master_table")) {
+            System.out.println("Bin da.");
+        }
 
         /* Populate table-name and offset metadata */
-        if (filetype == Global.ROLLBACK_JOURNAL_FILE || filetype == Global.WAL_ARCHIVE_FILE) {
+
+        // case 1: WAL-Archive
+        if (filetype == Global.WAL_ARCHIVE_FILE) {
+
+            if(tblname == null)
+                return null;
+
+            record.add(tblname);
+            hexdump.add(null);
 
             if (pagenumber_db < job.pages.length && job.pages[pagenumber_db] != null) {
-                ad = job.pages[pagenumber_db];
-                td = ad;
-
-                if (ad instanceof TableDescriptor) {
+                td = job.pages[pagenumber_db];
+                rowid_col = td.rowid_col;
+                if ( td instanceof TableDescriptor) {
                     isVT  = td.sql.toUpperCase().contains("CREATE VIRTUAL");
-                    rowid_col = ad.rowid_col;
                 }
-                record.add(ad.getName().intern());
-                hexdump.add(null);
-            } else {
-                record.add(Global.DELETED_RECORD_IN_PAGE.intern());
-                hexdump.add(null);
+
             }
+
             record.add(Global.REGULAR_RECORD.intern());
             hexdump.add(null);
             record.add(offset > -1 ? offset + "" : cellstart + "");
             hexdump.add(null);
 
-        } else if (job.pages[pagenumber_db] != null) {
-            ad        = job.pages[pagenumber_db];
-            rowid_col = ad.rowid_col;
-            if (ad instanceof TableDescriptor) {
-                td   = (TableDescriptor) ad;
-                isVT = isVirtualTable(ad.getName());
+        }
+
+        // case 2: Rollback-Journal
+        else if (filetype == Global.ROLLBACK_JOURNAL_FILE) {
+
+            if(tblname == null)
+                return null;
+
+            record.add(tblname);
+            hexdump.add(null);
+
+            if (pagenumber_db < job.pages.length && job.pages[pagenumber_db] != null) {
+                td = job.pages[pagenumber_db];
+                rowid_col = td.rowid_col;
+                if ( td instanceof TableDescriptor) {
+                    isVT  = td.sql.toUpperCase().contains("CREATE VIRTUAL");
+                }
+
             }
-            record.add(ad.getName().intern());
+
+            record.add(Global.REGULAR_RECORD.intern());
+            hexdump.add(null);
+            record.add(offset > -1 ? offset + "" : cellstart + "");
+            hexdump.add(null);
+
+        }
+        // case 3: regular db-page
+        else if (job.pages[pagenumber_db] != null) {
+            td = job.pages[pagenumber_db];
+            rowid_col = td.rowid_col;
+            if (td instanceof TableDescriptor) {
+                td   = (TableDescriptor) td;
+                isVT = isVirtualTable(td.getName());
+            }
+            record.add(td.getName().intern());
             hexdump.add(null);
             record.add(Global.REGULAR_RECORD.intern());
             hexdump.add(null);
@@ -689,7 +737,7 @@ public class Auxiliary {
             buffer.position(cellstart);
         } catch (Exception err) {
             AppLog.debug("ERROR: cellstart not in buffer: " + cellstart
-                    + " pagenumber_db=" + (pagenumber_db - 1L) + " pagesize=" + job.ps);
+                         + " pagenumber_db=" + (pagenumber_db - 1L) + " pagesize=" + job.ps);
             return null;
         }
 
@@ -703,7 +751,7 @@ public class Auxiliary {
             if (unknown) {
                 rowid = readUnsignedVarInt(buffer);
             } else if (pagenumber_db < job.pages.length
-                    && (job.pages[pagenumber_db] == null || job.pages[pagenumber_db].ROWID)) {
+                       && (job.pages[pagenumber_db] == null || job.pages[pagenumber_db].ROWID)) {
                 rowid = readUnsignedVarInt(buffer);
             }
         }
@@ -738,8 +786,8 @@ public class Auxiliary {
                     record.add(td.tblname.intern());
                     hexdump.add(null);
                     job.pages[pagenumber_db] = td;
-                    if (ad != null) {
-                        isVT = isVirtualTable(ad.getName());
+                    if (td != null) {
+                        isVT = isVirtualTable(td.getName());
                     }
                     rowid_col = td.rowid_col;
                     record.add(Global.FREELIST_ENTRY.intern());
@@ -816,7 +864,7 @@ public class Auxiliary {
                 byte[] value = new byte[en.getlength()];
                 if ((bf.limit() - bf.position()) < value.length) {
                     AppLog.debug("Buffer underflow: available=" + (bf.limit() - bf.position())
-                            + " needed=" + value.length);
+                                 + " needed=" + value.length);
                 }
                 try {
                     //hex - representation of the field value
@@ -902,7 +950,7 @@ public class Auxiliary {
      * BLOB caching. Returns the updated {@code blobcolidx}.
      */
     private int appendColumn(LinkedList<String> record, LinkedList<byte[]> raw, SqliteElement en, byte[] value,
-                              int blobcolidx, boolean isVT, int offsetidx) {
+                             int blobcolidx, boolean isVT, int offsetidx) {
         if (en.serial == StorageClass.BLOB) {
             return appendBlobColumn(record, raw, en, value, blobcolidx, isVT, offsetidx);
         }
@@ -916,8 +964,8 @@ public class Auxiliary {
      * the table descriptor {@code td}.
      */
     private int appendValue(LinkedList<String> record, LinkedList<byte[]> hexdump, SqliteElement en,
-                                          byte[] value, int blobcolidx, boolean isVT,
-                                          AbstractDescriptor td, int co, int offsetidx) {
+                            byte[] value, int blobcolidx, boolean isVT,
+                            AbstractDescriptor td, int co, int offsetidx) {
         if (en.serial == StorageClass.BLOB) {
             hexdump.add(value);
             return appendBlobColumn(record, hexdump, en, value, blobcolidx, isVT, offsetidx);
@@ -930,15 +978,18 @@ public class Auxiliary {
         }
 
         // Check for TIMESTAMP column type
-        if (co < td.serialtypes.size()) {
-            String coltype = td.sqltypes.get(co);
-            if ("TIMESTAMP".equals(coltype)) {
-                TimeStamp ts = timestamp2String(en, value);
-                if (ts != null) {
-                    job.timestamps.put(ts.text, found);
-                    record.add(ts.text.intern());
-                    hexdump.add(value);
-                    return blobcolidx;
+        if (co < td.sqltypes.size()) {
+
+            if(td.sqltypes.size() > 0) {
+                String coltype = td.sqltypes.get(co);
+                if ("TIMESTAMP".equals(coltype)) {
+                    TimeStamp ts = timestamp2String(en, value);
+                    if (ts != null) {
+                        job.timestamps.put(ts.text, found);
+                        record.add(ts.text.intern());
+                        hexdump.add(value);
+                        return blobcolidx;
+                    }
                 }
             }
         }
@@ -964,7 +1015,7 @@ public class Auxiliary {
      * Returns the updated blob index.
      */
     private int appendBlobColumn(LinkedList<String> record,LinkedList<byte[]> raw, SqliteElement en, byte[] value,
-                                  int blobcolidx, boolean isVT, int offsetidx) {
+                                 int blobcolidx, boolean isVT, int offsetidx) {
         String text = en.getBLOB(value, !isVT);
         if (!text.isEmpty()) {
             String display = "[BLOB-" + blobcolidx + "] "; // + text;
@@ -986,7 +1037,7 @@ public class Auxiliary {
     // -------------------------------------------------------------------------
 
     private void storeBLOB(LinkedList<String> record, int blobcolidx,
-                            String tablecelltext, byte[] value, int offsetidx) {
+                           String tablecelltext, byte[] value, int offsetidx) {
         long hash = -1;
         if (record.get(offsetidx).length() > 2) {
             try {
@@ -1118,6 +1169,10 @@ public class Auxiliary {
         }
         if (l > UNIX_MIN_DATE_PICO && l < UNIX_MAX_DATE_PICO) {
             return formatEpochMilli(l / 1_000_000L);
+        }
+        // WebKit / Chrome: microseconds since 1601-01-01 (Windows FILETIME epoch)
+        if (l > WEBKIT_MIN_DATE && l < WEBKIT_MAX_DATE) {
+            return formatEpochMilli((l / 1_000L) - (WEBKIT_EPOCH_OFFSET * 1_000L));
         }
         return "";
     }
@@ -1473,7 +1528,7 @@ public class Auxiliary {
             buffer.get(header);
         } catch (Exception err) {
             AppLog.debug("getColumns error: " + err + " headerlength=" + headerlength
-                    + " capacity=" + buffer.capacity());
+                         + " capacity=" + buffer.capacity());
             return null;
         }
         return get(header);
@@ -1593,7 +1648,7 @@ public class Auxiliary {
     /** Converts a 4-byte integer to a hex string. */
     public static String intToHex(int i) {
         return bytesToHex3(new byte[]{
-            (byte) (i >>> 24), (byte) (i >>> 16), (byte) (i >>> 8), (byte) i
+                (byte) (i >>> 24), (byte) (i >>> 16), (byte) (i >>> 8), (byte) i
         });
     }
 
@@ -1657,7 +1712,7 @@ public class Auxiliary {
         byte[] data = new byte[len / 2];
         for (int i = 0; i < len; i += 2) {
             data[i / 2] = (byte) ((Character.digit(s.charAt(i), 16) << 4)
-                    + Character.digit(s.charAt(i + 1), 16));
+                                  + Character.digit(s.charAt(i + 1), 16));
         }
         return data;
     }
@@ -1844,8 +1899,8 @@ public class Auxiliary {
         for (int i = 1; i < elements.length; i++) {
             StackTraceElement s = elements[i];
             sb.append("\tat ").append(s.getClassName()).append(".")
-              .append(s.getMethodName()).append("(")
-              .append(s.getFileName()).append(":").append(s.getLineNumber()).append(")\n");
+                    .append(s.getMethodName()).append("(")
+                    .append(s.getFileName()).append(":").append(s.getLineNumber()).append(")\n");
         }
         AppLog.debug(sb.toString());
     }

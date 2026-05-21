@@ -69,9 +69,6 @@ public class RecoveryTask implements Runnable {
 		try {
 			
 			AppLog.debug("Offset in recover()::" + offset);
-			System.out.println("recover() " + pagenumber);
-			if(pagenumber==31)
-				System.out.println("bin da.");
 
 			/* read the db page into buffer */
 			buffer = job.readDBPageWithOffset(offset, pagesize);
@@ -299,7 +296,7 @@ public class RecoveryTask implements Runnable {
                                     recover.put(pos + 3, (byte) 0);  // first column is 00
                                 recover.put(pos + 4, freeblock); // the freeblock
 
-                                DataRow dr = ct.readRecord(pos, recover, pagenumber, null, Integer.MAX_VALUE, withoutROWID, Global.REGULAR_DB_FILE, -1);
+                                DataRow dr = ct.readRecord(pos, recover, pagenumber, null, Integer.MAX_VALUE, withoutROWID, Global.REGULAR_DB_FILE, -1,null);
 
 								record = dr.line();
 
@@ -390,7 +387,7 @@ public class RecoveryTask implements Runnable {
 				
 					
 
-				DataRow row = ct.readRecord(celloff, buffer, pagenumber, visit, Integer.MAX_VALUE, withoutROWID,Global.REGULAR_DB_FILE,-1);
+				DataRow row = ct.readRecord(celloff, buffer, pagenumber, visit, Integer.MAX_VALUE, withoutROWID,Global.REGULAR_DB_FILE,-1,null);
 
 
 				// add new line to output

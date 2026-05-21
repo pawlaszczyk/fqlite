@@ -2,10 +2,15 @@ package fqlite.hex;
 
 
 import fqlite.base.ThemeManager;
+import javafx.animation.KeyFrame;
+import javafx.animation.Timeline;
 import javafx.application.Application;
+import javafx.application.Platform;
 import javafx.scene.Scene;
 import javafx.scene.layout.BorderPane;
 import javafx.stage.Stage;
+import javafx.stage.WindowEvent;
+import javafx.util.Duration;
 
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -56,7 +61,20 @@ public class HexViewerApp extends Application {
         primaryStage.setMinHeight(600);
         primaryStage.setScene(scene);
         primaryStage.setOnCloseRequest(e -> ThemeManager.unregister(scene));
+
+        primaryStage.addEventHandler(WindowEvent.WINDOW_SHOWN, e -> {
+            new Timeline(new KeyFrame(Duration.millis(50), ev -> {
+                primaryStage.setMaximized(false);
+                primaryStage.setWidth(680);
+                primaryStage.setHeight(600);
+                primaryStage.centerOnScreen();
+            })).play();
+        });
+
+
         primaryStage.show();
+
+
     }
 
     public static void main(String[] args) {

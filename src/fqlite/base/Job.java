@@ -33,6 +33,7 @@ import fqlite.descriptor.ADComparator;
 import fqlite.descriptor.AbstractDescriptor;
 import fqlite.descriptor.IndexDescriptor;
 import fqlite.descriptor.TableDescriptor;
+import fqlite.export.CASEExport;
 import fqlite.export.SQLiteDatabaseCreator;
 import fqlite.log.AppLog;
 import fqlite.pattern.HeaderPattern;
@@ -100,18 +101,18 @@ public class Job {
 
 	/* since version 1.2 - support for write-ahead logs WAL */
 	public boolean readWAL = false;
-	String walpath = null;
+	public String walpath = null;
 	public WALReader wal = null;
 	public Hashtable<String, String> guiwaltab = new Hashtable<String, String>();
 
 	/* since version 1.2 - support for write Rollback Journal files */
 	public boolean readRollbackJournal = false;
-	String rollbackjournalpath = null;
+	public String rollbackjournalpath = null;
 	public RollbackJournalReader rol = null;
 	public Hashtable<String, String> guiroltab = new Hashtable<String, String>();
 
 	/* this is a multi-threaded program -> all data are saved to the list first*/
-	ConcurrentHashMap<String,ObservableList<ObservableList<String>>> resultlist = new ConcurrentHashMap<>();
+    public ConcurrentHashMap<String,ObservableList<ObservableList<String>>> resultlist = new ConcurrentHashMap<>();
 	public ConcurrentHashMap<String,ObservableList<ObservableList<byte[]>>> hexdumplist = new ConcurrentHashMap<>();
 
 
@@ -1648,6 +1649,7 @@ public class Job {
 					/* start parsing Rollbackjournal-file */
 					rol.parse();
 					rol.output();
+					rol = null;
 				}
 				else if (readWAL) {
 					/* the readWAL option is enabled -> check the WAL-file too */
@@ -1656,6 +1658,7 @@ public class Job {
 					/* start parsing WAL-file */
 					wal.parse();
 					wal.output();
+					wal = null;
 				}
 
 
@@ -2185,12 +2188,26 @@ public class Job {
 	}
 
 	/**
-	 * This method actually creates a html file with the database content
+	 * This method actually creates a CASE ontology file (JSON) with the database content
 	 * @param dbname
 	 * @param outputPath
 	 * @param exp
 	 * @throws IOException
 	 */
+	public void exportToCASE(String dbname, String outputPath, String xpath, ExportType exp, boolean isTable, String tname) throws IOException {
+
+		CASEExport.exportToCase(this, dbname, outputPath, xpath, exp, isTable, tname);
+
+	}
+
+
+		/**
+         * This method actually creates a html file with the database content
+         * @param dbname
+         * @param outputPath
+         * @param exp
+         * @throws IOException
+         */
 	public void exportToHtml(String dbname, String outputPath, String xpath, ExportType exp, boolean isTable, String tname) throws IOException {
 
 		BufferedWriter writer = new BufferedWriter(new FileWriter(outputPath));
@@ -2909,7 +2926,7 @@ public class Job {
 
 	/// This method is used to export a BLOB-field as spearate file
 	/// to the file system.
-	private String exportBLOB(String dbname, String offset, String c, String exportfolder){
+    public String exportBLOB(String dbname, String offset, String c, String exportfolder){
 
 		/* BLOB-value found? */
 		if(c.length()>7) {
@@ -3086,9 +3103,6 @@ public class Job {
 
 		for (int cc = 1; cc < pages.length; cc++) {
 
-			System.out.println("teste: " + cc);
-		    if(cc == 386)
-				System.out.println("Bin da");
 
 			if (cc == 1) {
 				RecoveryTask task = new RecoveryTask(worker[cc % Global.numberofThreads].util,this, 100, cc, ps, false);

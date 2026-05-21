@@ -51,9 +51,10 @@ public class WALReader{
 	 * 
 	 */
 	TreeMap<Long,LinkedList<WALFrame>> checkpoints = new TreeMap<Long,LinkedList<WALFrame>>();
-	
-	
-	
+
+	Map<Long, WALAnalyzer.SchemaEntry> pageOwner;
+	List<WALAnalyzer.FrameInfo> frames;
+
 	/* this is a multi-threaded program -> all data are saved to the list first*/
 	public ConcurrentHashMap<String,ObservableList<ObservableList<String>>> resultlist = new ConcurrentHashMap<>();
 	public ConcurrentHashMap<String,ObservableList<ObservableList<byte[]>>> hexdumplist = new ConcurrentHashMap<>();
@@ -153,7 +154,13 @@ public class WALReader{
 		
 		Path p = Paths.get(path);
 
-		System.out.println("parse WAL-File");
+        try {
+			WALAnalyzer.analyzeWAL(this);
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+
+        System.out.println("parse WAL-File");
 		/*
 		 * We have to do this before we open the database because of the concurrent
 		 * access
@@ -341,7 +348,7 @@ public class WALReader{
 	
 			/* get the page number of this frame */
 			pagenumber_maindb = fheader.getInt();
-			
+
 			/* number or size of pages for a commit header, otherwise zero. */
 			int commit = fheader.getInt();
 			long fsalt1 = Integer.toUnsignedLong(fheader.getInt());
@@ -583,8 +590,25 @@ public class WALReader{
 			LinkedList<String> rc = null;
 			LinkedList<byte[]> raw = null;
 
-			try { 
-				DataRow result = ct.readRecord(celloff, buffer, pagenumber_maindb, visit, Integer.MAX_VALUE, withoutROWID,Global.WAL_ARCHIVE_FILE, framestart + 24 + celloff);
+			try {
+				String tname = "";
+
+				for(WALAnalyzer.FrameInfo fr : frames){
+
+					if (fr.pageNumber() == frame.pagenumber){
+
+						tname = fr.ownerName();
+					}
+
+				}
+
+
+
+
+				DataRow result = ct.readRecord(celloff, buffer, pagenumber_maindb, visit, Integer.MAX_VALUE, withoutROWID,Global.WAL_ARCHIVE_FILE, framestart + 24 + celloff,tname);
+
+				if(null == result)
+					continue;
 
 			    rc = result.line();
 				raw = result.hexdump();
@@ -680,10 +704,24 @@ public class WALReader{
 		{
 			/* try to read record as usual */
 			LinkedList<String> rc;
-			
+			String tname = "";
+			if (frame.framenumber == 0) {
+				tname = "sqlite_master";
+			}
+			else{
+				WALAnalyzer.SchemaEntry e = pageOwner.get((long)frame.framenumber);
+				if(e == null) {
+					System.out.println(" frame " + frame.framenumber + " ohne tabellennamen");
+				}
+				else{
+					tname = e.name();
+				}
+			}
+
+
 			/* Tricky thing: data record could be partly overwritten with a new data record!!!  */
 			/* We should read until the end of the unallocated area and not above! */
-			DataRow resultset = ct.readRecord(buffer.position(), buffer, ps, visit, ccrstart - buffer.position(), withoutROWID,Global.WAL_ARCHIVE_FILE, framestart + 24 + buffer.position());
+			DataRow resultset = ct.readRecord(buffer.position(), buffer, ps, visit, ccrstart - buffer.position(), withoutROWID,Global.WAL_ARCHIVE_FILE, framestart + 24 + buffer.position(), tname);
 			rc = resultset.line();
 
 			// add new line to output

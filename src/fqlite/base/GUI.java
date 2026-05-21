@@ -17,6 +17,7 @@ import java.util.logging.Level;
 import javax.swing.*;
 
 import fqlite.descriptor.TableDescriptor;
+import fqlite.export.SQLiteDatabaseCreator;
 import fqlite.timemap.LocationWindow;
 import fqlite.erm.MermaidHTMLGenerator;
 import fqlite.erm.SchemaRetriever;
@@ -216,6 +217,7 @@ public class GUI extends Application {
 	Button btnHTML;
 	Button btnSchema;
 	Button btnFTS;
+	Button btnCASE;
 
 	MenuItem cmExport;
 	MenuItem mntmExportDB;
@@ -608,6 +610,21 @@ public class GUI extends Application {
 		btnHTML.setDisable(true);
 		btnHTML.setTooltip(new Tooltip("Export database to HTML"));
 		toolBar.getItems().add(btnHTML);
+
+
+		s = Objects.requireNonNull(GUI.class.getResource("/icon24_case.png")).toExternalForm();
+		btnCASE = new Button();
+		iv = new ImageView(s);
+		iv.smoothProperty().setValue(true);
+		iv.setCache(true);
+		iv.preserveRatioProperty().setValue(true);
+		iv.setFitHeight(icon_size_in_pixels);
+		iv.setFitWidth(icon_size_in_pixels);
+		btnCASE.setGraphic(iv);
+		btnCASE.setOnAction(e -> doExportCASE());
+		btnCASE.setDisable(true);
+		btnCASE.setTooltip(new Tooltip("Export database to CASE Report"));
+		toolBar.getItems().add(btnCASE);
 
 		s = Objects.requireNonNull(GUI.class.getResource("/icon24_export.png")).toExternalForm();
 		btnExportDB = new Button();
@@ -1545,6 +1562,26 @@ public class GUI extends Application {
 		export_html(no);
 	}
 
+	/**
+	 * Start a data export.
+	 */
+	public void doExportCASE() {
+		NodeObject no = null;
+
+		/* Do we really have a database node currently selected? */
+		TreeItem<NodeObject> node = tree.getSelectionModel().getSelectedItem();
+		if (node == null || node.getValue().isRoot) {
+			return;
+		} else if (null != node.getValue()) {
+			no = node.getValue();
+		}
+
+		/* it is indeed a valid node (database, table, journal, WAL archive) -> begin with export */
+		assert no != null;
+		export_case(no);
+	}
+
+
 
 	/**
 	 * Add a new table header to the database tree.
@@ -2256,27 +2293,11 @@ public class GUI extends Application {
 
 			// handle binary values like protocol buffers, Java serials or property lists
 			if (cellvalue.startsWith("[BLOB-")) {
-				int from = cellvalue.indexOf("BLOB-");
-				int to = cellvalue.indexOf("]");
-				String number = cellvalue.substring(from + 5, to);
-
-
-				int start = cellvalue.indexOf("<");
-				int end = cellvalue.indexOf(">");
-
-				String type;
-				if (end > 0) {
-					type = cellvalue.substring(start + 1, end);
-				} else
-					type = "bin";
-
-				if (type.equals("java"))
-					type = "bin";
 
 				tc = (TableColumn) table.getColumns().get(2);
 				ObservableValue off = tc.getCellObservableValue(row);
 
-				String path = GUI.baseDir + Global.separator + table.dbname + "_" + off.getValue() + "-" + number + "." + type;
+				String path = SQLiteDatabaseCreator.getBLOBKey(cellvalue,table.dbname,(String)off.getValue());
 				String data = table.job.bincache.getHexString(path);
 				content.putString(data.toUpperCase());
 				clipboard.setContent(content);
@@ -2331,7 +2352,7 @@ public class GUI extends Application {
 			while (s.hasNext()) {
 
 				/* column for offset found? */
-				if (current == 5) {
+				if (current > 7) {
 					offset = s.next();
 
 					sb.append(token);
@@ -2343,8 +2364,7 @@ public class GUI extends Application {
 				String cellvalue = s.next();
 
 				/* BLOB-value found? */
-				if (cellvalue.length() > 7) {
-
+				if (cellvalue.length() > 5) {
 
 					int from = cellvalue.indexOf("BLOB-");
 					int to = cellvalue.indexOf("]");
@@ -2352,22 +2372,9 @@ public class GUI extends Application {
 					if (from > 0 && to > 0) {
 
 						String number = cellvalue.substring(from + 5, to);
-						int start = cellvalue.indexOf("<");
-						int end = cellvalue.indexOf(">");
 
-						String type;
-						if (end > 0) {
-							type = cellvalue.substring(start + 1, end);
-						} else
-							type = "bin";
-
-						if (type.equals("java"))
-							type = "bin";
-
-						String path = GUI.baseDir + Global.separator + table.dbname + "_" + offset + "-" + number + "." + type;
-						System.out.println("Clipboard-Path<3>:: " + path);
+						String path = GUI.baseDir + Global.separator + table.dbname + "_" + offset + "-" + number;
 						String data = table.job.bincache.getHexString(path);
-						System.out.println(" Data" + data);
 						cellvalue = data.toUpperCase();
 					}
 				}
@@ -2471,10 +2478,6 @@ public class GUI extends Application {
 					dualPane.setOrientation(Orientation.HORIZONTAL);
 					dualPane.setDividerPositions(0.80);
 
-					// tablePane aus altem SplitPaneSkin$Content befreien:
-					// SplitPane.getItems().clear() gibt den internen Skin-Wrapper
-					// nicht sofort frei. Wir entfernen tablePane explizit aus dem
-					// Parent-Chain bevor wir es neu einhaengen.
 					if (node.tablePane.getParent() != null) {
 						javafx.scene.Parent p = node.tablePane.getParent();
 						if (p instanceof javafx.scene.layout.Pane) {
@@ -2484,7 +2487,6 @@ public class GUI extends Application {
 						}
 					}
 
-					// Neuen SplitPane pro Selection - vermeidet Skin-Caching-Probleme
 					SplitPane vSplit = new SplitPane();
 					vSplit.setOrientation(Orientation.VERTICAL);
 					vSplit.setDividerPositions(0.75);
@@ -2498,7 +2500,8 @@ public class GUI extends Application {
 					disableButtons(false);
 
 				});
-			} else // no table -> show db pane
+			}
+			else // no table -> show db pane
 			{
 
 				if (node.isRoot) {
@@ -2528,6 +2531,37 @@ public class GUI extends Application {
 			}
 		});
 
+
+		tree.addEventFilter(javafx.scene.input.KeyEvent.KEY_PRESSED, event -> {
+			if (event.getCode() != KeyCode.TAB) return;
+
+			TreeItem<NodeObject> selectedItem = tree.getSelectionModel().getSelectedItem();
+			if (selectedItem == null) return;
+
+			NodeObject node = selectedItem.getValue();
+			if (node == null || node.tablePane == null) return;
+
+			// tablePane ist VBox: Index 0 = filterpane (HBox), Index 1 = FQTableView
+			if (node.tablePane.getChildren().size() < 2) return;
+
+			javafx.scene.Node tableNode = node.tablePane.getChildren().get(1);
+			if (!(tableNode instanceof FQTableView)) return;
+
+			FQTableView<?> tbl = (FQTableView<?>) tableNode;
+
+			event.consume(); // Tab-Default-Navigation im Tree unterdrücken
+
+			Platform.runLater(() -> {
+				tbl.requestFocus();
+				// Falls noch keine Zeile selektiert ist, erste Zeile wählen
+				if (tbl.getSelectionModel().isEmpty() && !tbl.getItems().isEmpty()) {
+					tbl.getSelectionModel().select(0);
+					tbl.scrollTo(0);
+				}
+			});
+		});
+
+
 	}
 
 	/**
@@ -2546,6 +2580,7 @@ public class GUI extends Application {
 			btnExport.setDisable(active);
 			btnExportDB.setDisable(active);
 			btnHTML.setDisable(active);
+			btnCASE.setDisable(active);
 			btnSchema.setDisable(active);
 			hexViewBtn.setDisable(active);
 			cmExport.setDisable(active);
@@ -2896,6 +2931,52 @@ public class GUI extends Application {
 
 	}
 
+	/**
+	 * This method is called to transfer the recovered data of a database to a new database.
+	 *
+	 * @param no Database node for export
+	 */
+	private void export_case(NodeObject no) {
+
+		boolean success;
+
+		FileChooser fileChooser = new FileChooser();
+		fileChooser.setTitle("Export recovered data to CASE ONTOLOGY file ");
+		fileChooser.setInitialFileName(prepareDefaultCASEReportName(no.name));
+		File f = fileChooser.showSaveDialog(stage);
+
+		if (null == f)
+			return;
+
+		int tp;
+		if(no.isTable){
+
+			TreeItem<NodeObject> parent = getDatabaseNode();
+			tp = parent.getValue().tabletype;
+		}
+		else
+			tp = no.tabletype;
+
+
+		ExportType etype = switch (tp) {
+			case 99  -> ExportType.SQLITEDB;
+			case 100 -> ExportType.ROLLBACKJOURNAL;
+			case 101 -> ExportType.WALARCHIVE;
+			default -> null;
+		};
+
+		try {
+			no.job.exportToCASE(no.job.filename, f.getAbsolutePath(), f.getParent(), etype, no.isTable, no.name);
+			//openInBrowser(f.getAbsolutePath(), gui.getHostServices());
+		} catch (IOException e) {
+			throw new RuntimeException(e);
+		}
+
+	}
+
+
+
+
 
 	public void openInBrowser(String htmlFilePath, HostServices hostServices) {
 		try {
@@ -3004,6 +3085,16 @@ public class GUI extends Application {
 		return nameofnode + date + ".html";
 	}
 
+	private String prepareDefaultCASEReportName(String nameofnode) {
+		LocalDateTime now = LocalDateTime.now();
+		DateTimeFormatter df;
+		df = DateTimeFormatter.ISO_DATE_TIME; // 2020-01-31T20:07:07.095
+		String date = df.format(now);
+		date = date.replace(":", "_");
+		return nameofnode + date + ".jsonld";
+	}
+
+
 
 	/**
 	 * This method is used to insert new records into an output table.
@@ -3014,6 +3105,9 @@ public class GUI extends Application {
 	 */
 	@SuppressWarnings({"unchecked", "rawtypes"})
 	public void update_table(String treepath, ObservableList<ObservableList<String>> rows, ObservableList<ObservableList<byte[]>> rawbytes, boolean isWALTable) {
+
+		if (null == treepath)
+			return;
 
 		datasets.put(treepath, rows);
 
