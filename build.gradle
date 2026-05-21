@@ -9,7 +9,7 @@ plugins {
 
 
 group 'hswm.fqlite'
-version '4.1'
+version '4.21'
 
 def protocversion = "27.4"
 
