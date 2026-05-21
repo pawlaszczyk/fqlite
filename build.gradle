@@ -57,7 +57,7 @@ javafx {
 jar {
     manifest {
         attributes(
-                'Main-Class': 'fqlite.base.JARStarter'
+                'Main-Class': 'fqlite.base.FQLite'
         )
     }
 }
