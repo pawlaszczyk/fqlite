@@ -65,8 +65,10 @@ public class AppLog extends Application {
 
             Button copyButton = new Button("Copy");
 
-            String s = Objects.requireNonNull(GUI.class.getResource("/edit-copy_small.png")).toExternalForm();
+            String s = Objects.requireNonNull(GUI.class.getResource("/icon24_copy.png")).toExternalForm();
             ImageView iv = new ImageView(s);
+            iv.setFitHeight(16);
+            iv.setFitWidth(16);
             copyButton.setGraphic(iv);
             copyButton.setTooltip(new Tooltip("copy log to clipboard"));
             copyButton.setOnAction(new EventHandler<ActionEvent>() {
@@ -84,8 +86,10 @@ public class AppLog extends Application {
             });
 
             Button backButton = new Button("Back");
-            s = Objects.requireNonNull(GUI.class.getResource("/analyzer-exit.png")).toExternalForm();
+            s = Objects.requireNonNull(GUI.class.getResource("/icon32_exit.png")).toExternalForm();
             iv = new ImageView(s);
+            iv.setFitWidth(16);
+            iv.setFitHeight(16);
             backButton.setGraphic(iv);
             backButton.setTooltip(new Tooltip("Go back to main window"));
 

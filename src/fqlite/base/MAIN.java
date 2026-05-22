@@ -2,6 +2,7 @@
 
 import fqlite.log.AppLog;
 
+import java.io.IOException;
 import java.lang.reflect.InvocationTargetException;
 import java.util.concurrent.ExecutionException;
 import java.util.logging.Level;
@@ -113,7 +114,7 @@ public class MAIN {
 				/* start processing the db-file */
 				job.processDB();
 
-			} catch (InterruptedException | ExecutionException e) {
+			} catch (IOException | InterruptedException | ExecutionException e) {
 				e.printStackTrace();
 			}
 

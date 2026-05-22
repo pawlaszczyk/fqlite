@@ -361,6 +361,8 @@ public class Auxiliary {
             {
                 return null;
             }
+            else
+                repeat = true;
 
             int cnumber = -1;
             if (ad != null && ad.columnnames != null) {
@@ -372,6 +374,11 @@ public class Auxiliary {
             List<SqliteElement> columns;
             int rowid = -1;
 
+            // Guard: m.end must be within buffer bounds
+            if (m.end < 0 || m.end > buffer.limit()) {
+                AppLog.debug("readDeletedRecord: m.end=" + m.end + " out of buffer limit=" + buffer.limit() + ", skipping.");
+                return null;
+            }
             buffer.position(m.end);
 
             /* CASE 1: Complete but deleted record — try to read ROWID */
@@ -384,16 +391,12 @@ public class Auxiliary {
                     return null;
                 }
 
-                //      buffer.position(m.end - headerlength - 4);
-                //      byte[] beforeheader = new byte[4];
-                //      buffer.get(beforeheader);
-
-                //      int[] values = readVarInt(beforeheader);
-                //      if (values != null && values.length > 0) {
-                //          rowid = values[values.length - 1];
-                //      }
-
                 m.match = m.match.replace("RI", "");
+                // Guard: re-check after RI-strip
+                if (m.end < 0 || m.end > buffer.limit()) {
+                    AppLog.debug("readDeletedRecord: m.end=" + m.end + " out of buffer limit after RI-strip, skipping.");
+                    return null;
+                }
                 buffer.position(m.end);
             }
 
@@ -402,6 +405,10 @@ public class Auxiliary {
             /* CASE 2: Partial header — first column overwritten */
             if (header.startsWith("XX")) {
                 header = resolvePartialHeader(header, buffer, m, next, round);
+                if (m.end < 0 || m.end > buffer.limit()) {
+                    AppLog.debug("readDeletedRecord: m.end=" + m.end + " out of buffer limit after resolvePartialHeader, skipping.");
+                    return null;
+                }
                 buffer.position(m.end);
             }
 
@@ -424,7 +431,38 @@ public class Auxiliary {
                 AppLog.debug("Deleted spilled payload: " + so);
                 AppLog.debug("Deleted pll payload: " + pll);
 
-                buffer.position(buffer.position() + so - phl - 1);
+                int overflowSeekPos = buffer.position() + so - phl - 1;
+                if (overflowSeekPos < 0 || overflowSeekPos + 4 > buffer.limit()) {
+                    AppLog.debug("readDeletedRecord: overflow seek position " + overflowSeekPos + " out of buffer limit=" + buffer.limit() + ", treating as no-overflow.");
+                    pll = so;
+                    // fall through to the no-overflow branch below by adjusting so
+                    // We set bf=buffer and skip the getInt entirely
+                    ByteBuffer bf = buffer;
+                    bf.position(last);
+                    int blobcolidx = 0;
+                    for (SqliteElement en : columns) {
+                        if (en == null) continue;
+                        if ((bf.position() + en.getlength()) > bf.limit()) break;
+                        byte[] value = new byte[en.getlength()];
+                        bf.get(value);
+                        blobcolidx = appendColumn(record, hexdump, en, value, blobcolidx, false, 2);
+                    }
+                    buffer.position(Math.min(last + so - phl - 1, buffer.limit()));
+                    bs.set(m.end, buffer.position(), true);
+                    long cursor = ((pagenumber - 1L) * job.ps) + buffer.position();
+                    record.add(0, "[" + pll + "|" + header.length() / 2 + "]");
+                    record.add(1, "" + rowid);
+                    hexdump.add(0, null);
+                    hexdump.add(1, null);
+                    round++;
+                    if ((record.size() - columns.size()) < 2) {
+                        repeat = true;
+                        continue;
+                    }
+                    return new CarvingResult(buffer.position(), cursor, new StringBuffer(), record, hexdump);
+                }
+
+                buffer.position(overflowSeekPos);
                 int overflow = buffer.getInt();
                 AppLog.debug("Deleted overflow: " + overflow + " " + Integer.toHexString(overflow));
                 buffer.position(last);
@@ -457,15 +495,21 @@ public class Auxiliary {
                 int blobcolidx = 0;
                 for (SqliteElement en : columns) {
                     if (en == null) continue;
+                    if ((bf.position() + en.getlength()) > bf.limit()) {
+                        AppLog.debug("readDeletedRecord: overflow bf underflow at pos=" + bf.position() + " needed=" + en.getlength() + " limit=" + bf.limit());
+                        break;
+                    }
                     byte[] value = new byte[en.getlength()];
                     bf.get(value);
                     //hexdump.add(value);
                     blobcolidx = appendColumn(record, hexdump, en, value, blobcolidx, false, 2);
                 }
 
-                buffer.position(last + so - phl - 1);
+                int finalPos = last + so - phl - 1;
+                buffer.position(Math.min(finalPos, buffer.limit()));
 
-            } else {
+            }
+            else {
                 /* No overflow */
                 if (pll < 42) {
                     int blobcolidx = 0;
@@ -489,7 +533,8 @@ public class Auxiliary {
                         //hexdump.add(value);
                         blobcolidx = appendColumn(record, hexdump, en, value, blobcolidx, false, 0);
                     }
-                } else {
+                }
+                else {
                     /* Large record — may be partial */
                     int nextrecord = bs.nextSetBit(buffer.position());
                     if (nextrecord == -1) nextrecord = job.ps;
@@ -555,32 +600,18 @@ public class Auxiliary {
             hexdump.add(0, null);
             hexdump.add(1, null);
 
-            //System.out.println(" record length: " + record.size());
-            //System.out.println(" table columns" + columns.size());
-            //System.out.println(" offset" + record.get(2));
-
             String id = record.get(3);
             // in most cases the column byte length was set to 2 instead of 3 bytes for the int/rowid column
             // therefore, the 2-byte varint is only read half  -> 195 instead of 50001 or 50020
-            if(id.equals("195")) {
-                //System.out.println(" 195");
-                repeat = true;
-                round++;
-                continue;
-            }
-
-            //System.out.println(record);
-
+            round++;
             if ((record.size() - columns.size()) < 2) {
                 repeat = true;
-                round++;
                 continue;
             }
             else {
                 // successful recovery -> number of columns does match to the number of fields
                 return new CarvingResult(buffer.position(), cursor, new StringBuffer(), record, hexdump);
             }
-
         }
         while(repeat);
         return null;
@@ -659,7 +690,7 @@ public class Auxiliary {
         AbstractDescriptor td = null;
 
         if(tblname != null && tblname.equals("room_master_table")) {
-            System.out.println("Bin da.");
+            AppLog.debug("readRecord: room_master_table hit.");
         }
 
         /* Populate table-name and offset metadata */
@@ -1306,24 +1337,51 @@ public class Auxiliary {
      * @param pagenumber 0-based page number of the first overflow page
      * @return all overflow payload bytes concatenated
      */
+    /**
+     * Reads all overflow pages iteratively (cycle-safe, no stack-overflow risk).
+     * Replaces the former recursive implementation.
+     *
+     * @param job        current recovery job
+     * @param pagenumber 0-based page number of the first overflow page
+     * @return all overflow payload bytes concatenated
+     */
     public static byte[] readOverflow(Job job, int pagenumber) {
-        ByteBuffer overflowpage = job.readPageWithNumber(pagenumber, job.ps);
-        overflowpage.position(0);
-        int next = overflowpage.getInt();
+        List<byte[]>    parts   = new LinkedList<>();
+        Set<Integer>    visited = new HashSet<>();
+        int             next    = pagenumber;
 
-        byte[] rest = (next != 0) ? readOverflow(job, next) : null;
+        while (true) {
+            if (next < 0 || next >= job.numberofpages) break;
+            if (visited.contains(next)) {
+                AppLog.debug("readOverflow: cycle detected at page " + next + " — stopping.");
+                break;
+            }
+            visited.add(next);
 
-        byte[] current = new byte[job.ps - 4];
-        overflowpage.position(4);
-        overflowpage.get(current, 0, job.ps - 4);
+            ByteBuffer overflowpage = job.readPageWithNumber(next, job.ps);
+            if (overflowpage == null) break;
 
-        if (rest != null) {
-            byte[] merged = new byte[current.length + rest.length];
-            System.arraycopy(current, 0, merged, 0, current.length);
-            System.arraycopy(rest,    0, merged, current.length, rest.length);
-            return merged;
+            overflowpage.position(0);
+            int nextRaw = overflowpage.getInt();
+
+            byte[] current = new byte[job.ps - 4];
+            overflowpage.position(4);
+            overflowpage.get(current, 0, job.ps - 4);
+            parts.add(current);
+
+            if (nextRaw == 0) break;
+            next = nextRaw - 1;
         }
-        return current;
+
+        if (parts.isEmpty()) return new byte[0];
+        int total = parts.stream().mapToInt(b -> b.length).sum();
+        byte[] merged = new byte[total];
+        int off = 0;
+        for (byte[] part : parts) {
+            System.arraycopy(part, 0, merged, off, part.length);
+            off += part.length;
+        }
+        return merged;
     }
 
     /**
@@ -1345,16 +1403,17 @@ public class Auxiliary {
         while (true) {
             ByteBuffer overflowpage;
 
+            if (visited.contains(next)) {
+                AppLog.debug("readOverflowIterativ: cycle detected at page " + next + " — stopping.");
+                break;
+            }
+
             if (fromWAL) {
-                if (visited.contains(next)) {
-                    AppLog.debug("Overflow cycle detected at page " + next);
-                    break;
-                }
                 overflowpage = job.readWALOverflowPage(frame, next, job.ps, pagenumber);
-                visited.add(next);
             } else {
                 overflowpage = job.readPageWithNumber(next, job.ps);
             }
+            visited.add(next);
 
             if (overflowpage == null) break;
 
@@ -1596,10 +1655,12 @@ public class Auxiliary {
     public static int readUnsignedVarInt(ByteBuffer buffer) {
         byte b     = buffer.get();
         int  value = b & 0x7F;
-        while ((b & 0x80) != 0) {
+        int  count = 1;
+        while ((b & 0x80) != 0 && count < 9 && buffer.hasRemaining()) {
             b      = buffer.get();
             value  <<= 7;
             value  |= (b & 0x7F);
+            count++;
         }
         return value;
     }
@@ -1611,25 +1672,26 @@ public class Auxiliary {
      * @return array of decoded integer values
      */
     public static int[] readVarInt(byte[] values) {
-        int   position = 0;
-        int   limit    = values.length;
-        int[] resultset = new int[1000];
-        int   howmuch   = 0;
+        int   position  = 0;
+        int   limit     = values.length;
+        List<Integer> resultlist = new ArrayList<>();
 
         do {
             if (position < limit) {
                 byte b     = values[position++];
                 int  value = b & 0x7F;
-                while ((b & 0x80) != 0 && position < limit) {
+                int  count = 1;
+                while ((b & 0x80) != 0 && position < limit && count < 9) {
                     b      = values[position++];
                     value  <<= 7;
                     value  |= (b & 0x7F);
+                    count++;
                 }
-                resultset[howmuch++] = value;
+                resultlist.add(value);
             }
         } while (position < limit);
 
-        return Arrays.copyOfRange(resultset, 0, howmuch);
+        return resultlist.stream().mapToInt(Integer::intValue).toArray();
     }
 
     public static int[] readMasterHeaderVarInts(byte[] values) {

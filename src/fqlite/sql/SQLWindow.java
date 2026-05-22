@@ -1,6 +1,7 @@
 package fqlite.sql;
 
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 
 import fqlite.ui.NodeObject;
 import fqlite.util.AutoCompletion;
@@ -34,7 +35,7 @@ import javafx.stage.Stage;
  */
 public class SQLWindow extends Application {
 
-    Hashtable<String, ObservableList<ObservableList<String>>> tabledata;
+    ConcurrentHashMap<String, ObservableList<ObservableList<String>>> tabledata;
     TableView<Object> resultview = new TableView<>();
     List<String> dbnames;
     final ComboBox<String> dbBox = new ComboBox<>();
@@ -65,7 +66,7 @@ public class SQLWindow extends Application {
             "SET", "TABLE", "TOP", "TRUNCATE TABLE", "UNION", "UNION ALL", "UNIQUE", "UPDATE", "VALUES", "VIEW", "WHERE"
     };
 
-    static final Hashtable<String, String> templates = new Hashtable<>();
+    static final ConcurrentHashMap<String, String> templates = new ConcurrentHashMap<>();
 
     /**
      * Constructor of the SQL Analyser window.

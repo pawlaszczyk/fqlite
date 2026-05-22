@@ -374,14 +374,14 @@ public class RollbackJournalReader{
 			AppLog.info("No Data page. " + pagenumber_rol);
 			return -1;
 		} else if (type == 5) {
-			AppLog.info("Internal Table page " + pagenumber_rol);
+	//		AppLog.info("Internal Table page " + pagenumber_rol);
 			return -1;
 		} else if (type == 10) {
-			AppLog.info("Index leaf page " + pagenumber_rol);
+	//		AppLog.info("Index leaf page " + pagenumber_rol);
 			withoutROWID = true;
 
-		} else {
-			AppLog.info("Data page " + pagenumber_rol+ " Offset: " + (rollbackjournal.position() - ps));
+	//	} else {
+			//AppLog.info("Data page " + pagenumber_rol+ " Offset: " + (rollbackjournal.position() - ps));
 		}
 
 		/************** regular leaf page with data ******************/

@@ -173,9 +173,9 @@ public class GUI extends Application {
 
 	public static GUI mainwindow;
 	public ConcurrentHashMap<String, javafx.scene.Node> tables = new ConcurrentHashMap<>();
-	private final Hashtable<Object, String> rowcolors = new Hashtable<>();
+	private final ConcurrentHashMap<Object, String> rowcolors = new ConcurrentHashMap<>();
 
-	public Hashtable<String, ObservableList<ObservableList<String>>> datasets = new Hashtable<>();
+	public ConcurrentHashMap<String, ObservableList<ObservableList<String>>> datasets = new ConcurrentHashMap<>();
 
 	protected ContextMenu cm = null;
 	protected MenuBar menuBar;
@@ -2599,6 +2599,19 @@ public class GUI extends Application {
 	 *
 	 */
 	public synchronized void open_db(File f) {
+
+		/* Prevent concurrent imports: check if any known job is still processing */
+		List<TreeItem<NodeObject>> openDbs = TreeHelper.getFirstLevelTreeItems(tree);
+		for (TreeItem<NodeObject> item : openDbs) {
+			NodeObject no = item.getValue();
+			if (no != null && no.job != null && no.job.runningTasks.get() > 0) {
+				Alert alert = new Alert(AlertType.INFORMATION);
+				alert.setTitle("Import running");
+				alert.setContentText("An import is already in progress. Please wait until it finishes before opening another database.");
+				alert.showAndWait();
+				return;
+			}
+		}
 		File file = f;
 
 		if (file == null) {
@@ -2617,6 +2630,33 @@ public class GUI extends Application {
 
 		if (file == null)
 			return;
+
+		/* Check if this database is already loaded */
+		final String canonicalPath;
+		try {
+			canonicalPath = file.getCanonicalPath();
+		} catch (IOException e) {
+			AppLog.error("Could not resolve canonical path for " + file.getAbsolutePath() + ": " + e.getMessage());
+			return;
+		}
+		for (TreeItem<NodeObject> item : openDbs) {
+			NodeObject no = item.getValue();
+			if (no != null && no.job != null) {
+				try {
+					String loadedPath = new File(no.job.path).getCanonicalPath();
+					if (loadedPath.equals(canonicalPath)) {
+						Alert alert = new Alert(AlertType.WARNING);
+						alert.setTitle("Database already loaded");
+						alert.setHeaderText(file.getName() + " is already open.");
+						alert.setContentText("This database has already been imported. Close it first before importing it again.");
+						alert.showAndWait();
+						return;
+					}
+				} catch (IOException ignore) {
+					// if we can't resolve the path, don't block the import
+				}
+			}
+		}
 
 
 
@@ -3349,7 +3389,7 @@ public class GUI extends Application {
 	}
 
 
-	public Hashtable<Object, String> getRowcolors() {
+	public ConcurrentHashMap<Object, String> getRowcolors() {
 		return rowcolors;
 	}
 
@@ -3815,22 +3855,18 @@ public class GUI extends Application {
 
 	private static void navigateToRow(FQTableView tbl, int row) {
 
-		var items = tbl.getItems();
-		tbl.setItems(null);
-		final int r = row--;
+		if (tbl == null || tbl.getItems() == null) return;
+
+		final int r = Math.max(0, row - 1);
+
 		Platform.runLater(() -> {
-					tbl.setItems(items);
-					Platform.runLater(() -> {
-						tbl.refresh();
-						tbl.scrollTo(r-2);
-						PauseTransition pause = new PauseTransition(Duration.millis(200));
-						pause.setOnFinished(e -> tbl.getSelectionModel().select(r));
-						pause.play();
-
-					});
-				}
-		);
-
+			tbl.refresh();
+			int scrollTarget = Math.max(0, r - 2);
+			tbl.scrollTo(scrollTarget);
+			PauseTransition pause = new PauseTransition(Duration.millis(200));
+			pause.setOnFinished(e -> tbl.getSelectionModel().select(r));
+			pause.play();
+		});
 
 	}
 

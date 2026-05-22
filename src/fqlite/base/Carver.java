@@ -1,5 +1,6 @@
 package fqlite.base;
 
+import java.nio.BufferUnderflowException;
 import java.nio.ByteBuffer;
 import java.util.BitSet;
 import java.util.LinkedList;
@@ -101,48 +102,31 @@ public class Carver{
 			String m = mat.group2Hex();
 			char[] cmatch = m.toCharArray();
 
-				if (headertype == CarverTypes.COLUMNSONLY) {
+			if (headertype == CarverTypes.COLUMNSONLY) {
 
-					//SQLiteRecovery.ValidationResult result = SQLiteRecovery.validateAndTrimOverwritePrefix("0000"+m, 5);
-				    //System.out.println(result.toString());
+				mat.start +=2;
+				cmatch = m.toCharArray();
 
-					//m = result.cleanedMatch;
-					mat.start +=2;
-					cmatch = m.toCharArray();
+			}
+			if (headertype == CarverTypes.FIRSTCOLUMNMISSING){
 
+				if(tbd.serialtypes.get(0)=="INT") {
 
-					//if (tbd.serialtypes.get(0) == "INT") {
+					String firstcol = m.substring(0,2);
 
-					//	byte[] bmatch = Auxiliary.hexStringToByteArray(m);
-					//	int[] test = Auxiliary.readVarInt(bmatch);
+					byte[] bmatch = Auxiliary.hexStringToByteArray(m);
+					int[] first = Auxiliary.readVarInt(bmatch);
 
-
-
-					//	for(int i=0;i<test.length;i++)
-					//		System.out.println("##$&$#" + test[i]);
-
-					//	System.out.println("#############");
-					//}
-				}
-				if (headertype == CarverTypes.FIRSTCOLUMNMISSING){
-
-					if(tbd.serialtypes.get(0)=="INT") {
-
-						String firstcol = m.substring(0,2);
-
-						byte[] bmatch = Auxiliary.hexStringToByteArray(m);
-						int[] first = Auxiliary.readVarInt(bmatch);
-
-						int ff = first[0];
-						if(ff > job.ps)
-						{
-							cmatch = m.substring(2).toCharArray();
-							m = m.substring(2);
-							mat.start += 2;
-						}
-
-
+					int ff = first[0];
+					if(ff > job.ps)
+					{
+						cmatch = m.substring(2).toCharArray();
+						m = m.substring(2);
+						mat.start += 2;
 					}
+
+
+				}
 			}
 
 			/* skip stupid matches - remember - it is just a heuristic */
@@ -170,7 +154,6 @@ public class Carver{
 					return 0;
 				}								
 			}
-			
 
 			/* get the start indices of the match */
 			int from = mat.start();
@@ -198,18 +181,14 @@ public class Carver{
 			 * begins
 			 */
 			int end = mat.end();
-			
 
 			if (Match.onlyZeros(m))
 			{
 				continue;
 			}
 			
-			
 			AppLog.debug("Match (0..NORMAL, 1..NOLENGTH, 2..FIRSTCOLMISSING) : " + headertype);
 			AppLog.debug("Match: " + m + " on pos:" + ((pagenumber - 1) * job.ps + from));
-			//System.out.println("Match (0..NORMAL, 1..NOLENGTH, 2..FIRSTCOLMISSING) : " + headertype);
-			//System.out.println("Match: " + m + " on pos:" + ((pagenumber - 1) * job.ps + from));
 
 			if (headertype == CarverTypes.NORMAL) {
 				if (m.length()>=4)
@@ -270,7 +249,7 @@ public class Carver{
 			bs.set(e.begin,e.end);
 		}
 		
-	   Match[] mm =  matches.toArray(new Match[0]);
+	    Match[] mm =  matches.toArray(new Match[0]);
 	 		
 		// take all matches in this region and try to recover those data records
 		for (int i = 0; i < mm.length; i++)
@@ -314,9 +293,10 @@ public class Carver{
 				}
 				
 				
+			} catch (IllegalArgumentException | BufferUnderflowException ex) {
+				AppLog.debug("Could not read record (buffer bounds): " + ex.getClass().getSimpleName() + " – " + ex.getMessage());
 			} catch (Exception err) {
-				AppLog.warning("Could not read record" + err);
-				//System.out.println(" ERROR: " + err);
+				AppLog.debug("Could not read record: " + err.getClass().getName() + " – " + err.getMessage());
 			}
 			
 		}

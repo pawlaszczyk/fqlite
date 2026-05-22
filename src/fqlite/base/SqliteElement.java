@@ -15,7 +15,14 @@ import fqlite.util.Auxiliary;
  *
  */
 public class SqliteElement {
-	
+
+	/**
+	 * Encoding used for STRING column decoding.
+	 * Set by Job after reading the database header (Option B).
+	 * Default: UTF-8.
+	 */
+	public static java.nio.charset.Charset db_encoding = java.nio.charset.StandardCharsets.UTF_8;
+
 	public final SerialTypes type;
 	public final StorageClass serial;
 	private final int length;
@@ -209,9 +216,8 @@ public class SqliteElement {
         return String.format("%.8f", d);
 	}
 
-	 static CharBuffer decodeString(byte[] v) {
-		
-		return Job.db_encoding.decode(ByteBuffer.wrap(v));
+	static CharBuffer decodeString(byte[] v) {
+		return db_encoding.decode(ByteBuffer.wrap(v));
 	}
 
 	private static final char[] HEX_ARRAY = "0123456789ABCDEF".toCharArray();
