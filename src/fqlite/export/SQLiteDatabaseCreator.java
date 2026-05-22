@@ -121,7 +121,7 @@ public class SQLiteDatabaseCreator {
 
             // iterate over all Descriptor objects, extract the original SQL command and execute it
             for(TableDescriptor desc : tables) {
-                if (desc.sql.isEmpty() || desc.tblname.startsWith("sqlite_"))
+                if (desc.sql.isEmpty() || desc.tblname.startsWith("sqlite_") || desc.isVirtual())
                     continue;
                 if (desc.isVirtual()) {
                     continue;
