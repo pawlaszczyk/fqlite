@@ -11,8 +11,6 @@ plugins {
 group 'hswm.fqlite'
 version '4.21'
 
-def protocversion = "27.4"
-
 def currentOs = org.gradle.internal.os.OperatingSystem.current()
 
 application {
@@ -77,30 +75,6 @@ dependencies {
     implementation group: 'org.xerial', name: 'sqlite-jdbc', version: '3.47.0.0'
 }
 
-task downloadProtoc(type: Download) {
-    def protocOsName = ""
-    if (currentOs.windows) {
-        protocOsName = "win64"
-    } else if (currentOs.linux) {
-        protocOsName = "linux-x86_64"
-    } else if (currentOs.macOsX) {
-        protocOsName = "osx-universal_binary"
-    }
-
-    var fileName = "protoc-${protocversion}-${protocOsName}.zip"
-    var protocUrl = "https://github.com/protocolbuffers/protobuf/releases/download/v${protocversion}/" + fileName
-    src protocUrl
-    dest new File(temporaryDir, fileName)
-}
-
-task downloadAndUnzipProtoc(dependsOn: downloadProtoc, type: Copy) {
-    from zipTree(downloadProtoc.dest)
-    into layout.buildDirectory.dir('protoc')
-}
-
-tasks.named('jpackage') {
-    dependsOn downloadAndUnzipProtoc
-}
 
 tasks.jpackage.doFirst {
     def fqliteJpackageDirectory = "build/jpackage/"
@@ -110,15 +84,6 @@ tasks.jpackage.doFirst {
         fqliteJpackageDirectory += "fqlite/lib"
     } else if (currentOs.macOsX) {
         fqliteJpackageDirectory += "fqlite.app/Contents/MacOS"
-    }
-    copy {
-        from layout.buildDirectory.dir('protoc')
-        into "$fqliteJpackageDirectory/protoc"
-    }
-    copy {
-        from layout.projectDirectory
-        include 'proto.run', 'proto.sh', 'protoc.bat'
-        into "$fqliteJpackageDirectory"
     }
 }
 
