@@ -186,6 +186,7 @@ jobs:
       # ──────────────────────────────────────────
       # macOS: DMG bauen & signieren
       # ──────────────────────────────────────────
+     
       - name: Create and sign macOS DMG
         if: startsWith(matrix.os, 'mac')
         env:
@@ -198,17 +199,32 @@ jobs:
             echo "Error: fqlite.app not found"; exit 1
           fi
 
+          # Kurz warten bis codesign alle Handles freigegeben hat
+          sleep 5
+
+          # App in separaten Staging-Ordner kopieren
+          mkdir -p dmg-staging
+          cp -R build/jpackage/fqlite.app dmg-staging/
+
+          # Symlink zu Applications hinzufügen (Drag & Drop Installation)
+          ln -s /Applications dmg-staging/Applications
+
+          # DMG aus Staging-Ordner erstellen
           hdiutil create -volname "FQLite" \
-            -srcfolder build/jpackage/fqlite.app \
+            -srcfolder dmg-staging \
             -ov -format UDZO \
             "${{ env.OUTPUT_FILE_NAME }}"
 
+          # DMG signieren
           codesign --force --sign "$SIGN_ID" \
             --timestamp \
             "${{ env.OUTPUT_FILE_NAME }}"
 
           echo "OUTPUT_FILE=$(pwd)/${{ env.OUTPUT_FILE_NAME }}" >> $GITHUB_ENV
 
+          # Aufräumen
+          rm -rf dmg-staging
+      
       # ──────────────────────────────────────────
       # macOS: Notarisieren & Staple
       # ──────────────────────────────────────────
