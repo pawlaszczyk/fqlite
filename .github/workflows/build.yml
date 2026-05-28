@@ -102,6 +102,7 @@ jobs:
       # macOS: Alle nativen Binaries signieren
       #   (inkl. .dylib/.jnilib innerhalb von JARs)
       # ──────────────────────────────────────────
+
       - name: Sign macOS app bundle
         if: startsWith(matrix.os, 'mac')
         env:
@@ -112,7 +113,6 @@ jobs:
           APP="build/jpackage/fqlite.app"
           SIGN_FLAGS="--force --timestamp --options runtime --keychain build.keychain"
 
-          # Entitlements für JVM
           cat > entitlements.plist << 'EOF'
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -137,12 +137,14 @@ jobs:
               | grep -iE '(mac|darwin|osx)' || true)
             if [ -n "$NATIVE" ]; then
               echo "Processing JAR: $(basename $JAR)"
+              JAR_ABS=$(realpath "$JAR")          # <-- absoluter Pfad merken
               TMPDIR=$(mktemp -d)
-              (cd "$TMPDIR" && jar xf "$JAR")
+              (cd "$TMPDIR" && jar xf "$JAR_ABS") # <-- absoluten Pfad beim Entpacken
               find "$TMPDIR" \( -name "*.dylib" -o -name "*.jnilib" \) | while read -r LIB; do
+                echo "  Signing: $(basename $LIB)"
                 codesign $SIGN_FLAGS --sign "$SIGN_ID" "$LIB" || true
               done
-              (cd "$TMPDIR" && jar cf "$JAR" .)
+              (cd "$TMPDIR" && jar cf "$JAR_ABS" .) # <-- absoluten Pfad beim Packen
               rm -rf "$TMPDIR"
             fi
           done
