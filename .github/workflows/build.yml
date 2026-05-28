@@ -160,21 +160,28 @@ jobs:
               codesign $SIGN_FLAGS --sign "$SIGN_ID" "$BIN" || true
           done
 
-          # 4. Weitere Executables (protoc etc.)
+          # 4. Weitere Executables (protoc etc.) – nur Mach-O Binaries
           find "$APP/Contents/MacOS" -type f | while read -r BIN; do
-            codesign $SIGN_FLAGS --sign "$SIGN_ID" "$BIN" || true
+            # Nur echte Mach-O Binaries signieren, keine Textdateien
+            if file "$BIN" | grep -q "Mach-O"; then
+              codesign $SIGN_FLAGS --sign "$SIGN_ID" "$BIN" || true
+            fi
           done
 
-          # 5. App-Bundle als Ganzes signieren (zuletzt!)
+          # 5. Schreibrechte auf alle Dateien im Bundle sicherstellen
+          chmod -R u+w "$APP"
+
+          # 6. App-Bundle als Ganzes signieren (zuletzt!)
           codesign --force --timestamp --options runtime \
             --entitlements entitlements.plist \
             --keychain build.keychain \
             --sign "$SIGN_ID" \
             "$APP"
 
-          # Verifikation
-          codesign --verify --deep --strict --verbose=2 "$APP"
+          # 7. Verifikation (ohne --deep wegen eingebetteter Nicht-Binaries)
+          codesign --verify --strict --verbose=2 "$APP"
           echo "✅ App bundle signed successfully"
+         
 
       # ──────────────────────────────────────────
       # macOS: DMG bauen & signieren
