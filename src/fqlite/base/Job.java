@@ -187,20 +187,13 @@ public class Job {
 	public AtomicInteger runningTasks = new AtomicInteger();
 	int tablematch = 0;
 	int indexmatch = 0;
-	public Map<String,Image> Thumbnails = new ConcurrentHashMap<String,Image>();
-	public Map<String,String> FileCache = new ConcurrentHashMap<String,String>();
 	public BLOBCache bincache;
-
-	public HashMap<String,String> convertto = new HashMap<String,String>();
-
-	public Set<String> inspectBASE64 = new HashSet<String>();
-
 	public AtomicInteger numberofcells = new AtomicInteger();
 
 	Set<Integer> allreadyvisit;
 
 	/* all unfinished tasks are hold in this list*/
-	List<RecoveryTask> tasklist = new LinkedList<RecoveryTask>();
+	List<RecoveryTask> tasklist = new ArrayList<RecoveryTask>();
 
 	/* this array holds a description of the associated component for each data page, if known */
 	public AbstractDescriptor[] pages;
@@ -229,12 +222,9 @@ public class Job {
 	boolean emptydb = false;
 
 	public SortedSet<Integer> mastertable = new ConcurrentSkipListSet<Integer>();
-
-	//public Hashtable<String,List<String>> autoindex = new Hashtable<String,List<String>>();
-
 	public List<Integer> freelistpages = new ArrayList<Integer>();
 
-	public LinkedList<WALFrame> checkpointlist = new LinkedList<WALFrame>();
+	public List<WALFrame> checkpointlist = new ArrayList<WALFrame>();
 
 	// for analyzing
 	public InMemoryDatabase mdb;
@@ -1659,32 +1649,7 @@ public class Job {
 			});
 
 		}
-		else {
-			String[] lines = null; //resultlist.toArray(new String[0]);
-			writeResultsToFile(null, lines);
 
-			if (readRollbackJournal) {
-				/* the readWAL option is enabled -> check the WAL-file too */
-				info("RollbackJournal-File " + this.rollbackjournalpath);
-				rol = new RollbackJournalReader(rollbackjournalpath, this);
-				rol.ps = this.ps;
-				/* start parsing Rollbackjournal-file */
-				rol.parse();
-				rol.output();
-				rol = null;
-			}
-			else if (readWAL) {
-				/* the readWAL option is enabled -> check the WAL-file too */
-				info("WAL-File " + walpath);
-				WALReader wal = new WALReader(walpath, this);
-				/* start parsing WAL-file */
-				wal.parse();
-				wal.output();
-				wal = null;
-			}
-
-
-		}
 
 		// Cleanup: post a fence runLater so the JavaFX thread processes all
 		// pending GUI updates *before* we close the db buffer on this thread.

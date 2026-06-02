@@ -3,6 +3,11 @@ package fqlite.base;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
+import java.time.Instant;
+import java.time.ZoneId;
+import java.time.ZoneOffset;
+import java.time.ZonedDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.Properties;
 import java.util.logging.Level;
 import fqlite.log.AppLog;
@@ -18,10 +23,12 @@ import javafx.scene.control.CheckBox;
 import javafx.scene.control.ChoiceBox;
 import javafx.scene.control.Label;
 import javafx.scene.control.RadioButton;
+import javafx.scene.control.TextField;
 import javafx.scene.control.ToggleGroup;
 import javafx.scene.control.Tooltip;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.VBox;
+import javafx.scene.paint.Color;
 import javafx.scene.text.Font;
 import javafx.scene.text.FontWeight;
 import javafx.scene.text.TextAlignment;
@@ -33,6 +40,9 @@ public class SettingsDialog extends Application{
 		final	RadioButton r1 = new RadioButton("don't export any BLOBs"); 
 		final   RadioButton r3 = new RadioButton("export BLOB values as separate files");
         final   ChoiceBox<String> loglevel = new ChoiceBox<String>();
+
+        /** Sample instant used for the live format preview (fixed, reproducible). */
+        private static final long PREVIEW_EPOCH_SECONDS = 1_682_694_647L; // 2023-04-28 17:30:47 UTC
 
 
     @Override
@@ -124,6 +134,86 @@ public class SettingsDialog extends Application{
             loggrp.setStyle(cssLayout);
             rootGroup.getChildren().addAll(heading3, loggrp);
 
+            // ----------------------------------------------------------------
+            // Timestamp Format section
+            // ----------------------------------------------------------------
+            javafx.scene.control.Label heading4 = new javafx.scene.control.Label("Timestamp Format");
+            heading4.setFont(Font.font("Verdana", FontWeight.BOLD, 12));
+
+            VBox tsBox = new VBox();
+            tsBox.setPadding(new Insets(5, 5, 5, 5));
+            tsBox.setSpacing(6);
+            tsBox.setStyle(cssLayout);
+
+            // Pattern input row
+            Label tsPatternLabel = new Label("Pattern:");
+            TextField tsPatternField = new TextField(Global.TIMESTAMP_FORMAT);
+            tsPatternField.setPrefWidth(220);
+            tsPatternField.setTooltip(new Tooltip(
+                    "Unicode CLDR date/time pattern\n" +
+                    "e.g.  yyyy-MM-dd HH:mm:ss Z\n" +
+                    "      MM/dd/yyyy - HH:mm:ss zzzz\n" +
+                    "See: unicode.org/reports/tr35/tr35-dates.html"));
+            HBox tsPatternRow = new HBox(tsPatternLabel, tsPatternField);
+            tsPatternRow.setSpacing(8);
+            tsPatternRow.setAlignment(Pos.CENTER_LEFT);
+
+            // Live preview label
+            Label tsPreviewLabel = new Label("Preview:");
+            Label tsPreviewValue = new Label();
+            tsPreviewValue.setStyle("-fx-font-family: monospace;");
+            HBox tsPreviewRow = new HBox(tsPreviewLabel, tsPreviewValue);
+            tsPreviewRow.setSpacing(8);
+            tsPreviewRow.setAlignment(Pos.CENTER_LEFT);
+
+            // Timezone selection
+            ToggleGroup tzGroup = new ToggleGroup();
+            RadioButton tsUTC   = new RadioButton("UTC");
+            RadioButton tsLocal = new RadioButton("Local time  (" + ZoneId.systemDefault().getId() + ")");
+            tsUTC  .setToggleGroup(tzGroup);
+            tsLocal.setToggleGroup(tzGroup);
+            if (Global.TIMESTAMP_USE_UTC) tsUTC.setSelected(true);
+            else                          tsLocal.setSelected(true);
+            HBox tzRow = new HBox(tsUTC, tsLocal);
+            tzRow.setSpacing(16);
+            tzRow.setAlignment(Pos.CENTER_LEFT);
+
+            // Helper: update preview from current pattern field content
+            Runnable updatePreview = () -> {
+                String pat = tsPatternField.getText().trim();
+                ZoneId zone = tsUTC.isSelected() ? ZoneOffset.UTC : ZoneId.systemDefault();
+                try {
+                    String preview = ZonedDateTime
+                            .ofInstant(Instant.ofEpochSecond(PREVIEW_EPOCH_SECONDS), zone)
+                            .format(DateTimeFormatter.ofPattern(pat));
+                    tsPreviewValue.setText(preview);
+                    tsPreviewValue.setTextFill(Color.BLACK);
+                    tsPatternField.setStyle("");          // clear any error highlight
+                } catch (IllegalArgumentException ex) {
+                    tsPreviewValue.setText("Invalid pattern");
+                    tsPreviewValue.setTextFill(Color.RED);
+                    tsPatternField.setStyle("-fx-border-color: red;");
+                }
+            };
+
+            // Update preview on every keystroke or zone change
+            tsPatternField.textProperty().addListener((obs, oldVal, newVal) -> updatePreview.run());
+            tzGroup.selectedToggleProperty().addListener((obs, oldVal, newVal) -> updatePreview.run());
+            updatePreview.run();   // initial render
+
+            // Quick-pick buttons for the two canonical formats
+            Button btnISO   = new Button("ISO  (yyyy-MM-dd HH:mm:ss Z)");
+            Button btnUS    = new Button("US   (MM/dd/yyyy - HH:mm:ss Z)");
+            btnISO .setStyle("-fx-font-size: 10;");
+            btnUS  .setStyle("-fx-font-size: 10;");
+            btnISO .setOnAction(e -> tsPatternField.setText("yyyy-MM-dd HH:mm:ss Z"));
+            btnUS  .setOnAction(e -> tsPatternField.setText("MM/dd/yyyy - HH:mm:ss Z"));
+            HBox tsQuickRow = new HBox(btnISO, btnUS);
+            tsQuickRow.setSpacing(6);
+
+            tsBox.getChildren().addAll(tsPatternRow, tsPreviewRow, tzRow, tsQuickRow);
+            rootGroup.getChildren().addAll(heading4, tsBox);
+
 	        ButtonBar buttonBar = new ButtonBar();
 	        buttonBar.setPadding( new Insets(10) );
 
@@ -166,6 +256,17 @@ public class SettingsDialog extends Application{
 		            	        Global.CSV_SEPARATOR = choiceBox.getSelectionModel().getSelectedItem();
 		            	        appProps.setProperty("CSV_SEPARATOR",Global.CSV_SEPARATOR);
 		            	        appProps.setProperty("LOG-LEVEL",Global.LOGLEVEL.toString());
+		            	        // Timestamp format — validate before saving
+		            	        String newPattern = tsPatternField.getText().trim();
+		            	        try {
+		            	            DateTimeFormatter.ofPattern(newPattern); // validate
+		            	            Global.TIMESTAMP_FORMAT = newPattern;
+		            	        } catch (IllegalArgumentException patEx) {
+		            	            AppLog.error("Rejected invalid timestamp pattern: " + newPattern);
+		            	        }
+		            	        appProps.setProperty("TIMESTAMP_FORMAT", Global.TIMESTAMP_FORMAT);
+		            	        Global.TIMESTAMP_USE_UTC = tsUTC.isSelected();
+		            	        appProps.setProperty("TIMESTAMP_USE_UTC", Global.TIMESTAMP_USE_UTC ? "true" : "false");
 		            	        appProps.store(new FileOutputStream(path), null);
 
 		            		} catch (Exception err) {
@@ -197,7 +298,7 @@ public class SettingsDialog extends Application{
 	  
 	        rootGroup.getChildren().add(buttonBar);
 
-	        Scene settingsScene = new Scene(rootGroup, 400, 650);
+	        Scene settingsScene = new Scene(rootGroup, 400, 780);
 	        ThemeManager.register(settingsScene);   // ← apply global theme
 	        stage.setScene(settingsScene);
 	        stage.setAlwaysOnTop(true);

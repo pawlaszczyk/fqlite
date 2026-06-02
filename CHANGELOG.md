@@ -1,4 +1,4 @@
 # What's Changed 
 - Bug Fixes for WAL-archive & Rollback-Journal-Analysis
-- Now a CASE/UCO export functionality is available
-- Fix a bug for copy of BLOB values
+- Settings: Timestamp conversion format customization (issue 22)
+- added support for SQLCipher databases (issue 24)

@@ -46,6 +46,24 @@ public class Global {
 	
 	public static boolean SQLWARNING_SEEN = false;
 
+	/**
+	 * Output pattern used by {@code Auxiliary.int2Timestamp()} to render
+	 * numeric timestamps as human-readable strings.
+	 * Follows the Unicode CLDR Date Field Symbol Table
+	 * (https://www.unicode.org/reports/tr35/tr35-dates.html#Date_Field_Symbol_Table)
+	 * as interpreted by {@link java.time.format.DateTimeFormatter}.
+	 * Examples:
+	 *   "MM/dd/yyyy - HH:mm:ss Z"   → 04/28/2023 - 17:30:47 +0000
+	 *   "yyyy-MM-dd HH:mm:ss Z"     → 2023-04-28 17:30:47 +0000  (default)
+	 */
+	public static String TIMESTAMP_FORMAT = "yyyy-MM-dd HH:mm:ss Z";
+
+	/**
+	 * When {@code true}, timestamps are displayed in UTC.
+	 * When {@code false}, the system's local time zone is used instead.
+	 */
+	public static boolean TIMESTAMP_USE_UTC = true;
+
 	public final static String col_offset = "_OFFSET";
 	public final static String col_rowid = "_ROWID";
 	public final static String col_no = "_NO";

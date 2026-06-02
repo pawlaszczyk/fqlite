@@ -57,11 +57,11 @@ public class ImportDBTask {
 
               try {
                   rol.parse();
+                  rol.output();
               } catch (IOException e) {
                   throw new RuntimeException(e);
               }
 
-              rol.output();
             String s2 = Objects.requireNonNull(GUI.class.getResource("/icon24_rb.png")).toExternalForm();
             ImageView iv2 = new ImageView(s2);
             iv2.setFitWidth(24);

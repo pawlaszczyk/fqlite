@@ -7,6 +7,8 @@ import java.awt.TrayIcon;
 import java.io.*;
 import java.net.URL;
 import java.nio.file.*;
+import java.sql.Connection;
+import java.sql.DriverManager;
 import java.sql.SQLException;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
@@ -18,6 +20,7 @@ import javax.swing.*;
 
 import fqlite.descriptor.TableDescriptor;
 import fqlite.export.SQLiteDatabaseCreator;
+import fqlite.sqlcipher.*;
 import fqlite.timemap.LocationWindow;
 import fqlite.erm.MermaidHTMLGenerator;
 import fqlite.erm.SchemaRetriever;
@@ -1329,10 +1332,16 @@ public class GUI extends Application {
 				Global.CSV_SEPARATOR = (String) cvalue;
 			}
 
-			Object lvalue = appProps.get("LOG-LEVEL");
+				Object lvalue = appProps.get("LOG-LEVEL");
 			if (null != lvalue) {
 				Global.LOGLEVEL = Level.parse((String) lvalue);
 			}
+
+			if (appProps.containsKey("TIMESTAMP_FORMAT"))
+				Global.TIMESTAMP_FORMAT = appProps.getProperty("TIMESTAMP_FORMAT");
+
+			if (appProps.containsKey("TIMESTAMP_USE_UTC"))
+				Global.TIMESTAMP_USE_UTC = "true".equals(appProps.getProperty("TIMESTAMP_USE_UTC"));
 
 			//Object fn = appProps.get("font_name");
 			//if (null != fn) {
@@ -1375,7 +1384,7 @@ public class GUI extends Application {
 				NodeObject no = node.getValue();
 				if (null != no.job) {
 					no.job.checkpointlist = null;
-					no.job.FileCache = null;
+					//no.job.FileCache = null;
 					if (no.job.bincache != null){
 						no.job.bincache = null;
 					}
@@ -2674,6 +2683,34 @@ public class GUI extends Application {
 			alert.showAndWait();
 			return;
 		}
+
+		File dbFile = file;
+
+		boolean encrypted = SQLCipherDatabaseHandler.looksEncrypted(dbFile);
+		AppLog.info("File: " + dbFile.getName() + " | encrypted: " + encrypted);
+
+		if (encrypted) {
+
+			// Show decryption dialog
+			Optional<SQLCipherParams> paramsOpt =
+					SQLCipherDecryptDialog.show(this.stage);
+
+
+			if (paramsOpt.isEmpty()) {
+				AppLog.info("User cancelled the decryption dialog.");
+			}
+
+			SQLCipherParams params = paramsOpt.get();
+
+			File plainDb = SQLCipherExportDialog.show(this.stage, dbFile, params);
+
+ 			System.out.println(plainDb);
+			file = plainDb;
+			//open_db(plainDb);
+			//return;
+
+        }
+
 
 		RandomAccessFile raf = null;
 		boolean abort = false;

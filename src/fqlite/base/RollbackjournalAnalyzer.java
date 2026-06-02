@@ -59,9 +59,9 @@ public class RollbackjournalAnalyzer {
     static final int PAGE_LEAF_INDEX     = 0x0A;
     static final int PAGE_LEAF_TABLE     = 0x0D;
 
-    record SchemaEntry(String type, String name, long rootPage) {}
+    public record SchemaEntry(String type, String name, long rootPage) {}
 
-    record PageRecord(
+    public record PageRecord(
             int     segmentIndex,
             int     recordIndex,
             long    recordOffset,   // byte offset of this record's start (page-number field) in the journal file

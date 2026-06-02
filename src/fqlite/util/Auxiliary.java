@@ -102,9 +102,29 @@ public class Auxiliary {
     static final long WEBKIT_MIN_DATE = (UNIX_MIN_SECONDS + 11_644_473_600L) * 1_000_000L;
     static final long WEBKIT_MAX_DATE = (UNIX_MAX_SECONDS + 11_644_473_600L) * 1_000_000L;
 
-    /** Shared timestamp formatter (thread-safe, immutable) */
-    static final DateTimeFormatter TIMESTAMP_FORMATTER =
-            DateTimeFormatter.ofPattern("MM/dd/yyyy - HH:mm:ss Z");
+    /**
+     * Returns a {@link DateTimeFormatter} built from the user-configurable
+     * pattern stored in {@link Global#TIMESTAMP_FORMAT}.
+     * Falls back to a safe ISO-like default when the pattern is invalid.
+     */
+    static DateTimeFormatter getTimestampFormatter() {
+        try {
+            return DateTimeFormatter.ofPattern(Global.TIMESTAMP_FORMAT);
+        } catch (IllegalArgumentException e) {
+            AppLog.error("Invalid TIMESTAMP_FORMAT pattern \"" + Global.TIMESTAMP_FORMAT
+                    + "\", falling back to default. Cause: " + e.getMessage());
+            return DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss Z");
+        }
+    }
+
+    /**
+     * Returns the display time zone based on {@link Global#TIMESTAMP_USE_UTC}:
+     * {@link ZoneOffset#UTC} when the flag is {@code true}, otherwise the
+     * JVM's default (local) time zone.
+     */
+    static java.time.ZoneId getTimestampZone() {
+        return Global.TIMESTAMP_USE_UTC ? ZoneOffset.UTC : ZoneId.systemDefault();
+    }
 
     protected static final char[] HEX_ARRAY = "0123456789abcdef".toCharArray();
 
@@ -1243,13 +1263,13 @@ public class Auxiliary {
 
 
     private static String formatEpochSecond(long epochSecond) {
-        return ZonedDateTime.ofInstant(Instant.ofEpochSecond(epochSecond), ZoneOffset.UTC)
-                .format(TIMESTAMP_FORMATTER);
+        return ZonedDateTime.ofInstant(Instant.ofEpochSecond(epochSecond), getTimestampZone())
+                .format(getTimestampFormatter());
     }
 
     private static String formatEpochMilli(long epochMilli) {
-        return ZonedDateTime.ofInstant(Instant.ofEpochMilli(epochMilli), ZoneOffset.UTC)
-                .format(TIMESTAMP_FORMATTER);
+        return ZonedDateTime.ofInstant(Instant.ofEpochMilli(epochMilli), getTimestampZone())
+                .format(getTimestampFormatter());
     }
 
     /**

@@ -12,7 +12,7 @@ import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.Future;
-
+import fqlite.analyzer.DatabaseComparator;
 import fqlite.descriptor.AbstractDescriptor;
 import fqlite.descriptor.TableDescriptor;
 import fqlite.log.AppLog;
@@ -69,7 +69,6 @@ public class RollbackJournalReader{
 	/* number of pages that is currently analysed */
 	int pagenumber_rol;
 	int pagenumber_maindb;
-	
 	long pagecount;
 	long nounce;
 	long pages;
@@ -88,16 +87,12 @@ public class RollbackJournalReader{
 	/* buffer that holds the current page */
 	ByteBuffer buffer;
 
-	public static List<TableDescriptor> tables = new LinkedList<TableDescriptor>();
-	/* this is a multi-threaded program -> all data are saved to the list first */
+	public static List<TableDescriptor> tables = new ArrayList<TableDescriptor>();
 
-	/* outputlist */
-	ConcurrentLinkedQueue<LinkedList<String>> output = new ConcurrentLinkedQueue<LinkedList<String>>();
-	
+	//ConcurrentLinkedQueue<LinkedList<String>> output = new ConcurrentLinkedQueue<LinkedList<String>>();
 
 	/* file pointer */
 	int journalpointer = 0;
-
 
 	Map<Long, RollbackjournalAnalyzer.SchemaEntry> pageOwner;
 	List<RollbackjournalAnalyzer.PageRecord> records;
@@ -121,6 +116,7 @@ public class RollbackJournalReader{
 	 * @return
 	 */
 	public void parse() throws IOException {
+
 		Path p = Paths.get(path);
 
 		RollbackjournalAnalyzer.analyzeJournal(this);
@@ -182,10 +178,7 @@ public class RollbackJournalReader{
 		
 		/* read header of the WAL file - the first 28 bytes */
 		ByteBuffer header = ByteBuffer.allocate(28);
-
-		
 		Future<Integer> result = file.read(header, 0); // position = 0
-
 		while (!result.isDone()) {
 
 			// we can do something in between or just wait ;-).
@@ -222,12 +215,9 @@ public class RollbackJournalReader{
 		journalpagesize = Integer.toUnsignedLong(header.getInt());
 		AppLog.info(" journal page size  " + journalpagesize);
 
-		
 	    journalpointer = 512; // this is the position, where the first frame should be
 
-
 		/* initialise the BitSet for already visited location within */
-
 		visit = new BitSet(ps);
 
 		int i = 0;
@@ -242,47 +232,8 @@ public class RollbackJournalReader{
 			analyzePage(i, (int)page,(int)offset + 4); // we need the original page number to compute the offset for the diff between journal and database
 			i++;
 		}
-		
-//		boolean next = false;
-//		int numberofpages = 0;
-//		do
-//		{
-//			rollbackjournal.position(journalpointer);
-//			/* get the page number of the journal page in main db */
-//
-//		    pagenumber_maindb = rollbackjournal.getInt();
-//			AppLog.debug("pagenumber of journal-entry " + pagenumber_maindb);
-//			System.out.println(String.format("pagenumber of journal-entry " + pagenumber_maindb));
-//
-//			//* offset of the journal page -> save it */
-//			int pageoffset = rollbackjournal.position();
-//
-//			/* now we can read the page - it follows immediately after the frame header */
-//
-//			/* read the db page into buffer */
-//			buffer = readPage();
-//
-//			numberofpages++;
-//			pagenumber_rol = numberofpages;
-//
-//			analyzePage(pagenumber_maindb,pageoffset); // we need the original page number to compute the offset for the diff between journal and database
-//
-//			/* set pointer to next journal record  -> currentpos + 4 Byte for the page number in mainDB + pagesize + 4 Byte for Checksum */
-//			journalpointer += (4 + ps + 4);
-//
-//			//System.out.println(" Position in RollbackJournal-file " + journalpointer + " " );
-//
-//			/*  More pages to analyse? */
-//			if(journalpointer + ps  <= size)
-//			{
-//				next = true;
-//			}
-//			else
-//				next = false;
-//
-//		}while(next);
 
-		AppLog.info("Lines after RollbackJournal-file recovery: " + output.size());
+		//AppLog.info("Lines after RollbackJournal-file recovery: " + output.size());
 		AppLog.info("Number of pages in RollbackJournal-file" + records.size());
 	
 	}
@@ -374,13 +325,13 @@ public class RollbackJournalReader{
 			AppLog.info("No Data page. " + pagenumber_rol);
 			return -1;
 		} else if (type == 5) {
-	//		AppLog.info("Internal Table page " + pagenumber_rol);
+		//	AppLog.info("Internal Table page " + pagenumber_rol);
 			return -1;
 		} else if (type == 10) {
-	//		AppLog.info("Index leaf page " + pagenumber_rol);
+		//	AppLog.info("Index leaf page " + pagenumber_rol);
 			withoutROWID = true;
 
-	//	} else {
+		//	} else {
 			//AppLog.info("Data page " + pagenumber_rol+ " Offset: " + (rollbackjournal.position() - ps));
 		}
 
@@ -461,8 +412,6 @@ public class RollbackJournalReader{
 
 			String tname = null;
 
-//			RollbackjournalAnalyzer.SchemaEntry e = pageOwner.get((long)page);
-
 			for (RollbackjournalAnalyzer.PageRecord re : records){
 				if (re.pageNumber()== pagenumber_maindb){
 					tname = re.ownerName();
@@ -472,9 +421,6 @@ public class RollbackJournalReader{
 			if (tname == null) {
 				tname = "unkown";
 			}
-//			else {
-//				tname = e.name();
-//			}
 
 			try {
 				DataRow r = ct.readRecord(celloff, buffer, pagenumber_maindb, visit, Integer.MAX_VALUE, withoutROWID, Global.ROLLBACK_JOURNAL_FILE, pageoffset + celloff, tname);
@@ -484,7 +430,6 @@ public class RollbackJournalReader{
 
 				// add new line to output
 				if (null != record && record.size() > 0) {
-					output.add(record);
 					updateResultSet(r);
 				}
 
@@ -720,90 +665,60 @@ public class RollbackJournalReader{
 	}
 	
 	/**
-	 *  This method can be used to write the result to a file or
-	 *  to update tables in the user interface (in GUI mode).
+	 *  This method is used to update tables in the user interface (in GUI mode).
 	 */
 	public void output()
 	{
 		if (job.gui != null) {
-			
-			AppLog.info("Number of records recovered: " + output.size());
-			//String[] lines = output.toArray(new String[0]);
-			//Arrays.sort(lines);
 
-			Iterator<LinkedList<String>> lines = output.iterator();
+			// make a diff between the rolback journal and the database
+			Map<String, DatabaseComparator.TableDiff> differences = DatabaseComparator.compare(job.resultlist, this.resultlist, 2);
 
-			// holds all data sets for all tables, whereas the tablename represents the key
-			Hashtable<String,ObservableList<ObservableList<String>>> dataSets = new Hashtable<>();
-			
-			while(lines.hasNext())
-			{
-				LinkedList<String> line = lines.next();
-		
-			 	/* if table name is empty -> assign data record to table fqlite_freelist */
-			   	if (line.getFirst().trim().length()==0)
-			   	{
-			 
-			        // Add the new element add the beginning
-			       // line.set(0,"fqlite_freelist"); 			   	
-			   	}
-				
-			   	// is there already a data set for this particular table
-							
-				if (dataSets.containsKey(line.get(0)))
-				{
-					 
-					     ObservableList<ObservableList<String>> tablelist = dataSets.get(line.getFirst());
-					     tablelist.add(FXCollections.observableList(line));  // add row 
-				}
-				
-				// create a new data set before inserting the first row
-				else {
-					  	  ObservableList<ObservableList<String>> tablelist = FXCollections.observableArrayList();
-						  tablelist.add(FXCollections.observableList(line));  // add row 
-					  	  dataSets.put(line.getFirst(),tablelist); 
-				}	
-			
-	            // TODO: Remove empty tables from rollback journal		
-	
-		
+			for (DatabaseComparator.TableDiff diff : differences.values()) {
+				System.out.println(diff);
+
+				System.out.println("  Inserted:" + diff.inserted.size());
+				diff.inserted.forEach(row -> System.out.println("    " + row));
+
+				System.out.println("  Deleted:" + diff.deleted.size());
+				//diff.deleted.forEach(row -> System.out.println("    " + row));
+
+				System.out.println("  Modified:" + diff.modified.size());
+				diff.modified.forEach(row -> System.out.println("    " + row));
 			}
-		
-			//Platform.runLater(() -> {
-			//	fqlite.ui.HexViewFX hex = new fqlite.ui.HexViewFX(GUI.topContainer,this.path,this.rollbackjournal);
- 			//   hexview = hex; 
-			//});
-			
-			Enumeration<String> tables = dataSets.keys();
-			
+
+			// journal entries 
+			Enumeration<String> tables = this.resultlist.keys();
+
+
 			/* finally, we can update the TableView for each table */
 			while(tables.hasMoreElements())
 			{	
 				String tablename = tables.nextElement();
 		        /* get tree path, i.e. /databases/02-05.db/users */
 				String rpath = job.guiroltab.get(tablename);
-				job.gui.update_table(rpath,dataSets.get(tablename),hexdumplist.get(tablename),false);
+
+				ObservableList<ObservableList<String>> rs = resultlist.get(tablename);
+
+				//resultlist.get(tablename).getFirst().set(1,"BLBABLBA");
+
+				//for(String d : differences.keySet())
+				//{
+				//	if(tablename.equals(d)){
+
+				//		DatabaseComparator.TableDiff td = differences.get(d);
+				//		List<ObservableList<String>> del = td.getConfirmedDeletes();
+				//		System.out.println(" test " + rs.get(2));
+				//	}
+				//}
+
+
+
+				job.gui.update_table(rpath,resultlist.get(tablename),hexdumplist.get(tablename),false);
 				
 			}
 		} 
-		else 
-		{
 
-			Path dbfilename = Paths.get(path);
-			String name = dbfilename.getFileName().toString();
-
-			LocalDateTime now = LocalDateTime.now();
-			DateTimeFormatter df;
-			df = DateTimeFormatter.ISO_DATE_TIME; // 2020-01-31T20:07:07.095
-			String date = df.format(now);
-
-			String filename = "results" + name + date + ".csv";
-			
-			String[] lines = output.toArray(new String[0]);
-			job.writeResultsToFile(filename,lines);
-
-		}
-		
 	}
 
 	/**
