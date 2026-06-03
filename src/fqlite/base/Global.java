@@ -15,8 +15,8 @@ public class Global {
 	public static final String DELETED_RECORD_IN_PAGE = "D"; // U2718 - deleted
 	public static final String FREELIST_ENTRY = "F"; // U267D - freelist
 	public static final String STATUS_CLOMUN = "S"; // U291D U2691
-	public static final String FQLITE_VERSION = "4.21";
-	public static final String FQLITE_RELEASEDATE = "20/05/2026";
+	public static final String FQLITE_VERSION = "4.22";
+	public static final String FQLITE_RELEASEDATE = "04/06/2026";
 	public static final String YEAR = "2026";
 	public static final int CARVING_ERROR = -1;
 	public static Level LOGLEVEL = Level.FINER;
