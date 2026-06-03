@@ -199,21 +199,27 @@ jobs:
             echo "Error: fqlite.app not found"; exit 1
           fi
 
-          # Kurz warten bis codesign alle Handles freigegeben hat
-          sleep 5
+          # Warten bis alle Handles freigegeben sind + Retry-Loop
+          for i in 1 2 3 4 5; do
+            sleep $((i * 5))
+            
+            # App in separaten Staging-Ordner kopieren
+            mkdir -p dmg-staging
+            cp -R build/jpackage/fqlite.app dmg-staging/
 
-          # App in separaten Staging-Ordner kopieren
-          mkdir -p dmg-staging
-          cp -R build/jpackage/fqlite.app dmg-staging/
-
-          # Symlink zu Applications hinzufügen (Drag & Drop Installation)
-          ln -s /Applications dmg-staging/Applications
-
-          # DMG aus Staging-Ordner erstellen
-          hdiutil create -volname "FQLite" \
-            -srcfolder dmg-staging \
-            -ov -format UDZO \
-            "${{ env.OUTPUT_FILE_NAME }}"
+            # Symlink zu Applications hinzufügen (Drag & Drop Installation)
+            ln -s /Applications dmg-staging/Applications
+            
+            hdiutil create -volname "FQLite" \
+              -srcfolder dmg-staging \
+              -ov -format UDZO \
+              "${{ env.OUTPUT_FILE_NAME }}" && break
+            echo "Attempt $i failed, retrying..."
+            if [ $i -eq 5 ]; then
+              echo "All attempts failed"
+              exit 1
+            fi
+          done
 
           # DMG signieren
           codesign --force --sign "$SIGN_ID" \
