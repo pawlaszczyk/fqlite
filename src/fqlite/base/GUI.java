@@ -7,8 +7,6 @@ import java.awt.TrayIcon;
 import java.io.*;
 import java.net.URL;
 import java.nio.file.*;
-import java.sql.Connection;
-import java.sql.DriverManager;
 import java.sql.SQLException;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
@@ -2686,15 +2684,13 @@ public class GUI extends Application {
 
 		File dbFile = file;
 
-		boolean encrypted = SQLCipherDatabaseHandler.looksEncrypted(dbFile);
+		boolean encrypted = looksEncrypted(dbFile);
 		AppLog.info("File: " + dbFile.getName() + " | encrypted: " + encrypted);
 
 		if (encrypted) {
 
 			// Show decryption dialog
-			Optional<SQLCipherParams> paramsOpt =
-					SQLCipherDecryptDialog.show(this.stage);
-
+			Optional<SQLCipherParams> paramsOpt = SQLCipherDecryptDialog.show(this.stage);
 
 			if (paramsOpt.isEmpty()) {
 				AppLog.info("User cancelled the decryption dialog.");
@@ -2702,12 +2698,10 @@ public class GUI extends Application {
 
 			SQLCipherParams params = paramsOpt.get();
 
-			File plainDb = SQLCipherExportDialog.show(this.stage, dbFile, params);
-
- 			System.out.println(plainDb);
+			// Forensic page-level decrypt (preserves everything)
+			File plainDb = DecryptProgressDialog.show(this.stage, dbFile, params);
+			System.out.println(plainDb);
 			file = plainDb;
-			//open_db(plainDb);
-			//return;
 
         }
 
@@ -3906,5 +3900,19 @@ public class GUI extends Application {
 		});
 
 	}
+
+
+	public static boolean looksEncrypted(File dbFile) {
+		try (var is = new java.io.FileInputStream(dbFile)) {
+			byte[] header = new byte[16];
+			int read = is.read(header);
+			if (read < 16) return false;
+			String magic = new String(header, java.nio.charset.StandardCharsets.US_ASCII);
+			return !magic.startsWith("SQLite format 3");
+		} catch (Exception e) {
+			return false;
+		}
+	}
+
 
 } // End of class GUI
