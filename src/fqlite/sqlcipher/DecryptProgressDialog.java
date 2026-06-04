@@ -126,7 +126,7 @@ public class DecryptProgressDialog {
         );
         String suggested = source.getName();
                 //.replaceFirst("(\\.[^.]+)$", "_forensic$1");
-        suggested += "_encrypted";
+        suggested += "_decrypted";
         chooser.setInitialFileName(suggested);
         if (source.getParentFile() != null)
             chooser.setInitialDirectory(source.getParentFile());

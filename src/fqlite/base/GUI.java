@@ -2605,7 +2605,7 @@ public class GUI extends Application {
 	 * started.
 	 *
 	 */
-	public synchronized void open_db(File f) {
+	public synchronized void open_db(File f){
 
 		/* Prevent concurrent imports: check if any known job is still processing */
 		List<TreeItem<NodeObject>> openDbs = TreeHelper.getFirstLevelTreeItems(tree);
@@ -2702,6 +2702,27 @@ public class GUI extends Application {
 			File plainDb = DecryptProgressDialog.show(this.stage, dbFile, params);
 			System.out.println(plainDb);
 			file = plainDb;
+
+            try {
+                SQLCipherForensicExport.Result result =
+
+                        SQLCipherForensicExport.exportAll(
+                                dbFile,
+                                new File(dbFile.getParent()),
+                                params,
+                                (current, total) -> {});
+            } catch (Exception e) {
+                throw new RuntimeException(e);
+            }
+
+
+			// WAL und Journal werden automatisch erkannt und verarbeitet
+			//if (result.walDb() != null) {
+				// WAL war vorhanden – merged DB öffnen
+			//	loadDatabase(result.walDb());
+			//} else {
+			//	loadDatabase(result.mainDb());
+			//}
 
         }
 
