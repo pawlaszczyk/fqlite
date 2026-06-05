@@ -36,6 +36,7 @@ FQLite allows you to:
 * Export recovered data to CASE/UCO JSON-LD format
 * white and black theme support
 * support of sqlcipher encrypted databases
+* Apple DMG Installer is signed (since 4.22)
 
 Some features:
 
