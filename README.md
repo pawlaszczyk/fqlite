@@ -92,7 +92,13 @@ In the latest version, the FQLite is bundled with a Java Runtime Environment (JR
 
 > **Important note:** With version 2.0, the support for the command line mode was cancelled.
 
+### NodeQL Implementation
 
+<p align="center">
+  <img width="80%" height="80%" src="img/nodeql_implementation.png?raw=true" alt="NodeQL Node Windows Showcase"/>
+</p>
+
+With NodeQL you can easily create full SQL Commands graphicly. Just use the Nodes and Snap them onto each other. It work's this simple.
 
 # Installation
 ## macOS
