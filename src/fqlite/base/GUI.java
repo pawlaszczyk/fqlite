@@ -18,6 +18,7 @@ import javax.swing.*;
 
 import fqlite.descriptor.TableDescriptor;
 import fqlite.export.SQLiteDatabaseCreator;
+import fqlite.nodeql.NodeQlBuilderWindow;
 import fqlite.sqlcipher.*;
 import fqlite.timemap.LocationWindow;
 import fqlite.erm.MermaidHTMLGenerator;
@@ -210,6 +211,7 @@ public class GUI extends Application {
 
 	/* Buttons for toolbar */
 	Button btnSQL;
+	Button btnNodeQL;
 	Button btnLLM;
 	Button btnLocation;
 	Button btnExport;
@@ -224,6 +226,7 @@ public class GUI extends Application {
 	MenuItem mntmExportDB;
 	MenuItem mntmHex;
 	MenuItem mntmSQL;
+	MenuItem mntmNodeQL;
 	MenuItem mntmHTML;
 	MenuItem mntmSchema;
 
@@ -364,6 +367,10 @@ public class GUI extends Application {
 		mntmSQL.setDisable(true);
 		mntmSQL.setOnAction(e -> showSqlWindow(null, getDatabaseNode()));
 
+		mntmNodeQL = new MenuItem("NodeQL Builder...");
+		mntmNodeQL.setDisable(true);
+		mntmNodeQL.setOnAction(e -> openNodeQlBuilder());
+
 		mntmHex = new MenuItem("Hex-Viewer...");
 		mntmHex.setDisable(true);
 		mntmHex.setOnAction(e -> openHexViewer());
@@ -382,7 +389,7 @@ public class GUI extends Application {
 
 		mnFiles.getItems().addAll(mntopen, sep, mntclose, sep2, mntmProp, mntmExit);
 		mnExport.getItems().addAll(cmExport, mntmExportDB, mntmHTML);
-		mnAnalyze.getItems().addAll(mntmSQL, mntmHex, mntmSchema);
+		mnAnalyze.getItems().addAll(mntmSQL, mntmNodeQL, mntmHex, mntmSchema);
 		mnInfo.getItems().addAll(mntmHelp, mntmLog, mntAbout);
 
 		/* MenuBar */
@@ -551,6 +558,12 @@ public class GUI extends Application {
 		btnSQL.setTooltip(new Tooltip("Open SQL-Analyzer"));
 		toolBar.getItems().add(btnSQL);
 		btnSQL.setOnAction(e -> showSqlWindow(null, getDatabaseNode()));
+
+		btnNodeQL = new Button("NodeQL");
+		btnNodeQL.setDisable(true);
+		btnNodeQL.setTooltip(new Tooltip("Open NodeQL Builder"));
+		btnNodeQL.setOnAction(e -> openNodeQlBuilder());
+		toolBar.getItems().add(btnNodeQL);
 
 		s = Objects.requireNonNull(GUI.class.getResource("/icon24_reasoning.png")).toExternalForm();
 		btnLLM = new Button();
@@ -1085,6 +1098,27 @@ public class GUI extends Application {
 			});
 		});
 
+	}
+
+	private void openNodeQlBuilder() {
+		if (dbnames.isEmpty()) {
+			Alert alert = new Alert(AlertType.INFORMATION);
+			alert.setTitle("Information");
+			alert.setContentText("You must open at least one database before you can use NodeQL Builder.");
+			alert.showAndWait();
+			return;
+		}
+
+		TreeItem<NodeObject> node = getDatabaseNode();
+		if (node == null || node == root || node.getValue() == null) {
+			Alert alert = new Alert(AlertType.INFORMATION);
+			alert.setTitle("Information");
+			alert.setContentText("Select a database before opening NodeQL Builder.");
+			alert.showAndWait();
+			return;
+		}
+
+		new NodeQlBuilderWindow(this, node, stage).show();
 	}
 
 	private static void showWarning(Stage stage, String details) {
@@ -2583,6 +2617,7 @@ public class GUI extends Application {
 
 			btnLLM.setDisable(active);
 			btnSQL.setDisable(active);
+			btnNodeQL.setDisable(active);
 			btnFTS.setDisable(active);
 			btnExport.setDisable(active);
 			btnExportDB.setDisable(active);
@@ -2594,6 +2629,7 @@ public class GUI extends Application {
 			mntmExportDB.setDisable(active);
 			mntmHex.setDisable(active);
 			mntmSQL.setDisable(active);
+			mntmNodeQL.setDisable(active);
 			mntmSchema.setDisable(active);
 			mntmHTML.setDisable(active);
 		});

@@ -1,0 +1,52 @@
+.nodeql-builder {
+    -fx-font-family: "System";
+}
+
+.nodeql-builder .button {
+    -fx-text-fill: #1f2937;
+}
+
+.nodeql-builder .tool-bar .button {
+    -fx-background-color: #eef3f8;
+    -fx-border-color: #cbd5e1;
+    -fx-border-radius: 6;
+    -fx-background-radius: 6;
+    -fx-padding: 6 10 6 10;
+}
+
+.nodeql-builder .tool-bar .button:hover {
+    -fx-background-color: #e2e8f0;
+}
+
+.nodeql-builder .accordion {
+    -fx-background-color: #ffffff;
+}
+
+.nodeql-builder .titled-pane {
+    -fx-text-fill: #1f2937;
+}
+
+.nodeql-builder .titled-pane > .title {
+    -fx-background-color: #eef3f8;
+    -fx-border-color: #d7dee9;
+    -fx-border-width: 1 0 1 0;
+}
+
+.nodeql-builder .titled-pane:expanded > .title {
+    -fx-background-color: #dbeafe;
+}
+
+.nodeql-builder .titled-pane > .title > .text {
+    -fx-fill: #1f2937;
+    -fx-font-weight: bold;
+}
+
+.nodeql-builder .titled-pane > *.content {
+    -fx-background-color: #f8fafc;
+    -fx-border-color: #d7dee9;
+}
+
+.nodeql-builder .scroll-pane,
+.nodeql-builder .scroll-pane > .viewport {
+    -fx-background-color: #f5f8fc;
+}
