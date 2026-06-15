@@ -3,7 +3,10 @@ set -eu
 
 JDK_HOME=""
 
-if [ -n "${JAVA_HOME:-}" ] && [ -x "$JAVA_HOME/bin/java" ]; then
+if [ -n "${JAVA_HOME:-}" ] \
+  && [ -x "$JAVA_HOME/bin/java" ] \
+  && [ -f "$JAVA_HOME/release" ] \
+  && grep -q '^JAVA_VERSION="21' "$JAVA_HOME/release"; then
   JDK_HOME="$JAVA_HOME"
 elif [ -x "/opt/homebrew/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home/bin/java" ]; then
   JDK_HOME="/opt/homebrew/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home"
