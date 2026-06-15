@@ -9,15 +9,14 @@ FQLite bleibt die vollwertige Hauptanwendung. NodeQL ist nur eine optionale Erg�
 ## Relevante Ordner
 
 ```text
-nodeql-java/
-  src/main/java/digital/codespiresolutions/nodeql/
+fqlite/
+  src/digital/codespiresolutions/nodeql/
     BlockNode.java
     BlockType.java
-    NodeQlProject.java
+    Position.java
+    SqlCompileResult.java
     SqlCompiler.java
-    ...
 
-nodeql-java/fqlite/
   build.gradle
   src/fqlite/nodeql/NodeQlBuilderWindow.java
   src/fqlite/sql/SQLWindow.java
@@ -25,13 +24,13 @@ nodeql-java/fqlite/
 
 ## Build-Einbindung
 
-In `nodeql-java/fqlite/build.gradle` wird die NodeQL-Library als lokale Source mitkompiliert:
+In `build.gradle` werden die FQLite- und NodeQL-Quellen gemeinsam aus `src` kompiliert:
 
 ```gradle
 sourceSets {
     main {
         java {
-            srcDirs = ['src', '../src/main/java']
+            srcDirs = ['src']
         }
         resources {
             srcDirs "resources"
@@ -40,7 +39,7 @@ sourceSets {
 }
 ```
 
-Dadurch ist kein separates JAR nötig. FQLite kann die Klassen direkt importieren:
+Dadurch ist weder ein separates JAR noch ein nicht versionierter Elternordner nötig. FQLite kann die Klassen direkt importieren:
 
 ```java
 import digital.codespiresolutions.nodeql.SqlCompileResult;
@@ -88,8 +87,8 @@ Der Builder unterstützt:
 Die Implementierung sitzt hier:
 
 ```text
-nodeql-java/fqlite/src/fqlite/base/GUI.java
-nodeql-java/fqlite/src/fqlite/nodeql/NodeQlBuilderWindow.java
+src/fqlite/base/GUI.java
+src/fqlite/nodeql/NodeQlBuilderWindow.java
 ```
 
 Der Builder zeigt unten rechts außerdem die Attribution:
@@ -101,7 +100,7 @@ NodeQL Implementation by Paul Bodach (CodeSpire-Solutions)
 ### 2. SQL Analyzer
 
 ```text
-nodeql-java/fqlite/src/fqlite/sql/SQLWindow.java
+src/fqlite/sql/SQLWindow.java
 ```
 
 Der SQL Analyzer bleibt FQLites normaler SQL-Editor. NodeQL-Dateien werden dort nicht geöffnet. Der relevante Flow ist:
@@ -116,7 +115,7 @@ Der SQL Analyzer bleibt FQLites normaler SQL-Editor. NodeQL-Dateien werden dort 
 Aus dem FQLite-Ordner:
 
 ```bash
-cd "/Users/paul/Documents/Flutter/SkratchQL Creator/scratchql_creater/nodeql-java/fqlite"
+cd "/path/to/fqlite"
 ./run-fqlite.sh
 ```
 
@@ -137,7 +136,7 @@ Warum: Gradle 8.10.2/FQLite läuft mit den sehr neuen systemweiten JDKs 25/26 ni
 Manuell geht es so:
 
 ```bash
-cd "/Users/paul/Documents/Flutter/SkratchQL Creator/scratchql_creater/nodeql-java/fqlite"
+cd "/path/to/fqlite"
 JAVA_HOME="/Applications/Android Studio.app/Contents/jbr/Contents/Home" ./gradlew run
 ```
 
@@ -167,7 +166,7 @@ export JAVA_HOME=$(/usr/libexec/java_home -v 21)
 ## Kompilierung prüfen
 
 ```bash
-cd "/Users/paul/Documents/Flutter/SkratchQL Creator/scratchql_creater/nodeql-java/fqlite"
+cd "/path/to/fqlite"
 JAVA_HOME="/Applications/Android Studio.app/Contents/jbr/Contents/Home" ./gradlew compileJava
 ```
 
@@ -177,30 +176,15 @@ Erwartetes Ergebnis:
 BUILD SUCCESSFUL
 ```
 
-## Manuelles Library-JAR bauen
+## NodeQL-Quellen
 
-Falls FQLite die Library später als JAR statt als Source einbinden soll:
-
-```bash
-cd "/Users/paul/Documents/Flutter/SkratchQL Creator/scratchql_creater"
-./nodeql-java/build-jar.sh
-```
-
-Das JAR liegt danach hier:
+Die fünf von FQLite benötigten NodeQL-Klassen liegen direkt im Repository:
 
 ```text
-nodeql-java/build/libs/nodeql-0.1.0.jar
+src/digital/codespiresolutions/nodeql/
 ```
 
-Dann in FQLite:
-
-```gradle
-dependencies {
-    implementation files("../build/libs/nodeql-0.1.0.jar")
-}
-```
-
-In diesem Projekt ist aktuell die Source-Einbindung gewählt, weil sie beim gemeinsamen Entwickeln einfacher ist.
+Damit enthält ein normaler Clone alle für den Build benötigten Dateien.
 
 ## Testablauf in der UI
 
