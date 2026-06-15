@@ -25,7 +25,7 @@ repositories {
 sourceSets {
     main {
         java {
-            srcDirs = ['src']
+            srcDirs = ['src', '../src/main/java']
         }
         resources {
             srcDirs "resources"
@@ -90,8 +90,6 @@ tasks.jpackage.doFirst {
 tasks.withType(JavaExec) {
     jvmArgs = [
             '-XX:NativeMemoryTracking=detail',
-            '-XX:+UseZGC',
-            '-XX:+ZGenerational',
             '-Xms32m',
             '-Xmx4G',
             '-XX:G1PeriodicGCInterval=10000',  // GC every 10s when idle
@@ -126,7 +124,7 @@ runtime {
     jpackage {
         installerOptions += ['--resource-dir', "resources"]
         imageOptions += [
-                '--java-options', '-XX:+UseZGC'
+                '--java-options', '-Xmx4G'
         ]
 
         if (currentOs.windows) {
