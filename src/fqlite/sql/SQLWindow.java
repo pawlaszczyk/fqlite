@@ -272,6 +272,15 @@ public class SQLWindow extends Application {
         primaryStage.sizeToScene();
         codeArea.requestFocus();
         primaryStage.show();
+
+        // If opened with a pre-filled statement (e.g. via the chat
+        // assistant's [RUN] link), execute it right away so the results
+        // list (resultview) is populated immediately — otherwise the user
+        // has to notice and click the Play button themselves even though
+        // they already clicked "[RUN]" in the chat.
+        if (initial_statement != null) {
+            btnGo.fire();
+        }
     }
 
     /**

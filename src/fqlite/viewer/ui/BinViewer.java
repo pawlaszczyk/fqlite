@@ -25,10 +25,17 @@ import javafx.stage.FileChooser;
 import javafx.stage.Screen;
 import javafx.stage.Stage;
 
+import fqlite.viewer.model.SegbFile;
+import fqlite.viewer.model.SegbRecord;
+import fqlite.viewer.parser.SegbParseException;
+import fqlite.viewer.parser.SegbParser;
+
 import java.io.File;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
@@ -101,6 +108,14 @@ public class BinViewer{
     private static final String BINARY_NODE_LIGHT_BINARY  = "#504070";
     private static final String BINARY_NODE_LIGHT_UNKNOWN = "#a00000";
 
+    // SEGB colours (dark / light)
+    private static final String SEGB_COLOR_HEADER_DARK  = "#a0c8ff";   // blue  – version / entry-count
+    private static final String SEGB_COLOR_TS_DARK      = "#f0c060";   // gold  – timestamp
+    private static final String SEGB_COLOR_PAYLOAD_DARK = "#a0e8a0";   // green – payload bytes
+    private static final String SEGB_COLOR_HEADER_LIGHT = "#103060";
+    private static final String SEGB_COLOR_TS_LIGHT     = "#705000";
+    private static final String SEGB_COLOR_PAYLOAD_LIGHT = "#205020";
+
     // Colour for the Base64-decoded wrapper node (both themes)
     private static final String B64_WRAPPER_COLOR_DARK  = "#ffd080";  // amber
     private static final String B64_WRAPPER_COLOR_LIGHT = "#8a5a00";  // dark amber
@@ -145,6 +160,11 @@ public class BinViewer{
     private final ThriftParser      thriftParser      = new ThriftParser();
     private final FlatBuffersParser flatBuffersParser = new FlatBuffersParser();
     private final JavaSerialParser  javaSerialParser  = new JavaSerialParser();
+
+    private SegbFile                segbFile;
+    private final SegbParser        segbParser        = new SegbParser();
+    private static final DateTimeFormatter SEGB_TS_FMT =
+            DateTimeFormatter.ofPattern("yyyy-MM-dd  HH:mm:ss.SSS z").withZone(ZoneId.systemDefault());
 
     // ── UI ────────────────────────────────────────────────────────────────
     private final Stage     stage;
@@ -278,6 +298,7 @@ public class BinViewer{
                 else if (item instanceof XmlNode    x)        { setText(x.treeLabel()); setStyle("-fx-text-fill:" + xmlColor(x)      + ";"); }
                 else if (item instanceof JsonNode   j)        { setText(j.treeLabel()); setStyle("-fx-text-fill:" + jsonColor(j)     + ";"); }
                 else if (item instanceof BinaryNode b)        { setText(b.treeLabel()); setStyle("-fx-text-fill:" + binaryColor(b)   + ";"); }
+                else if (item instanceof SegbRecord r)        { setText(segbLabel(r));  setStyle("-fx-text-fill:" + segbColor(r)     + ";"); }
                 else if (item instanceof Base64WrapperNode w) { setText(w.label());     setStyle("-fx-text-fill:" + b64WrapperColor() + "; -fx-font-weight: bold;"); }
             }
         });
@@ -286,7 +307,7 @@ public class BinViewer{
                 .addListener((obs, old, sel) -> onNodeSelected(sel));
 
         dropHint = new Label(
-                "Drag & Drop\n.pb  |  .plist  |  .bplist  |  .xml  |  .json\nfiles here\n\nor  📂 Open\n\n(Base64-encoded content is auto-detected)");
+                "Drag & Drop\n.pb  |  .plist  |  .bplist  |  .xml  |  .json  |  .segb\nfiles here\n\nor  📂 Open\n\n(Base64-encoded content is auto-detected)");
         dropHint.getStyleClass().add("drop-hint");
         dropHint.setAlignment(Pos.CENTER);
 
@@ -417,10 +438,10 @@ public class BinViewer{
 
     private String themeBtnStyle(ThemeColors c) {
         return "-fx-background-color: " + c.toggleBg() + ";"
-             + "-fx-text-fill: " + c.toggleText() + ";"
-             + "-fx-background-radius: 4;"
-             + "-fx-font-size: 12px;"
-             + "-fx-padding: 4 10 4 10;";
+               + "-fx-text-fill: " + c.toggleText() + ";"
+               + "-fx-background-radius: 4;"
+               + "-fx-font-size: 12px;"
+               + "-fx-padding: 4 10 4 10;";
     }
 
     // ══════════════════════════════════════════════════════════════════════
@@ -489,8 +510,8 @@ public class BinViewer{
                 if (tn != null) {
                     if (tn.contains("String") || tn.contains("Str")) yield BINARY_NODE_LIGHT_STRING;
                     if (tn.contains("Int") || tn.contains("Long") || tn.contains("Float")
-                            || tn.contains("Double") || tn.contains("Byte") || tn.contains("Short")
-                            || tn.contains("uint") || tn.contains("int"))
+                        || tn.contains("Double") || tn.contains("Byte") || tn.contains("Short")
+                        || tn.contains("uint") || tn.contains("int"))
                         yield BINARY_NODE_LIGHT_NUMBER;
                 }
                 yield colors().textMain();
@@ -498,8 +519,206 @@ public class BinViewer{
         };
     }
 
-    private String b64WrapperColor() {
-        return currentTheme == Theme.DARK ? B64_WRAPPER_COLOR_DARK : B64_WRAPPER_COLOR_LIGHT;
+    // ── SEGB colour + label helpers ──────────────────────────────────────
+
+    private String segbLabel(SegbRecord r) {
+        // index == -2  → virtual header node
+        if (r.getIndex() == -2) {
+            if (segbFile == null) return "Header";
+            String outer = "";
+            if (segbFile.hasOuterHeader() && segbFile.getOuterHeader().streamName() != null
+                && !segbFile.getOuterHeader().streamName().isEmpty())
+                outer = "  │  Stream: " + segbFile.getOuterHeader().streamName();
+            return String.format("SEGB %s  │  %d record(s)%s",
+                    segbFile.getVersion(), segbFile.getEntryCount(), outer);
+        }
+        // index == -1  → virtual root (should not reach the cell)
+        if (r.getIndex() == -1) return segbFile != null ? segbFile.getFilePath() : "SEGB";
+
+        String ts = r.getTimestamp() != null ? SEGB_TS_FMT.format(r.getTimestamp()) : "\u2013";
+        // Fixed-Size-Variant: Marker und ggf. Dauer anzeigen
+        if (r.isFixedSize()) {
+            String markerStr;
+            if      (r.getMarker() == SegbRecord.MARKER_ACTIVE)   markerStr = "";
+            else if (r.getMarker() == SegbRecord.MARKER_LAST)     markerStr = "  [last]";
+            else if (segbFile != null && segbFile.getVersion() == SegbFile.Version.ACTIVITY)
+                markerStr = String.format("  [Index-Event, Typ=%d]", r.getMarker());
+            else markerStr = String.format("  [marker=0x%02X]", r.getMarker());
+            String dur = r.hasDuration()
+                    ? "  \u2192  " + SEGB_TS_FMT.format(r.getTimestampEnd()) : "";
+            return String.format("#%d  |  %s%s%s  |  %d bytes",
+                    r.getIndex(), ts, dur, markerStr, r.getPayload().length);
+        }
+        String[] activity = tryDecodeActivityEvent(r.getPayload());
+        if (activity != null) {
+            return String.format("#%d  |  %s  |  %s  |  %s",
+                    r.getIndex(), ts, activity[1], activity[0]);
+        }
+        return String.format("#%d  |  %s  |  %d bytes",
+                r.getIndex(), ts, r.getPayload().length);
+    }
+
+    /**
+     * Versucht, ein Activity-Log-Event (siehe {@link fqlite.viewer.parser.SegbParser}) aus der
+     * Record-Payload zu dekodieren. Die Payload beginnt mit einem 8-Byte-Vorspann
+     * (Pr\u00fcfsumme/Hash + Reserviert), gefolgt von einer Protobuf-Nachricht mit
+     * Feld 1 = UUID-String (36 Zeichen) und Feld 2 = Aktivit\u00e4tsname.
+     *
+     * @return {@code {uuid, name}} oder {@code null}, wenn die Payload nicht passt
+     */
+    private static String[] tryDecodeActivityEvent(byte[] payload) {
+        final int hdr = 8;
+        if (payload == null || payload.length < hdr + 2 + 36 + 2) return null;
+        if ((payload[hdr] & 0xFF) != 0x0A || (payload[hdr + 1] & 0xFF) != 0x24) return null;
+        for (int i = 0; i < 36; i++) {
+            int c = payload[hdr + 2 + i] & 0xFF;
+            boolean dash = (i == 8 || i == 13 || i == 18 || i == 23);
+            boolean hex  = (c >= '0' && c <= '9') || (c >= 'A' && c <= 'F') || (c >= 'a' && c <= 'f');
+            if (dash ? c != '-' : !hex) return null;
+        }
+        String uuid = new String(payload, hdr + 2, 36, StandardCharsets.US_ASCII);
+        int p = hdr + 2 + 36;
+        if ((payload[p] & 0xFF) != 0x12) return null;
+        int nameLen = payload[p + 1] & 0xFF;
+        if (p + 2 + nameLen > payload.length) return null;
+        String name = new String(payload, p + 2, nameLen, StandardCharsets.US_ASCII);
+        return new String[]{uuid, name};
+    }
+
+    private String segbColor(SegbRecord r) {
+        boolean dark = currentTheme == Theme.DARK;
+        if (r.getIndex() < 0)   return dark ? SEGB_COLOR_HEADER_DARK  : SEGB_COLOR_HEADER_LIGHT;
+        if (r.getTimestamp() != null) return dark ? SEGB_COLOR_TS_DARK : SEGB_COLOR_TS_LIGHT;
+        return dark ? SEGB_COLOR_PAYLOAD_DARK : SEGB_COLOR_PAYLOAD_LIGHT;
+    }
+
+    // ── SEGB detail panel ────────────────────────────────────────────────
+
+    private void showSegbDetail(SegbRecord r) {
+        // Virtual header node
+        if (r.getIndex() == -2) {
+            if (segbFile == null) return;
+            StringBuilder hdr = new StringBuilder();
+            hdr.append("SEGB File\n");
+            hdr.append("─────────────────────────────────────────\n");
+            hdr.append("Version       :  ").append(segbFile.getVersion()).append("\n");
+            hdr.append("Entry count   :  ").append(segbFile.getEntryCount()).append("\n");
+            hdr.append("Records read  :  ").append(segbFile.getRecords().size()).append("\n");
+            hdr.append("File          :  ").append(segbFile.getFilePath()).append("\n");
+            hdr.append("File size     :  ").append(fileBytes != null ? fileBytes.length : 0).append(" bytes\n");
+            if (segbFile.hasOuterHeader()) {
+                fqlite.viewer.parser.SegbParser.OuterHeader oh = segbFile.getOuterHeader();
+                hdr.append("\n─── Biome Outer-Header ──────────────────\n");
+                hdr.append("Stream-Typ    :  0x").append(Integer.toHexString(oh.streamType()).toUpperCase()).append("\n");
+                hdr.append("Outer-Version :  ").append(oh.outerVersion()).append("\n");
+                if (oh.streamName() != null && !oh.streamName().isEmpty())
+                    hdr.append("Stream-Name   :  ").append(oh.streamName()).append("\n");
+                if (oh.fileTimestamp() != null)
+                    hdr.append("Datei-Ts      :  ").append(SEGB_TS_FMT.format(oh.fileTimestamp())).append("\n");
+                hdr.append("SEGB-Offset   :  0x").append(Integer.toHexString(oh.segbOffset()).toUpperCase()).append("\n");
+            }
+            if (segbFile.getVersion() == SegbFile.Version.FIXED) {
+                hdr.append("\nFormat: Fixed-Size-Ring-Buffer (72 Bytes/Record)\n");
+                hdr.append("Payloads dieser Variante sind oft leer (reine Timestamp-Events).\n");
+            } else if (segbFile.getVersion() == SegbFile.Version.ACTIVITY) {
+                hdr.append("\nFormat: Activity-Log (UUID + Aktivitätsname, Apple Biome)\n");
+                hdr.append("Records mit Zeitstempel + Text sind Activity-Events (z. B. \"Share\",\n");
+                hdr.append("\"View N to M seconds\"); Records mit [Index-Event] sind unkorrelierte\n");
+                hdr.append("Zeitstempel-Markierungen ohne eigene Protobuf-Payload.\n");
+            } else {
+                hdr.append("\nPayloads sind typischerweise Protobuf (Apple Biome).\n");
+            }
+            infoArea.setText(hdr.toString());
+            fieldHexArea.setText(fileBytes != null ? HexDump.dump(fileBytes, 0) : "");
+            altList.getItems().clear();
+            return;
+        }
+        if (r.getIndex() == -1) return;   // root sentinel
+
+        StringBuilder sb = new StringBuilder();
+        sb.append("Record Index  :  ").append(r.getIndex()).append("\n");
+        sb.append("Byte Offset   :  0x")
+                .append(Long.toHexString(r.getOffset()).toUpperCase())
+                .append("  (").append(r.getOffset()).append(")\n");
+        sb.append("Payload Size  :  ").append(r.getPayload().length).append(" bytes\n");
+        sb.append("Timestamp     :  ").append(
+                r.getTimestamp() != null ? SEGB_TS_FMT.format(r.getTimestamp()) : "–").append("\n");
+        if (r.getTimestamp() != null) {
+            sb.append("  (epoch sec) :  ").append(r.getTimestamp().getEpochSecond()).append("\n");
+            long apple = r.getTimestamp().getEpochSecond() - 978_307_200L;
+            sb.append("  (apple ts)  :  ").append(apple).append("  (CFAbsoluteTime)\n");
+        }
+        if (r.getTimestampEnd() != null) {
+            sb.append("Timestamp-End :  ").append(SEGB_TS_FMT.format(r.getTimestampEnd())).append("\n");
+            if (r.hasDuration()) {
+                long ms = r.getTimestampEnd().toEpochMilli() - r.getTimestamp().toEpochMilli();
+                sb.append("  (Dauer)     :  ").append(ms).append(" ms\n");
+            }
+        }
+        if (r.isFixedSize()) {
+            String markerName = (r.getMarker() == SegbRecord.MARKER_ACTIVE)   ? "aktiv (0x21)"
+                    : (r.getMarker() == SegbRecord.MARKER_LAST)     ? "letzter Record (0x2D)"
+                    : (r.getMarker() == SegbRecord.MARKER_SENTINEL) ? "Sentinel (0x00)"
+                    : String.format("0x%02X", r.getMarker());
+            sb.append("Marker        :  ").append(markerName).append("\n");
+        }
+        String[] activity = tryDecodeActivityEvent(r.getPayload());
+        if (activity != null) {
+            sb.append("UUID          :  ").append(activity[0]).append("\n");
+            sb.append("Aktivität     :  ").append(activity[1]).append("\n");
+        }
+        sb.append("\n─── Payload ─────────────────────────────\n");
+        byte[] p = r.getPayload();
+        if (p.length == 0) {
+            sb.append("(leer – reines Timestamp-Event)\n");
+        } else {
+            int preview = Math.min(p.length, 64);
+            for (int i = 0; i < preview; i++) sb.append(String.format("%02X ", p[i] & 0xFF));
+            if (p.length > 64) sb.append("\n… (").append(p.length - 64).append(" more bytes)");
+        }
+        infoArea.setText(sb.toString());
+
+        fieldHexArea.setText(r.getPayload().length > 0
+                ? HexDump.dump(r.getPayload(), r.getOffset()) : "");
+        altList.setItems(javafx.collections.FXCollections.observableArrayList(buildSegbAlternatives(r)));
+    }
+
+    private List<String> buildSegbAlternatives(SegbRecord r) {
+        List<String> alts = new ArrayList<>();
+        if (r.getTimestamp() != null) {
+            long appleEpoch = r.getTimestamp().getEpochSecond() - 978_307_200L;
+            alts.add("timestamp ISO   :  " + r.getTimestamp());
+            alts.add("epoch seconds   :  " + r.getTimestamp().getEpochSecond());
+            alts.add("epoch millis    :  " + r.getTimestamp().toEpochMilli());
+            alts.add("apple time      :  " + appleEpoch + "  (CFAbsoluteTime)");
+        }
+        if (r.getTimestampEnd() != null && !r.getTimestampEnd().equals(r.getTimestamp())) {
+            long appleEnd = r.getTimestampEnd().getEpochSecond() - 978_307_200L;
+            alts.add("ts-end ISO      :  " + r.getTimestampEnd());
+            alts.add("apple time end  :  " + appleEnd + "  (CFAbsoluteTime)");
+            if (r.getTimestamp() != null) {
+                long ms = r.getTimestampEnd().toEpochMilli() - r.getTimestamp().toEpochMilli();
+                alts.add("duration        :  " + ms + " ms");
+            }
+        }
+        if (r.isFixedSize()) {
+            alts.add(String.format("marker          :  0x%02X  (%d)", r.getMarker(), r.getMarker()));
+        }
+        String[] activity = tryDecodeActivityEvent(r.getPayload());
+        if (activity != null) {
+            alts.add("uuid            :  " + activity[0]);
+            alts.add("activity        :  " + activity[1]);
+        }
+        alts.add("offset          :  0x" + Long.toHexString(r.getOffset()).toUpperCase());
+        alts.add("payload bytes   :  " + r.getPayload().length);
+        if (r.getPayload().length > 0) {
+            alts.add("payload hex     :  " + HexDump.toHexString(r.getPayload(), 32));
+            alts.add("base64          :  " + java.util.Base64.getEncoder().encodeToString(r.getPayload()));
+        }
+        return alts;
+    }
+
+    private String b64WrapperColor() {        return currentTheme == Theme.DARK ? B64_WRAPPER_COLOR_DARK : B64_WRAPPER_COLOR_LIGHT;
     }
 
     // ══════════════════════════════════════════════════════════════════════
@@ -545,7 +764,7 @@ public class BinViewer{
                 ? guessRawBinaryHint(decoded)
                 : FormatDetector.formatName(inner);
         String wrapLabel = "▶  [Base64 decoded: " + formatHint + "  –  " + decoded.length + " byte"
-                + (decoded.length == 1 ? "" : "s") + "]";
+                           + (decoded.length == 1 ? "" : "s") + "]";
 
         Base64WrapperNode wrapper = new Base64WrapperNode(wrapLabel, inner, parseable);
         TreeItem<Object> wrapItem = new TreeItem<>(wrapper);
@@ -720,9 +939,10 @@ public class BinViewer{
         fc.getExtensionFilters().addAll(
                 new FileChooser.ExtensionFilter("Supported Files",
                         "*.pb","*.bin","*.dat","*.plist","*.bplist","*.proto.bin",
-                        "*.xml","*.json","*.txt","*.bson","*.msgpack","*.thrift","*.fbs","*.ser"),
+                        "*.xml","*.json","*.txt","*.bson","*.msgpack","*.thrift","*.fbs","*.ser","*.segb"),
                 new FileChooser.ExtensionFilter("Protobuf",         "*.pb","*.bin","*.dat"),
                 new FileChooser.ExtensionFilter("Apple BPList",     "*.plist","*.bplist"),
+                new FileChooser.ExtensionFilter("Apple SEGB",       "*.segb","*"),
                 new FileChooser.ExtensionFilter("XML",              "*.xml"),
                 new FileChooser.ExtensionFilter("JSON",             "*.json"),
                 new FileChooser.ExtensionFilter("BSON",             "*.bson"),
@@ -744,6 +964,19 @@ public class BinViewer{
             return;
         }
 
+        // ── SEGB fast-path: magic "SEGB" (53 45 47 42) ───────────────────
+        // Viele Biome-Dateien tragen vor dem SEGB-Block einen proprietären
+        // Outer-Header (siehe SegbParser-Javadoc), das Magic liegt dann
+        // nicht bei Offset 0 — daher dieselbe Scan-Distanz wie dort.
+        if (findSegbMagic(fileBytes) >= 0) {
+            stage.setTitle("Binary Viewer – " + file.getName() + "  [SEGB]");
+            hexDumpArea.setText(HexDump.dump(fileBytes));
+            loadSegb(file);
+            dropHint.setVisible(false);
+            treeView.setVisible(true);
+            return;
+        }
+
         // Detect format (includes Base64 unwrapping)
         currentFormat = FormatDetector.detect(fileBytes);
 
@@ -758,7 +991,7 @@ public class BinViewer{
 
         // Window title
         stage.setTitle("Binary Viewer – " + file.getName()
-                + "  [" + FormatDetector.formatName(currentFormat) + "]");
+                       + "  [" + FormatDetector.formatName(currentFormat) + "]");
         updateFormatBadge();
 
         // Hex dump shows the *raw* file bytes
@@ -792,8 +1025,8 @@ public class BinViewer{
             treeView.setShowRoot(false);
             String b64hint = wasBase64 ? "  [Base64-decoded]" : "";
             setStatus("Protobuf" + b64hint + "  |  " + file.getName()
-                    + "  |  " + parsedBytes.length + " bytes"
-                    + "  |  " + protoFields.size() + " top-level field(s)");
+                      + "  |  " + parsedBytes.length + " bytes"
+                      + "  |  " + protoFields.size() + " top-level field(s)");
         } catch (ProtobufParseException ex) {
             showError("Parsers Error", "Unknown binary format.");
             setStatus("Unsupported format.");
@@ -814,13 +1047,38 @@ public class BinViewer{
             };
             String b64hint = wasBase64 ? "  [Base64-decoded]" : "";
             setStatus("Apple BPList" + b64hint + "  |  " + file.getName()
-                    + "  |  " + parsedBytes.length + " bytes"
-                    + "  |  Root: " + bplistRoot.getType()
-                    + "  |  " + topCount + " entries");
+                      + "  |  " + parsedBytes.length + " bytes"
+                      + "  |  Root: " + bplistRoot.getType()
+                      + "  |  " + topCount + " entries");
+        } catch (BPListUnsupportedVersionException ex) {
+            showBplistVersionHint(ex.getVersion(), file);
         } catch (BPListParseException ex) {
             showError("BPList Parse Error", ex.getMessage());
             setStatus("BPList parse error: " + ex.getMessage());
         }
+    }
+
+    /**
+     * Zeigt einen nicht-fatalen Hinweisdialog für bplist-Versionen ohne
+     * öffentliche Spezifikation (z. B. bplist15/16). Die Datei bleibt dabei
+     * im Viewer geöffnet — der Hex-Dump-Tab zeigt die Rohdaten weiterhin an.
+     */
+    private void showBplistVersionHint(String version, File file) {
+        Alert a = new Alert(Alert.AlertType.WARNING);
+        a.setTitle("Nicht unterstütztes BPList-Format");
+        a.setHeaderText("bplist" + version + " wird nicht unterstützt");
+        a.setContentText(
+                "Diese Datei verwendet das Apple-Binary-Property-List-Format \"bplist" + version + "\".\n\n" +
+                "Anders als beim Standardformat bplist00 hat Apple für diese Variante keine\n" +
+                "Spezifikation veröffentlicht. \"bplist16\" hat z. B. keinen Trailer und zusätzliche,\n" +
+                "undokumentierte Datentypen (UUID, URL, Sets, NULL) — ein Parsing-Versuch nach\n" +
+                "dem bplist00-Schema würde daher mit hoher Wahrscheinlichkeit falsche Werte\n" +
+                "anzeigen statt eines klaren Fehlers.\n\n" +
+                "Die Rohdaten sind im Hex-Dump-Tab weiterhin einsehbar.");
+        a.showAndWait();
+        setStatus("bplist" + version + "  |  " + file.getName()
+                  + "  |  " + parsedBytes.length + " bytes"
+                  + "  |  Format nicht unterstützt (keine öffentliche Spezifikation) – siehe Hex-Dump");
     }
 
     // ── XML ──────────────────────────────────────────────────────────────
@@ -832,9 +1090,9 @@ public class BinViewer{
             treeView.setShowRoot(true);
             String b64hint = wasBase64 ? "  [Base64-decoded]" : "";
             setStatus("XML" + b64hint + "  |  " + file.getName()
-                    + "  |  " + parsedBytes.length + " bytes"
-                    + "  |  Root: <" + xmlRoot.getName() + ">"
-                    + "  |  " + xmlRoot.getChildren().size() + " child(ren)");
+                      + "  |  " + parsedBytes.length + " bytes"
+                      + "  |  Root: <" + xmlRoot.getName() + ">"
+                      + "  |  " + xmlRoot.getChildren().size() + " child(ren)");
         } catch (XmlParseException ex) {
             showError("XML Parse Error", ex.getMessage());
             setStatus("XML parse error: " + ex.getMessage());
@@ -856,9 +1114,9 @@ public class BinViewer{
                 default     -> 1;
             };
             setStatus("JSON" + b64hint + "  |  " + file.getName()
-                    + "  |  " + parsedBytes.length + " bytes"
-                    + "  |  Root: " + jsonRoot.getType()
-                    + "  |  " + topCount + " entries");
+                      + "  |  " + parsedBytes.length + " bytes"
+                      + "  |  Root: " + jsonRoot.getType()
+                      + "  |  " + topCount + " entries");
         } catch (JsonParseException ex) {
             showError("JSON Parse Error", ex.getMessage());
             setStatus("JSON parse error: " + ex.getMessage());
@@ -884,12 +1142,128 @@ public class BinViewer{
             String b64hint = wasBase64 ? "  [Base64-decoded]" : "";
             int topCount = binaryRoot.getChildren().size();
             setStatus(fmtName + b64hint + "  |  " + file.getName()
-                    + "  |  " + parsedBytes.length + " bytes"
-                    + "  |  " + topCount + " top-level field(s)");
+                      + "  |  " + parsedBytes.length + " bytes"
+                      + "  |  " + topCount + " top-level field(s)");
         } catch (BinaryParseException ex) {
             showError(fmtName + " Parse Error", ex.getMessage());
             setStatus(fmtName + " parse error: " + ex.getMessage());
         }
+    }
+
+    // ── SEGB (Apple Biome) ───────────────────────────────────────────────
+
+    /**
+     * Sucht das SEGB-Magic (53 45 47 42) in den ersten 256 Bytes — dieselbe
+     * Scan-Distanz wie {@code SegbParser.MAX_OUTER_SCAN}, da Biome-Dateien
+     * häufig einen Outer-Header vor dem eigentlichen SEGB-Block tragen.
+     *
+     * @return Byte-Offset des Magic, oder -1 wenn keines gefunden wurde
+     */
+    private static int findSegbMagic(byte[] data) {
+        if (data == null) return -1;
+        int limit = Math.min(256, data.length - 4);
+        for (int i = 0; i <= limit; i++) {
+            if (data[i] == 0x53 && data[i + 1] == 0x45
+             && data[i + 2] == 0x47 && data[i + 3] == 0x42) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    private void loadSegb(File file) {
+        try {
+            segbFile = segbParser.parse(fileBytes, file.getName());
+            buildSegbTree(segbFile);
+            treeView.setShowRoot(true);
+            // Set the format badge manually (SEGB is detected outside FormatDetector)
+            String versionLabel = switch (segbFile.getVersion()) {
+                case V1    -> "v1";
+                case V2    -> "v2";
+                case FIXED -> "fixed";
+                default    -> "?";
+            };
+            formatBadge.setText("SEGB " + versionLabel);
+            formatBadge.setStyle(
+                    "-fx-background-color: #1a5a6b;"
+                    + "-fx-text-fill: #ffffff;"
+                    + "-fx-background-radius: 4;"
+                    + "-fx-font-weight: bold; -fx-font-size: 11px;");
+            setStatus("Apple SEGB  |  " + file.getName()
+                      + "  |  Version: " + segbFile.getVersion()
+                      + "  |  " + fileBytes.length + " bytes"
+                      + "  |  " + segbFile.getEntryCount() + " record(s)");
+        } catch (SegbParseException ex) {
+            showError("SEGB Parse Error", ex.getMessage());
+            setStatus("SEGB parse error: " + ex.getMessage());
+        }
+    }
+
+    @SuppressWarnings({"unchecked","rawtypes"})
+    private void buildSegbTree(SegbFile sf) {
+        // Root node: file summary
+        SegbRecord summaryMarker = new SegbRecord(-1, 0, null, new byte[0]);
+        TreeItem<Object> root = new TreeItem<>(summaryMarker);
+        root.setExpanded(true);
+
+        // Version + entry-count info node (reuse SegbRecord with index -2 as a header marker)
+        SegbRecord headerMarker = new SegbRecord(-2, 0, null, new byte[0]);
+        TreeItem<Object> headerItem = new TreeItem<>(headerMarker);
+        root.getChildren().add(headerItem);
+
+        // One tree item per record
+        for (SegbRecord rec : sf.getRecords()) {
+            TreeItem<Object> item = new TreeItem<>(rec);
+            // If the payload looks like a known format, attach decoded child sub-tree
+            if (rec.getPayload().length >= 8) {
+                // Skip the first 8 bytes (entry-header / Biome internal), try to parse the rest
+                byte[] innerPayload = java.util.Arrays.copyOfRange(rec.getPayload(), 8, rec.getPayload().length);
+                if (innerPayload.length > 0) {
+                    FormatDetector.Format innerFmt = FormatDetector.detect(innerPayload);
+                    FormatDetector.Format parseFmt = FormatDetector.innerFormat(innerFmt);
+                    try {
+                        switch (parseFmt) {
+                            case BPLIST -> {
+                                BPListNode bpRoot = new BPListParser().parse(innerPayload);
+                                TreeItem<Object> bpItem = new TreeItem<>(bpRoot);
+                                addBPListChildren(bpItem, bpRoot);
+                                bpItem.setExpanded(true);
+                                item.getChildren().add(bpItem);
+                            }
+                            case XML -> {
+                                XmlNode xRoot = new XmlParser().parse(innerPayload);
+                                TreeItem<Object> xItem = new TreeItem<>(xRoot);
+                                addXmlChildren(xItem, xRoot);
+                                xItem.setExpanded(true);
+                                item.getChildren().add(xItem);
+                            }
+                            case JSON -> {
+                                JsonNode jRoot = new JsonParser().parse(new String(innerPayload, StandardCharsets.UTF_8));
+                                TreeItem<Object> jItem = new TreeItem<>(jRoot);
+                                addJsonChildren(jItem, jRoot);
+                                jItem.setExpanded(true);
+                                item.getChildren().add(jItem);
+                            }
+                            case PROTOBUF -> {
+                                List<ProtoField> fields = new ProtobufParser().parse(innerPayload);
+                                addProtoItems(item, fields);
+                            }
+                            default -> {
+                                // raw payload — try as Protobuf (most common in Biome)
+                                try {
+                                    List<ProtoField> fields = protoParser.parse(innerPayload);
+                                    if (!fields.isEmpty()) addProtoItems(item, fields);
+                                } catch (Exception ignored) {}
+                            }
+                        }
+                    } catch (Exception ignored) {
+                        // inner parse failed – leave as leaf, Hex tab will show raw bytes
+                    }
+                }
+            }
+            root.getChildren().add(item);
+        }
+        treeView.setRoot((TreeItem) root);
     }
 
     private void closeFile() {
@@ -901,6 +1275,7 @@ public class BinViewer{
         xmlRoot       = null;
         jsonRoot      = null;
         binaryRoot    = null;
+        segbFile      = null;
         currentFormat = FormatDetector.Format.UNKNOWN;
         treeView.setRoot(null);
         treeView.setVisible(false);
@@ -1003,7 +1378,7 @@ public class BinViewer{
                 addXmlChildren(item, child);
                 item.setExpanded(child.getChildren().size() <= 8);
             } else if (child.getType() == XmlNode.Type.TEXT
-                    || child.getType() == XmlNode.Type.CDATA) {
+                       || child.getType() == XmlNode.Type.CDATA) {
                 tryAttachBase64Children(item, child.getTextValue());
             }
             parent.getChildren().add(item);
@@ -1025,8 +1400,8 @@ public class BinViewer{
                     TreeItem<Object> item = new TreeItem<>(child);
                     addBinaryChildren(item, child);
                     if (child.getKind() == BinaryNode.Kind.DOCUMENT
-                            || child.getKind() == BinaryNode.Kind.ARRAY
-                            || child.getKind() == BinaryNode.Kind.MAP)
+                        || child.getKind() == BinaryNode.Kind.ARRAY
+                        || child.getKind() == BinaryNode.Kind.MAP)
                         item.setExpanded(true);
                     parent.getChildren().add(item);
                 }
@@ -1102,6 +1477,7 @@ public class BinViewer{
         else if (val instanceof XmlNode    x)        showXmlDetail(x);
         else if (val instanceof JsonNode   j)        showJsonDetail(j);
         else if (val instanceof BinaryNode b)        showBinaryDetail(b);
+        else if (val instanceof SegbRecord r)        showSegbDetail(r);
         else if (val instanceof Base64WrapperNode w) showBase64WrapperDetail(w);
     }
 
@@ -1175,7 +1551,7 @@ public class BinViewer{
 
         // Base64 hint for string values
         if (stripped.length() >= 8 && stripped.length() % 4 == 0
-                && stripped.matches("[A-Za-z0-9+/=]+"))
+            && stripped.matches("[A-Za-z0-9+/=]+"))
             alts.add("→ Hint: value may be Base64-encoded data");
 
         return alts;
@@ -1184,7 +1560,7 @@ public class BinViewer{
     private void showBase64WrapperDetail(Base64WrapperNode w) {
         // Synthetic leaf nodes (hex-row labels inside a raw-binary wrapper) have no bytes
         boolean isSyntheticLeaf = w.decoded().length == 0
-                && w.innerFormat() == FormatDetector.Format.UNKNOWN;
+                                  && w.innerFormat() == FormatDetector.Format.UNKNOWN;
         if (isSyntheticLeaf) {
             infoArea.setText(w.label());
             fieldHexArea.clear();
@@ -1202,10 +1578,10 @@ public class BinViewer{
                 "Inner format  :  " + formatName + "\n" +
                 "Decoded size  :  " + w.decoded().length + " bytes\n\n" +
                 (w.innerFormat() == FormatDetector.Format.UNKNOWN
-                    ? "Raw binary data – no further structure detected.\n" +
-                      "The Hex tab shows the full decoded byte sequence.\n"
-                    : "The child nodes below show the parsed structure\n" +
-                      "of the decoded content.\n"));
+                        ? "Raw binary data – no further structure detected.\n" +
+                          "The Hex tab shows the full decoded byte sequence.\n"
+                        : "The child nodes below show the parsed structure\n" +
+                          "of the decoded content.\n"));
         fieldHexArea.setText(HexDump.dump(w.decoded()));
         altList.setItems(FXCollections.observableArrayList(
                 "format:  " + formatName,
@@ -1221,10 +1597,10 @@ public class BinViewer{
         StringBuilder sb = new StringBuilder();
         sb.append("Field Number  :  ").append(f.getFieldNumber()).append("\n");
         sb.append("Wire Type     :  ").append(f.getWireType())
-          .append("  (").append(f.getWireTypeName()).append(")\n");
+                .append("  (").append(f.getWireTypeName()).append(")\n");
         sb.append("Byte Offset   :  0x")
-          .append(Long.toHexString(f.getByteOffset()).toUpperCase())
-          .append("  (").append(f.getByteOffset()).append(")\n");
+                .append(Long.toHexString(f.getByteOffset()).toUpperCase())
+                .append("  (").append(f.getByteOffset()).append(")\n");
         sb.append("Raw Data      :  ").append(f.getRawBytes().length).append(" bytes\n");
         sb.append("\n─── Primary Value ────────────────────────\n");
         sb.append(f.getInterpretedValue()).append("\n");
@@ -1243,15 +1619,15 @@ public class BinViewer{
         sb.append("PList Type    :  ").append(n.getType()).append("\n");
         if (n.getKeyLabel() != null) sb.append("Key           :  ").append(n.getKeyLabel()).append("\n");
         sb.append("Byte Offset   :  0x")
-          .append(Long.toHexString(n.getByteOffset()).toUpperCase())
-          .append("  (").append(n.getByteOffset()).append(")\n");
+                .append(Long.toHexString(n.getByteOffset()).toUpperCase())
+                .append("  (").append(n.getByteOffset()).append(")\n");
         sb.append("Raw Data      :  ").append(n.getRawBytes().length).append(" bytes\n");
         sb.append("\n─── Value ────────────────────────────────\n");
         switch (n.getType()) {
             case DICT       -> sb.append("[Dictionary – ").append(n.getDictEntries().size())
-                                 .append(" entries]\n\nKeys:\n").append(dictKeyList(n));
+                    .append(" entries]\n\nKeys:\n").append(dictKeyList(n));
             case ARRAY, SET -> sb.append("[").append(n.getType())
-                                 .append(" – ").append(n.getArrayElements().size()).append(" elements]\n");
+                    .append(" – ").append(n.getArrayElements().size()).append(" elements]\n");
             default         -> sb.append(n.getScalarValue() != null ? n.getScalarValue() : "<null>").append("\n");
         }
         infoArea.setText(sb.toString());
@@ -1357,7 +1733,7 @@ public class BinViewer{
         sb.append("\n─── Value ────────────────────────────────\n");
         switch (j.getType()) {
             case OBJECT -> sb.append("{ ").append(j.getObjectEntries().size()).append(" key(s) }\n\nKeys:\n")
-                            .append(jsonKeyList(j));
+                    .append(jsonKeyList(j));
             case ARRAY  -> sb.append("[ ").append(j.getArrayElements().size()).append(" element(s) ]\n");
             case STRING -> sb.append("\"").append(j.getRawValue()).append("\"\n");
             default     -> sb.append(j.getRawValue()).append("\n");
@@ -1433,8 +1809,7 @@ public class BinViewer{
             case GZIP 				   -> new BadgeStyle("GZIP (.gz)", 	 "#6b1a4a");
             case AVRO 				   -> new BadgeStyle("AVRO (.avro)", 	 "#1a6b5a");
             case PROTOBUF              -> new BadgeStyle("PROTOBUF",       "#1a4d9e");
-            case BPLIST                -> new BadgeStyle("BPLIST",         "#1a6b2a");
-            case XML                   -> new BadgeStyle("XML",            "#7a4a00");
+            case BPLIST                -> new BadgeStyle("BPLIST",         "#1a6b2a");            case XML                   -> new BadgeStyle("XML",            "#7a4a00");
             case JSON                  -> new BadgeStyle("JSON",           "#5a1a6a");
             case BSON                  -> new BadgeStyle("BSON",           "#1a5a6b");
             case MSGPACK               -> new BadgeStyle("MSGPACK",        "#6b3a1a");
@@ -1505,6 +1880,16 @@ public class BinViewer{
         this.parsedBytes  = isB64
                 ? Base64Detector.detect(data).decodedBytes()
                 : data;
+
+        // ── SEGB fast-path (Magic kann hinter einem Biome-Outer-Header liegen) ──
+        if (findSegbMagic(data) >= 0) {
+            stage.setTitle("BinViewer – " + displayName + "  [SEGB]");
+            hexDumpArea.setText(HexDump.dump(fileBytes));
+            loadSegb(new File(displayName));
+            dropHint.setVisible(false);
+            treeView.setVisible(true);
+            return;
+        }
 
         stage.setTitle("BinViewer – " + displayName
                        + "  [" + FormatDetector.formatName(currentFormat) + "]");

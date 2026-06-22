@@ -55,6 +55,8 @@ public class LLMWindow extends Application {
     private Button configButton;
     private Label statusLabel;
     private RAGPipeline pipline;
+    /** The in-memory database that backs the current session. */
+    private InMemoryDatabase inMemoryDB;
     ProgressBar progress;
     private Stage primaryStage;
     private TreeItem<NodeObject> db_node;
@@ -76,6 +78,19 @@ public class LLMWindow extends Application {
 
 
     public Stage getPrimaryStage() { return primaryStage; }
+
+    /**
+     * Returns the active {@link RAGPipeline}, or {@code null} if not yet
+     * initialised.  Used by {@link fqlite.base.GUI} to pass the pipeline to
+     * a {@link fqlite.timemap.LocationWindow} that opens alongside this chat.
+     */
+    public RAGPipeline getPipeline() { return pipline; }
+
+    /**
+     * Returns the {@link InMemoryDatabase} for the current session, or
+     * {@code null} if not yet initialised.
+     */
+    public InMemoryDatabase getInMemoryDB() { return inMemoryDB; }
 
     /**
      * The main function of this class. It prepares and shows the window.
@@ -389,6 +404,21 @@ public class LLMWindow extends Application {
 
     /**
      * This method actually starts the inference process of the LLM.
+     *
+     * <p>Like {@code MapViewPane#onLlmRun}, the request is first classified
+     * (see {@link RAGPipeline#classifyIntent}) so that recognised forensic
+     * query types (co-location, calls/SMS direction, country filter,
+     * roamers, device/SIM-swap) are answered with their fixed, hand-reviewed
+     * SQL template instead of letting the free-form generator invent the
+     * SQL itself. This chat window used to call {@link RAGPipeline#generateSQL}
+     * unconditionally, which is how "Zeige mir alle französischen
+     * Telefonnummern an" ended up filtering on {@code national_country_code}
+     * (always {@code 'DE'} — the requesting agency's country, not the
+     * subscriber's) instead of the {@code msisdn} prefix: the free-form
+     * model has no notion of E.164 calling codes, but
+     * {@link RAGPipeline#buildCountryFilterSql} does. Only requests that
+     * don't match any known intent still fall back to the free-form path.
+     *
      * @param userinput the prompt
      */
     private void askLLM(String userinput){
@@ -396,8 +426,7 @@ public class LLMWindow extends Application {
         new Thread(() -> {
             try {
 
-                // forward to LLM
-                String response = pipline.generateSQL(userinput);
+                String response = resolveSql(userinput);
 
                 // UI update as soon as the response is available
                 Platform.runLater(() -> {
@@ -411,6 +440,61 @@ public class LLMWindow extends Application {
                 e.printStackTrace();
             }
         }).start();
+    }
+
+    /**
+     * Classifies {@code userinput} and returns the fixed SQL template for
+     * recognised forensic query types, or the free-form generator's answer
+     * if no known intent matched (see {@link #askLLM} for why this ordering
+     * matters). Mirrors the dispatch in {@code MapViewPane#onLlmRun}.
+     */
+    private String resolveSql(String userinput) {
+        RAGPipeline.QueryIntent intent = pipline.classifyIntent(userinput);
+
+        // Deterministic safety net, checked FIRST: the small local model
+        // unreliably classifies country-name requests — it has been observed
+        // to mistake them for an (ambiguous) co-location request instead of
+        // country_filter (e.g. "Zeige mir alle polnischen Telefonnummern an"
+        // came back as intent="colocation" with no time window, triggering a
+        // bogus "bitte Zeitraum präzisieren" clarification; once a time range
+        // was added it came back as intent="colocation" WITH a time window,
+        // which used to silently run a co-location query instead of an
+        // actual country filter). Country names are a small, fixed,
+        // enumerable set, so check the raw request directly and let an
+        // unambiguous country mention always win, regardless of what the
+        // model classified the rest of the request as.
+        String mentionedPrefix = fqlite.timemap.CountryCallingCodeLookup.findPrefixMentionedInText(userinput);
+        if (mentionedPrefix != null) {
+            String country = fqlite.timemap.CountryCallingCodeLookup.getCountryNameByPrefix(mentionedPrefix);
+            String sql = RAGPipeline.buildCountryFilterSql(country, intent.startTime, intent.endTime);
+            if (sql != null) return sql;
+        }
+
+        if (intent.isColocation()) {
+            String sql = RAGPipeline.buildColocationSql(intent.startTime, intent.endTime, intent.identifierColumn);
+            return sql != null ? sql : "Konnte den Zeitraum für die Co-Location-Anfrage nicht erkennen.";
+        }
+        if (intent.isAmbiguousColocation()) {
+            return "Co-Location-Anfrage erkannt, aber der Zeitraum konnte nicht eindeutig bestimmt werden — bitte präzisieren.";
+        }
+        if (intent.isCallsOrSms()) {
+            String sql = RAGPipeline.buildCallsSmsSql(intent.callSmsType, intent.startTime, intent.endTime);
+            return sql != null ? sql : "Konnte die Anruf-/SMS-Richtung nicht zuordnen.";
+        }
+        if (intent.isCountryFilter()) {
+            String sql = RAGPipeline.buildCountryFilterSql(intent.country, intent.startTime, intent.endTime);
+            return sql != null ? sql : "Land '" + intent.country + "' konnte keiner Landesvorwahl zugeordnet werden.";
+        }
+
+        if (intent.isRoamers()) {
+            return RAGPipeline.buildRoamersSql(intent.startTime, intent.endTime, intent.identifierColumn);
+        }
+        if (intent.isWechsler()) {
+            return RAGPipeline.buildWechslerSql(intent.startTime, intent.endTime);
+        }
+
+        // No known intent matched — fall back to the free-form generator.
+        return pipline.generateSQL(userinput);
     }
 
     /**
@@ -453,6 +537,37 @@ public class LLMWindow extends Application {
                     sql = sql.substring(sql.indexOf("SELECT"), sql.length());
                 }
                 parent.showSqlWindow(sql, db_node);
+
+                // Also redraw an already-open map/timeline view (if any)
+                // with the same result, so a query run from the chat
+                // updates Karte+Timeline too instead of only the separate
+                // SQL-Analyzer result list opened above. See
+                // LocationWindow#getActivePane / MapViewPane#runQueryAndDisplay.
+                //
+                // IMPORTANT: showSqlWindow() above only *schedules* its work
+                // via Platform.runLater and returns immediately — it does not
+                // block until the SQL-Analyzer has actually run its query.
+                // Both that query (SQLWindow's own auto-fired "Go" button)
+                // and this one execute against the SAME shared
+                // InMemoryDatabase/Connection (see DBManager#get). Running
+                // them concurrently from two different threads — as a
+                // plain background Thread used to do here — corrupts the
+                // shared SQLite connection often enough that one of the two
+                // queries silently comes back empty. Queueing this as a
+                // second Platform.runLater task instead makes it run on the
+                // FX thread strictly *after* showSqlWindow()'s own queued
+                // task, so the two queries never overlap.
+                fqlite.timemap.MapViewPane activePane = fqlite.timemap.LocationWindow.getActivePane();
+                if (activePane != null) {
+                    final String finalSql = sql;
+                    Platform.runLater(() -> {
+                        try {
+                            activePane.runQueryAndDisplay(finalSql);
+                        } catch (Exception ex) {
+                            ex.printStackTrace();
+                        }
+                    });
+                }
             });
             Text nl = new Text("\n\n");
             outputArea.getChildren().addAll(t,link1,nl);
@@ -564,6 +679,9 @@ public class LLMWindow extends Application {
             // 1. load recovered data to Memory (SQLite in Memory DB)
             mdb = parent.createInMemoryDB(db_node.getValue());
         }
+
+        // Store reference so LocationWindow can reuse the same connection
+        this.inMemoryDB = mdb;
 
         /* handover the connection object to retrieve the database schema */
         pipline.initializeRetriever(mdb.getConnectionObject());

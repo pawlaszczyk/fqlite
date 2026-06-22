@@ -6,6 +6,9 @@ import javafx.geometry.Pos;
 import javafx.scene.canvas.Canvas;
 import javafx.scene.canvas.GraphicsContext;
 import javafx.scene.control.*;
+import javafx.scene.input.Clipboard;
+import javafx.scene.input.ClipboardContent;
+import javafx.scene.input.ContextMenuEvent;
 import javafx.scene.input.MouseEvent;
 import javafx.scene.input.ScrollEvent;
 import javafx.scene.layout.*;
@@ -21,17 +24,17 @@ import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
 /**
- * Interactive <b>vertical</b> timeline with MSISDN labels and a live filter bar.
+ * Interactive <b>vertical</b> timeline with IMSI labels and a live filter bar.
  *
  * <h3>Layout (top → bottom)</h3>
  * <pre>
  *  ┌─────────────────────────────┐
  *  │ TIMELINE  ● Timestamp  ● +Geo │  ← header with legend
  *  ├─────────────────────────────┤
- *  │ [MSISDN ▼] [ filter text  ] │  ← filter bar
+ *  │ [IMSI ▼]   [ filter text  ] │  ← filter bar
  *  ├─────────────────────────────┤
  *  │  ←timestamp   ●             │
- *  │             ●  msisdn→      │  ← canvas (virtual scrolling)
+ *  │             ●  imsi→        │  ← canvas (virtual scrolling)
  *  │  ←timestamp   ●             │
  *  │    …                        │
  *  └─────────────────────────────┘  ← scrollbar on the right
@@ -40,14 +43,19 @@ import java.util.stream.Collectors;
  * <h3>Each dot shows two lines</h3>
  * <ul>
  *   <li>Line 1: timestamp string (e.g. {@code 09-27 00:06:32})</li>
- *   <li>Line 2: MSISDN / mobile number, rendered in {@link Theme#accent1} colour</li>
+ *   <li>Line 2: IMSI, rendered in {@link Theme#accent1} colour</li>
  * </ul>
  *
  * <h3>Filter bar</h3>
  * A {@link ComboBox} selects which field to filter on; a {@link TextField}
  * holds the search term. Matching is case-insensitive substring.  The
- * dropdown is pre-populated with all distinct MSISDN values found in the
- * data so the user can also pick a number from a list instead of typing.
+ * dropdown is pre-populated with all distinct IMSI values found in the
+ * data so the user can also pick a subscriber from a list instead of typing.
+ *
+ * <h3>Context menu</h3>
+ * Right-clicking a data point opens a context menu with a single entry to
+ * copy that point's IMSI to the system clipboard. Disabled when the point
+ * has no IMSI.
  */
 public class TimelineView extends BorderPane {
 
@@ -108,10 +116,17 @@ public class TimelineView extends BorderPane {
 
     // ── Filter field options ─────────────────────────────────────────────────
 
-    private static final String FF_MSISDN    = "MSISDN";
+    private static final String FF_IMSI      = "IMSI";
     private static final String FF_TABLE     = "Table";
     private static final String FF_TIMESTAMP = "Timestamp";
     private static final String FF_ALL       = "All fields";
+
+    // ── Context menu ─────────────────────────────────────────────────────────
+
+    private final ContextMenu contextMenu  = new ContextMenu();
+    private final MenuItem    copyImsiItem = new MenuItem("IMSI kopieren");
+    /** Index (into {@link #visible}) the context menu was last opened for. */
+    private int contextMenuIdx = -1;
 
     // ── Construction ─────────────────────────────────────────────────────────
 
@@ -131,8 +146,8 @@ public class TimelineView extends BorderPane {
 
         // Filter bar
         filterField = new ComboBox<>();
-        filterField.getItems().addAll(FF_MSISDN, FF_TABLE, FF_TIMESTAMP, FF_ALL);
-        filterField.setValue(FF_MSISDN);
+        filterField.getItems().addAll(FF_IMSI, FF_TABLE, FF_TIMESTAMP, FF_ALL);
+        filterField.setValue(FF_IMSI);
         filterField.setMaxWidth(110);
         filterField.setStyle("-fx-font-family: monospace; -fx-font-size: 11px;");
 
@@ -191,6 +206,11 @@ public class TimelineView extends BorderPane {
         canvas.setOnMouseClicked(this::onMouseClicked);
         canvas.setOnMouseExited(e -> { hoveredIdx = -1; render(); });
         canvas.setOnScroll(this::onScroll);
+        canvas.setOnContextMenuRequested(this::onContextMenuRequested);
+
+        // Right-click context menu: copy the IMSI of the clicked data point.
+        copyImsiItem.setOnAction(e -> copySelectedImsi());
+        contextMenu.getItems().add(copyImsiItem);
 
         // Filter listeners – re-apply filter on any change
         filterField.valueProperty().addListener((obs, o, n) -> applyFilter());
@@ -206,8 +226,8 @@ public class TimelineView extends BorderPane {
                 .filter(p -> p.getTimestamp() != null)
                 .collect(Collectors.toCollection(ArrayList::new));
 
-        // Populate MSISDN quick-pick list in the ComboBox
-        populateMsisdnPicker(allPoints);
+        // Populate IMSI quick-pick list in the ComboBox
+        populateImsiPicker(allPoints);
 
         hoveredIdx   = -1;
         selectedIdx  = -1;
@@ -281,15 +301,15 @@ public class TimelineView extends BorderPane {
     // ── Filtering ────────────────────────────────────────────────────────────
 
     /**
-     * Fills the ComboBox with the fixed field names plus all distinct MSISDN
-     * values found in the dataset, so users can select a number directly.
+     * Fills the ComboBox with the fixed field names plus all distinct IMSI
+     * values found in the dataset, so users can select a subscriber directly.
      */
-    private void populateMsisdnPicker(List<DataPoint> allPoints) {
-        List<String> items = new ArrayList<>(List.of(FF_MSISDN, FF_TABLE, FF_TIMESTAMP, FF_ALL));
+    private void populateImsiPicker(List<DataPoint> allPoints) {
+        List<String> items = new ArrayList<>(List.of(FF_IMSI, FF_TABLE, FF_TIMESTAMP, FF_ALL));
         // Separator-style entry
-        items.add("── Pick MSISDN ──");
+        items.add("── Pick IMSI ──");
         allPoints.stream()
-                .map(DataPoint::getMsisdn)
+                .map(DataPoint::getImsi)
                 .filter(m -> m != null && !m.isBlank())
                 .distinct()
                 .sorted()
@@ -297,8 +317,8 @@ public class TimelineView extends BorderPane {
 
         String current = filterField.getValue();
         filterField.getItems().setAll(items);
-        // Restore selection if still valid, else default to MSISDN
-        filterField.setValue(items.contains(current) ? current : FF_MSISDN);
+        // Restore selection if still valid, else default to IMSI
+        filterField.setValue(items.contains(current) ? current : FF_IMSI);
     }
 
     /**
@@ -312,31 +332,31 @@ public class TimelineView extends BorderPane {
 
         List<DataPoint> filtered;
 
-        // If a specific MSISDN was picked from the dropdown list, filter by it directly.
-        boolean isMsisdnPickValue = field != null
-                                    && !field.equals(FF_MSISDN) && !field.equals(FF_TABLE)
+        // If a specific IMSI was picked from the dropdown list, filter by it directly.
+        boolean isImsiPickValue = field != null
+                                    && !field.equals(FF_IMSI) && !field.equals(FF_TABLE)
                                     && !field.equals(FF_TIMESTAMP) && !field.equals(FF_ALL)
                                     && !field.startsWith("──");
 
-        if (isMsisdnPickValue) {
-            // User chose a specific MSISDN from the pick list
+        if (isImsiPickValue) {
+            // User chose a specific IMSI from the pick list
             final String picked = field;
             filtered = allTimestamped.stream()
-                    .filter(p -> picked.equals(p.getMsisdn()))
+                    .filter(p -> picked.equals(p.getImsi()))
                     .toList();
         } else if (term.isEmpty()) {
             filtered = allTimestamped;
         } else {
             filtered = allTimestamped.stream().filter(p -> {
                 return switch (field == null ? FF_ALL : field) {
-                    case FF_MSISDN -> {
-                        String m = p.getMsisdn();
+                    case FF_IMSI -> {
+                        String m = p.getImsi();
                         yield m != null && m.toLowerCase().contains(term);
                     }
                     case FF_TABLE -> p.getTableName().toLowerCase().contains(term);
                     case FF_TIMESTAMP -> p.getFormattedTimestamp().toLowerCase().contains(term);
                     default -> {  // FF_ALL
-                        String m = p.getMsisdn();
+                        String m = p.getImsi();
                         yield p.getTableName().toLowerCase().contains(term)
                               || p.getFormattedTimestamp().toLowerCase().contains(term)
                               || (m != null && m.toLowerCase().contains(term));
@@ -357,6 +377,7 @@ public class TimelineView extends BorderPane {
         // Keep selection valid
         if (selectedIdx >= visible.size()) selectedIdx = -1;
         hoveredIdx = -1;
+        contextMenuIdx = -1;
         scrollOffset = 0;
 
         // Update count label
@@ -485,7 +506,15 @@ public class TimelineView extends BorderPane {
     }
 
     private void drawDots(GraphicsContext gc, double W, double H, double axisX) {
-        if (visible.isEmpty()) return;
+        if (visible.isEmpty()) {
+            // Drop any stale hit-test arrays from a previous (larger) data set —
+            // otherwise hitTest() can still return an index that's valid against
+            // these old arrays but out of bounds for the now-empty `visible` list,
+            // crashing onMouseMoved()/onMouseClicked() with an IndexOutOfBoundsException.
+            dotX = new double[0];
+            dotY = new double[0];
+            return;
+        }
 
         long minMs   = minTs.toEpochMilli();
         long rangeMs = maxTs.toEpochMilli() - minMs;
@@ -535,8 +564,8 @@ public class TimelineView extends BorderPane {
             // Line 1: timestamp  (grey)
             String timeStr   = DateTimeFormatter.ofPattern("MM-dd HH:mm:ss")
                     .withZone(ZoneOffset.UTC).format(dp.getTimestamp());
-            // Line 2: MSISDN  (accent colour); empty string when unavailable
-            String msisdnStr = dp.getMsisdn() != null ? dp.getMsisdn() : "";
+            // Line 2: IMSI  (accent colour); empty string when unavailable
+            String imsiStr = dp.getImsi() != null ? dp.getImsi() : "";
 
             gc.setFont(Font.font("Monospace", 9));
 
@@ -546,25 +575,25 @@ public class TimelineView extends BorderPane {
 
             if (left) {
                 // Left-side dots: labels to the LEFT of the dot, right-aligned
-                double twTime   = timeStr.length()   * 5.5;
-                double twMsisdn = msisdnStr.length() * 5.5;
-                double textX    = scrX - DOT_R - 4;
+                double twTime = timeStr.length() * 5.5;
+                double twImsi = imsiStr.length() * 5.5;
+                double textX  = scrX - DOT_R - 4;
 
                 gc.setFill(theme.label);
-                gc.fillText(timeStr,   textX - twTime,   textTop);
-                if (!msisdnStr.isEmpty()) {
+                gc.fillText(timeStr, textX - twTime, textTop);
+                if (!imsiStr.isEmpty()) {
                     gc.setFill(theme.accent1);
-                    gc.fillText(msisdnStr, textX - twMsisdn, textTop + lineH);
+                    gc.fillText(imsiStr, textX - twImsi, textTop + lineH);
                 }
             } else {
                 // Right-side dots: labels to the RIGHT of the dot, left-aligned
                 double textX = scrX + DOT_R + 4;
 
                 gc.setFill(theme.label);
-                gc.fillText(timeStr,   textX, textTop);
-                if (!msisdnStr.isEmpty()) {
+                gc.fillText(timeStr, textX, textTop);
+                if (!imsiStr.isEmpty()) {
                     gc.setFill(theme.accent1);
-                    gc.fillText(msisdnStr, textX, textTop + lineH);
+                    gc.fillText(imsiStr, textX, textTop + lineH);
                 }
             }
         }
@@ -574,6 +603,7 @@ public class TimelineView extends BorderPane {
 
     private void onMouseMoved(MouseEvent e) {
         int hit = hitTest(e.getX(), e.getY());
+        if (hit >= visible.size()) hit = -1;   // guard against a stale hit-test index
         if (hit != hoveredIdx) { hoveredIdx = hit; render(); }
         if (hit >= 0) {
             tooltip.setText(buildTooltip(visible.get(hit)));
@@ -590,6 +620,39 @@ public class TimelineView extends BorderPane {
             render();
             if (selectionListener != null) selectionListener.accept(visible.get(hit));
         }
+    }
+
+    /**
+     * Right-click on a data point: select it, remember its index, and show a
+     * context menu offering to copy its IMSI. The menu item is disabled when
+     * the point has no IMSI. Right-clicking empty canvas space shows nothing.
+     */
+    private void onContextMenuRequested(ContextMenuEvent e) {
+        int hit = hitTest(e.getX(), e.getY());
+        if (hit < 0) {
+            contextMenu.hide();
+            return;
+        }
+
+        contextMenuIdx = hit;
+        selectedIdx = hit;
+        render();
+
+        String imsi = visible.get(hit).getImsi();
+        copyImsiItem.setDisable(imsi == null);
+        copyImsiItem.setText(imsi != null ? "IMSI kopieren (" + imsi + ")" : "IMSI kopieren (nicht verfügbar)");
+
+        contextMenu.show(canvas, e.getScreenX(), e.getScreenY());
+    }
+
+    /** Copies the IMSI of the data point the context menu was opened for. */
+    private void copySelectedImsi() {
+        if (contextMenuIdx < 0 || contextMenuIdx >= visible.size()) return;
+        String imsi = visible.get(contextMenuIdx).getImsi();
+        if (imsi == null) return;
+        ClipboardContent content = new ClipboardContent();
+        content.putString(imsi);
+        Clipboard.getSystemClipboard().setContent(content);
     }
 
     private void onScroll(ScrollEvent e) {
@@ -626,8 +689,8 @@ public class TimelineView extends BorderPane {
         sb.append("Table: ").append(dp.getTableName())
                 .append("  (row ").append(dp.getRowIndex()).append(")\n");
         sb.append("Time:  ").append(dp.getFormattedTimestamp()).append(" UTC\n");
-        String msisdn = dp.getMsisdn();
-        if (msisdn != null) sb.append("MSISDN: ").append(msisdn).append("\n");
+        String imsi = dp.getImsi();
+        if (imsi != null) sb.append("IMSI:  ").append(imsi).append("\n");
         if (dp.getCoordinate() != null) sb.append("Geo:   ").append(dp.getCoordinate()).append("\n");
         List<String> cols = dp.getColumnNames();
         List<String> row  = dp.getRawRow();

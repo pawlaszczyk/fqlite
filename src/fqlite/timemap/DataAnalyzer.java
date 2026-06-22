@@ -7,6 +7,7 @@ import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.Predicate;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import javafx.collections.ObservableList;
@@ -37,7 +38,7 @@ public class DataAnalyzer {
     private static final String SCHEMA_RESPONSE_RECORDS = "response_records";
 
     // -------------------------------------------------------------------------
-    // response_records – fixed positional offsets within a raw data row
+    // response_records – column resolution within a raw data row
     // -------------------------------------------------------------------------
     //
     // The fqlite query engine serialises each row with THREE leading meta-fields
@@ -47,84 +48,34 @@ public class DataAnalyzer {
     //   pos 1 : table name
     //   pos 2 : record reference, e.g. "[444|31]"
     //
-    // After those meta fields the actual table columns begin at position 3.
-    // In addition, the real data contains THREE undocumented extra columns
-    // between nw_access_type (pos 9) and start_time (pos 13):
-    //   pos 10 : carrier_country_code  (e.g. "DE")
-    //   pos 11 : carrier_header_id     (e.g. "01.28.01.08.1.01")
-    //   pos 12 : connection_type       (e.g. "mobilePacketData")
-    //
-    // Furthermore, the "other_information" column is serialised as FIVE
-    // consecutive "Key"="Value" fields (positions 27–31) followed by the
-    // same five values repeated as plain strings (positions 32–36).
-    //
-    // Absolute positions (0-based) in the raw ObservableList<String> row:
-    //
-    //   3  id                      16  latitude
-    //   4  request_id              17  longitude
-    //   5  record_number           18  map_datum
-    //   6  party_type              19  azimuth
-    //   7  national_country_code   20  user_location_info
-    //   8  national_header_id      21  imsi
-    //   9  nw_access_type          22  msisdn
-    //  10  [carrier_country_code]  23  apn
-    //  11  [carrier_header_id]     24  other_info kv[0]  ("Call Indikator"=…)
-    //  12  [connection_type]       25  other_info kv[1]  ("Call Action Code"=…)
-    //  13  start_time              26  other_info kv[2]  ("Call Subtype"=…)
-    //  14  end_time                27  other_info kv[3]  ("Session Id"=…)
-    //  15  duration_seconds        28  other_info kv[4]  ("TypeOfData"=…)
-    //  16  na_device_id            29  call_indicator    (plain repeat)
-    //  14  lt_raw                  30  call_action_code
-    //  15  lo_raw                  31  call_subtype
-    //  16  latitude                32  session_id
-    //  17  longitude               33  type_of_data_extra
-    //  18  map_datum               34  nat_country_code
-    //  19  azimuth                 35  nat_header_id
-    //  20  user_location_info      36  type_of_data
+    // After those meta fields the actual table columns begin at position 3,
+    // in exactly the order reported by the table's real column metadata
+    // (the "headers"/"cols" list passed into analyze()). Earlier versions of
+    // this class hardcoded the absolute position of every field, which broke
+    // silently whenever the importer's column order or naming changed (e.g.
+    // "latitude"/"longitude" vs. "latitude_dec"/"longitude_dec"). Column
+    // positions are now resolved BY NAME via colIndex(), using RR_META_OFFSET
+    // as the only fixed assumption.
 
     /** Number of fqlite meta-fields prepended to every row. */
     private static final int RR_META_OFFSET = 3;
 
-    // Absolute indices (meta already included) for the columns we need:
-    private static final int RR_IDX_START_TIME  = 13;  // start_time
-    private static final int RR_IDX_END_TIME    = 14;  // end_time
-    private static final int RR_IDX_DURATION    = 15;  // duration_seconds
-    private static final int RR_IDX_NA_DEVICE   = 16;  // na_device_id
-    private static final int RR_IDX_LT_RAW      = 17;  // lt_raw
-    private static final int RR_IDX_LO_RAW      = 18;  // lo_raw
-    private static final int RR_IDX_LATITUDE    = 19;  // latitude
-    private static final int RR_IDX_LONGITUDE   = 20;  // longitude
-    private static final int RR_IDX_MAP_DATUM   = 21;  // map_datum
-    private static final int RR_IDX_AZIMUTH     = 22;  // azimuth
-    private static final int RR_IDX_USER_LOC    = 23;  // user_location_info
-    private static final int RR_IDX_IMSI        = 24;  // imsi
-    private static final int RR_IDX_MSISDN      = 25;  // msisdn
-    private static final int RR_IDX_APN         = 26;  // apn
-    // other_information: 5 "Key"="Value" fields at 27–31
-    private static final int RR_IDX_OTHER_INFO_START = 27;
-    private static final int RR_IDX_OTHER_INFO_END   = 31; // inclusive
-    // plain-value repeats at 32–36:
-    private static final int RR_IDX_CALL_INDICATOR   = 32;
-    private static final int RR_IDX_CALL_ACTION      = 33;
-    private static final int RR_IDX_CALL_SUBTYPE     = 34;
-    private static final int RR_IDX_SESSION_ID       = 35;
-    private static final int RR_IDX_TYPE_EXTRA       = 36;
-    private static final int RR_IDX_NAT_CC           = 37;  // nat_country_code
-    private static final int RR_IDX_NAT_HEADER       = 38;  // nat_header_id
-    private static final int RR_IDX_TYPE_OF_DATA     = 39;  // type_of_data
-
-    // Left-side columns (after meta):
-    private static final int RR_IDX_PARTY_TYPE   = 6;   // party_type
-    private static final int RR_IDX_NAT_CC_LOCAL = 7;   // national_country_code
-    private static final int RR_IDX_NAT_HDR_LOCAL= 8;   // national_header_id
-    private static final int RR_IDX_NW_ACCESS    = 9;   // nw_access_type
-
     /** Primary timestamp column name in {@code response_records}. */
     private static final String RR_START_TIME  = "start_time";
-    /** Latitude column name. */
-    private static final String RR_LATITUDE    = "latitude";
-    /** Longitude column name. */
-    private static final String RR_LONGITUDE   = "longitude";
+
+    // Column-name aliases accepted for the geo-coordinate fields. The
+    // "_dec"/"_raw" suffixed names are what the current EtsiXmlImporter
+    // schema uses; the unsuffixed/"lt_raw"/"lo_raw" names are kept for
+    // backward compatibility with older databases and the demo data in
+    // LocationWindow. Column positions are resolved BY NAME against the
+    // real header list (see colIndex()) rather than hardcoded absolute
+    // offsets, because the offsets used to drift out of sync with the
+    // importer's actual column order and caused coordinates to silently
+    // disappear from the map.
+    private static final String[] RR_LATITUDE_NAMES  = {"latitude_dec", "latitude"};
+    private static final String[] RR_LONGITUDE_NAMES = {"longitude_dec", "longitude"};
+    private static final String[] RR_LAT_RAW_NAMES   = {"latitude_raw", "lt_raw"};
+    private static final String[] RR_LON_RAW_NAMES   = {"longitude_raw", "lo_raw"};
 
     // -------------------------------------------------------------------------
     // Timestamp patterns
@@ -202,28 +153,24 @@ public class DataAnalyzer {
 
             if (isResponseRecordsSchema(tableName, cols)) {
                 // ── Fast path: fixed schema ──────────────────────────────────
-                points.addAll(analyzeResponseRecords(tableName, rows, cols));
+                List<DataPoint> fastPathPoints = analyzeResponseRecords(tableName, rows, cols);
+                if (!fastPathPoints.isEmpty() || rows.isEmpty()) {
+                    points.addAll(fastPathPoints);
+                } else {
+                    // The header list names a response_records-like schema, but
+                    // none of the name-resolved column positions produced a
+                    // single usable timestamp or coordinate across the whole
+                    // table. This happens when the database was created by an
+                    // older/different importer revision whose row layout no
+                    // longer lines up 1:1 with today's column list (e.g. extra
+                    // columns inserted between nw_access_type and start_time).
+                    // Rather than silently showing nothing, fall back to the
+                    // same value-based heuristic used for unrecognised tables.
+                    points.addAll(analyzeGeneric(tableName, rows, cols));
+                }
             } else {
                 // ── General path: heuristic profiling ───────────────────────
-                ColumnProfile profile = profileColumns(rows, cols);
-
-                for (int rowIdx = 0; rowIdx < rows.size(); rowIdx++) {
-                    ObservableList<String> row = rows.get(rowIdx);
-
-                    Instant       timestamp = extractTimestamp(row, profile.timestampCols);
-                    GeoCoordinate coord     = extractCoordinate(row, profile);
-
-                    if (timestamp != null || coord != null) {
-                        DataPoint dp = new DataPoint();
-                        dp.setTableName(tableName);
-                        dp.setRowIndex(rowIdx);
-                        dp.setTimestamp(timestamp);
-                        dp.setCoordinate(coord);
-                        dp.setRawRow(new ArrayList<>(row));
-                        dp.setColumnNames(cols);
-                        points.add(dp);
-                    }
-                }
+                points.addAll(analyzeGeneric(tableName, rows, cols));
             }
         }
 
@@ -233,47 +180,175 @@ public class DataAnalyzer {
         return points;
     }
 
+    /**
+     * Value-based heuristic extraction: profiles every column for timestamp /
+     * coordinate content and builds one {@link DataPoint} per row that yields
+     * either. Used for any table that doesn't match a known fixed schema, and
+     * as a safety-net fallback when a fixed schema's name-resolved column
+     * positions fail to validate against the actual row data.
+     */
+    private List<DataPoint> analyzeGeneric(
+            String tableName,
+            ObservableList<ObservableList<String>> rows,
+            List<String> cols) {
+
+        List<DataPoint> points = new ArrayList<>();
+        ColumnProfile profile = profileColumns(rows, cols);
+
+        for (int rowIdx = 0; rowIdx < rows.size(); rowIdx++) {
+            ObservableList<String> row = rows.get(rowIdx);
+
+            Instant       timestamp = extractTimestamp(row, profile.timestampCols);
+            GeoCoordinate coord     = extractCoordinate(row, profile);
+
+            if (timestamp != null || coord != null) {
+                DataPoint dp = new DataPoint();
+                dp.setTableName(tableName);
+                dp.setRowIndex(rowIdx);
+                dp.setTimestamp(timestamp);
+                dp.setCoordinate(coord);
+                dp.setRawRow(new ArrayList<>(row));
+                dp.setColumnNames(cols);
+                points.add(dp);
+            }
+        }
+        return points;
+    }
+
     // -------------------------------------------------------------------------
     // response_records – fixed-schema extraction
     // -------------------------------------------------------------------------
 
     /**
      * Returns {@code true} when the table name equals {@code response_records}
-     * (case-insensitive) <em>and</em> the row data is wide enough to contain
-     * the expected timestamp and coordinate fields at their fixed positions.
-     *
-     * <p>The check uses the <em>minimum expected row width</em> (the longitude
-     * index + 1) rather than column-name lookup, because the fqlite serialisation
-     * format prepends meta-fields that shift all logical column indices.</p>
+     * (case-insensitive) <em>and</em> the supplied header list names a
+     * {@code start_time} column plus a recognised latitude/longitude column
+     * pair (see {@link #RR_LATITUDE_NAMES}/{@link #RR_LONGITUDE_NAMES}).
      */
     private boolean isResponseRecordsSchema(String tableName, List<String> cols) {
         if (!SCHEMA_RESPONSE_RECORDS.equalsIgnoreCase(tableName)) return false;
-        // Accept both: header-based confirmation OR a plausible column count.
-        // A genuine response_records row has at least 37 fields (meta + data).
-        if (!cols.isEmpty()) {
-            // Header names available: check for the key column names.
-            List<String> lower = cols.stream().map(String::toLowerCase).toList();
-            return lower.contains(RR_START_TIME)
-                && lower.contains(RR_LATITUDE)
-                && lower.contains(RR_LONGITUDE);
+        if (cols.isEmpty()) return false;
+        List<String> lower = cols.stream().map(String::toLowerCase).toList();
+        return lower.contains(RR_START_TIME)
+            && containsAny(lower, RR_LATITUDE_NAMES)
+            && containsAny(lower, RR_LONGITUDE_NAMES);
+    }
+
+    private static boolean containsAny(List<String> lower, String[] candidateNames) {
+        for (String name : candidateNames) {
+            if (lower.contains(name)) return true;
         }
         return false;
     }
 
     /**
-     * Processes a {@code response_records} table using fixed absolute field
-     * positions within each raw row.
+     * Resolves the absolute row index of a column, trying each candidate
+     * name in order (case-insensitive) against the real header list and
+     * adding {@link #RR_META_OFFSET}.
      *
-     * <p><b>Row layout (0-based absolute positions):</b><br>
-     * The fqlite engine prepends 3 meta-fields before the actual table columns,
-     * and the real data contains 3 additional undocumented fields between
-     * {@code nw_access_type} and {@code start_time}. The {@code other_information}
-     * column is serialised as 5 {@code "Key"="Value"} strings, followed by the
-     * same 5 values repeated as plain strings. All positions are therefore fixed
-     * and known; see the {@code RR_IDX_*} constants for exact values.</p>
+     * @return the absolute index into the raw row, or {@code -1} if none of
+     *         the candidate names is present in {@code cols}
+     */
+    private static int colIndex(List<String> cols, String... candidateNames) {
+        for (String name : candidateNames) {
+            for (int i = 0; i < cols.size(); i++) {
+                if (name.equalsIgnoreCase(cols.get(i))) {
+                    return RR_META_OFFSET + i;
+                }
+            }
+        }
+        return -1;
+    }
+
+    /**
+     * Searches a small window of candidate offsets around {@code naiveIdx} and
+     * returns the delta (added to {@code naiveIdx}) under which the most
+     * sampled rows validate against {@code validator}, requiring that the
+     * column immediately to the right of the candidate ALSO validates.
      *
-     * <p>Every row that yields either a parseable {@code start_time} or valid
-     * {@code latitude}/{@code longitude} values produces one {@link ResponseRecordDataPoint}.</p>
+     * <p>This corrects for databases where the row layout no longer lines up
+     * 1:1 with {@code RR_META_OFFSET + colIndex(...)} — e.g. a table created
+     * by an older importer revision that inserted a few extra columns between
+     * {@code nw_access_type} and {@code start_time}, or a query result that
+     * has none of fqlite's usual 3 leading meta-fields at all. The correction
+     * is purely value-based (does it actually look like a timestamp?), so it
+     * self-corrects regardless of why the shift exists, instead of trusting
+     * column names blindly and silently producing zero data points.</p>
+     *
+     * <p>Specifically for resolving {@code start_time}: a plain single-column
+     * score (does {@code idx} alone look like a timestamp?) ties between the
+     * true {@code start_time} position and the {@code end_time} column
+     * itself (one position later), since both share the exact same format.
+     * Scanning {@code ±d} outward and keeping the first candidate to beat the
+     * running best score then picks whichever of the two is reached first —
+     * which is wrong whenever the true offset is farther from the naive
+     * guess than that neighbour (e.g. when there are no leading meta-fields
+     * at all, so the correct delta is {@code -RR_META_OFFSET}, while
+     * {@code end_time} sits only one column closer). Requiring the next
+     * column to ALSO validate disambiguates correctly in both directions,
+     * since {@code end_time} itself is followed by {@code duration_seconds}
+     * (an integer), which fails the timestamp check.</p>
+     *
+     * @return the best delta, or {@code 0} when {@code naiveIdx} already
+     *         validates as well as or better than any shifted candidate
+     */
+    private static int findShiftPaired(
+            ObservableList<ObservableList<String>> rows,
+            int naiveIdx,
+            Predicate<String> validator,
+            int maxShift) {
+
+        if (naiveIdx < 0) return 0;
+        int sample = Math.min(rows.size(), 30);
+
+        int bestDelta = 0;
+        int bestScore = scorePairAt(rows, naiveIdx, validator, sample);
+
+        for (int d = 1; d <= maxShift; d++) {
+            int scoreForward  = scorePairAt(rows, naiveIdx + d, validator, sample);
+            if (scoreForward > bestScore) { bestScore = scoreForward; bestDelta = d; }
+
+            int scoreBackward = scorePairAt(rows, naiveIdx - d, validator, sample);
+            if (scoreBackward > bestScore) { bestScore = scoreBackward; bestDelta = -d; }
+        }
+        return bestDelta;
+    }
+
+    /** Scores {@code idx} only when both {@code idx} and {@code idx + 1} validate. */
+    private static int scorePairAt(
+            ObservableList<ObservableList<String>> rows,
+            int idx,
+            Predicate<String> validator,
+            int sampleSize) {
+
+        if (idx < 0) return 0;
+        int score = 0;
+        for (int r = 0; r < sampleSize; r++) {
+            ObservableList<String> row = rows.get(r);
+            if (idx + 1 >= row.size()) continue;
+            String v1 = row.get(idx);
+            String v2 = row.get(idx + 1);
+            if (v1 != null && !v1.isBlank() && validator.test(v1)
+                    && v2 != null && !v2.isBlank() && validator.test(v2)) score++;
+        }
+        return score;
+    }
+
+    /** {@code colIndex(cols, names)}, then shifted by {@code delta} (or {@code -1} unresolved). */
+    private static int colIndex(List<String> cols, int delta, String... candidateNames) {
+        int naive = colIndex(cols, candidateNames);
+        return naive < 0 ? -1 : naive + delta;
+    }
+
+    /**
+     * Processes a {@code response_records} table using column positions
+     * resolved by name from the real header list (see {@link #colIndex}),
+     * offset by {@link #RR_META_OFFSET} to account for fqlite's 3 leading
+     * meta-fields (row counter, table name, record reference) that precede
+     * the actual table columns in every raw row.
+     *
+     * <p>Every row that yields either a parseable {@code start_time}/{@code end_time}
+     * or valid latitude/longitude values produces one {@link ResponseRecordDataPoint}.</p>
      */
     private List<DataPoint> analyzeResponseRecords(
             String tableName,
@@ -282,18 +357,62 @@ public class DataAnalyzer {
 
         List<DataPoint> points = new ArrayList<>();
 
+        // Resolve every column position once (by name) for this table,
+        // instead of per row — cheap, and avoids hardcoded absolute offsets
+        // that silently go stale when the importer's column order changes.
+        //
+        // A purely name-based lookup still assumes the row's actual layout
+        // matches RR_META_OFFSET + the column's position in `cols` exactly.
+        // That assumption breaks for databases written by an older importer
+        // revision that inserted extra columns between nw_access_type and
+        // start_time — the table still LOOKS like response_records by name,
+        // but every field from start_time onward sits a few positions further
+        // right than its name-resolved index predicts. findShiftPaired() detects
+        // that constant offset by checking where start_time's value actually
+        // parses as a timestamp, and the same delta is then applied to every
+        // other field from start_time onward (id…nw_access_type are read from
+        // their naive, unshifted positions, since they were observed to stay
+        // correctly aligned even when the later shift exists).
+        int naiveStartTime = colIndex(cols, RR_START_TIME);
+        int delta = findShiftPaired(rows, naiveStartTime, this::looksLikeTimestamp, 12);
+
+        int idxStartTime    = naiveStartTime < 0 ? -1 : naiveStartTime + delta;
+        int idxEndTime      = colIndex(cols, delta, "end_time");
+        int idxDuration     = colIndex(cols, delta, "duration_seconds");
+        int idxNaDevice     = colIndex(cols, delta, "na_device_id");
+        int idxLtRaw        = colIndex(cols, delta, RR_LAT_RAW_NAMES);
+        int idxLoRaw        = colIndex(cols, delta, RR_LON_RAW_NAMES);
+        int idxLatitude     = colIndex(cols, delta, RR_LATITUDE_NAMES);
+        int idxLongitude    = colIndex(cols, delta, RR_LONGITUDE_NAMES);
+        int idxMapDatum     = colIndex(cols, delta, "map_datum");
+        int idxAzimuth      = colIndex(cols, delta, "azimuth");
+        int idxUserLoc      = colIndex(cols, delta, "user_location_info");
+        int idxImsi         = colIndex(cols, delta, "imsi");
+        int idxMsisdn       = colIndex(cols, delta, "msisdn");
+        int idxApn          = colIndex(cols, delta, "apn");
+        int idxOtherInfo    = colIndex(cols, delta, "other_information");
+        int idxCallIndicator= colIndex(cols, delta, "call_indicator");
+        int idxCallAction   = colIndex(cols, delta, "call_action_code");
+        int idxCallSubtype  = colIndex(cols, delta, "call_subtype");
+        int idxSessionId    = colIndex(cols, delta, "session_id");
+        int idxTypeExtra    = colIndex(cols, delta, "type_of_data_extra");
+        // party_type / nw_access_type precede the shift point, so they're
+        // read from their naive (unshifted) position.
+        int idxPartyType    = colIndex(cols, "party_type");
+        int idxNwAccess     = colIndex(cols, "nw_access_type");
+
         for (int rowIdx = 0; rowIdx < rows.size(); rowIdx++) {
             ObservableList<String> row = rows.get(rowIdx);
 
             // ── Timestamp ────────────────────────────────────────────────────
-            Instant timestamp = parseTimestamp(cell(row, RR_IDX_START_TIME));
+            Instant timestamp = parseTimestamp(cell(row, idxStartTime));
             if (timestamp == null)
-                timestamp = parseTimestamp(cell(row, RR_IDX_END_TIME));
+                timestamp = parseTimestamp(cell(row, idxEndTime));
 
             // ── Coordinates ──────────────────────────────────────────────────
             GeoCoordinate coord = null;
-            String latStr = cell(row, RR_IDX_LATITUDE);
-            String lonStr = cell(row, RR_IDX_LONGITUDE);
+            String latStr = cell(row, idxLatitude);
+            String lonStr = cell(row, idxLongitude);
             if (latStr != null && !latStr.isBlank()
                     && lonStr != null && !lonStr.isBlank()) {
                 try {
@@ -307,16 +426,6 @@ public class DataAnalyzer {
             // Skip rows that carry neither timestamp nor coordinates.
             if (timestamp == null && coord == null) continue;
 
-            // ── Collect other_information key=value pairs ─────────────────────
-            StringBuilder otherInfo = new StringBuilder();
-            for (int i = RR_IDX_OTHER_INFO_START; i <= RR_IDX_OTHER_INFO_END; i++) {
-                String kv = cell(row, i);
-                if (kv != null && !kv.isBlank()) {
-                    if (!otherInfo.isEmpty()) otherInfo.append("; ");
-                    otherInfo.append(kv);
-                }
-            }
-
             // ── Build DataPoint ──────────────────────────────────────────────
             ResponseRecordDataPoint rrdp = new ResponseRecordDataPoint();
             rrdp.setTableName(tableName);
@@ -326,25 +435,34 @@ public class DataAnalyzer {
             rrdp.setRawRow(new ArrayList<>(row));
             rrdp.setColumnNames(cols);
 
-            rrdp.setEndTime(cell(row, RR_IDX_END_TIME));
-            rrdp.setPartyType(cell(row, RR_IDX_PARTY_TYPE));
-            rrdp.setNwAccessType(cell(row, RR_IDX_NW_ACCESS));
-            rrdp.setNaDeviceId(cell(row, RR_IDX_NA_DEVICE));
-            rrdp.setLtRaw(cell(row, RR_IDX_LT_RAW));
-            rrdp.setLoRaw(cell(row, RR_IDX_LO_RAW));
-            rrdp.setMapDatum(cell(row, RR_IDX_MAP_DATUM));
-            rrdp.setAzimuth(cell(row, RR_IDX_AZIMUTH));
-            rrdp.setUserLocationInfo(cell(row, RR_IDX_USER_LOC));
-            rrdp.setImsi(cell(row, RR_IDX_IMSI));
-            rrdp.setMsisdn(cell(row, RR_IDX_MSISDN));
-            rrdp.setApn(cell(row, RR_IDX_APN));
-            rrdp.setOtherInformation(otherInfo.isEmpty() ? null : otherInfo.toString());
-            rrdp.setCallIndicator(cell(row, RR_IDX_CALL_INDICATOR));
-            rrdp.setCallActionCode(cell(row, RR_IDX_CALL_ACTION));
-            rrdp.setCallSubtype(cell(row, RR_IDX_CALL_SUBTYPE));
-            rrdp.setSessionId(cell(row, RR_IDX_SESSION_ID));
-            rrdp.setTypeOfDataExtra(cell(row, RR_IDX_TYPE_EXTRA));
-            rrdp.setDurationSeconds(cell(row, RR_IDX_DURATION));
+            rrdp.setEndTime(cell(row, idxEndTime));
+            rrdp.setPartyType(cell(row, idxPartyType));
+            rrdp.setNwAccessType(cell(row, idxNwAccess));
+            rrdp.setNaDeviceId(cell(row, idxNaDevice));
+            rrdp.setLtRaw(cell(row, idxLtRaw));
+            rrdp.setLoRaw(cell(row, idxLoRaw));
+            rrdp.setMapDatum(cell(row, idxMapDatum));
+            rrdp.setAzimuth(cell(row, idxAzimuth));
+            rrdp.setUserLocationInfo(cell(row, idxUserLoc));
+            rrdp.setImsi(cell(row, idxImsi));
+            rrdp.setMsisdn(cell(row, idxMsisdn));
+            rrdp.setApn(cell(row, idxApn));
+            rrdp.setOtherInformation(cell(row, idxOtherInfo));
+            rrdp.setCallIndicator(cell(row, idxCallIndicator));
+            rrdp.setCallActionCode(cell(row, idxCallAction));
+            rrdp.setCallSubtype(cell(row, idxCallSubtype));
+            rrdp.setSessionId(cell(row, idxSessionId));
+            rrdp.setTypeOfDataExtra(cell(row, idxTypeExtra));
+            rrdp.setDurationSeconds(cell(row, idxDuration));
+
+            // ── ULI decoding ─────────────────────────────────────────────────
+            // Attempt to decode the user_location_info hex field into structured
+            // cell identity (MCC, MNC, LAC/TAC, CI).  This is a best-effort
+            // operation; rows with missing or malformed ULI simply get null.
+            UliDecoder.CellInfo cellInfo = UliDecoder.decode(cell(row, idxUserLoc));
+            rrdp.setCellInfo(cellInfo);
+            // CellTower resolution (OpenCelliD lookup) is deferred: MapView
+            // triggers it asynchronously when the cell-tower layer is enabled.
 
             points.add(rrdp);
         }
@@ -452,19 +570,40 @@ public class DataAnalyzer {
             GeoCoordinate gc = parseLatLonPair(row.get(c));
             if (gc != null) return gc;
         }
-        // Priority 2: separate latitude and longitude columns.
-        if (!p.latCols.isEmpty() && !p.lonCols.isEmpty()) {
-            int latCol = p.latCols.get(0);
-            int lonCol = p.lonCols.get(0);
-            if (latCol < row.size() && lonCol < row.size()) {
-                try {
-                    double lat = Double.parseDouble(row.get(latCol));
-                    double lon = Double.parseDouble(row.get(lonCol));
-                    if (isValidLat(lat) && isValidLon(lon)) return new GeoCoordinate(lat, lon);
-                } catch (NumberFormatException ignored) {}
+        // Priority 2: separate latitude and longitude columns. A table can
+        // have more than one name-matched candidate (e.g. a raw DMS column
+        // alongside a decimal-degrees column) — try every pairing in order
+        // and use the first that actually parses as a valid coordinate,
+        // instead of blindly trusting the first column by index (which used
+        // to silently swallow valid coordinates whenever a non-numeric
+        // "raw" column happened to come first).
+        for (int latCol : p.latCols) {
+            if (latCol >= row.size()) continue;
+            Double lat = parseValidLat(row.get(latCol));
+            if (lat == null) continue;
+            for (int lonCol : p.lonCols) {
+                if (lonCol >= row.size()) continue;
+                Double lon = parseValidLon(row.get(lonCol));
+                if (lon != null) return new GeoCoordinate(lat, lon);
             }
         }
         return null;
+    }
+
+    private Double parseValidLat(String s) {
+        if (s == null) return null;
+        try {
+            double v = Double.parseDouble(s.trim());
+            return isValidLat(v) ? v : null;
+        } catch (NumberFormatException e) { return null; }
+    }
+
+    private Double parseValidLon(String s) {
+        if (s == null) return null;
+        try {
+            double v = Double.parseDouble(s.trim());
+            return isValidLon(v) ? v : null;
+        } catch (NumberFormatException e) { return null; }
     }
 
     // -------------------------------------------------------------------------
@@ -626,6 +765,25 @@ public class DataAnalyzer {
             return null;
         }
 
+        /**
+         * Returns the IMSI (subscriber identity) for this data point, or
+         * {@code null} if none is available.
+         *
+         * <p>For {@link ResponseRecordDataPoint} the dedicated field is used.
+         * For other table types the value is looked up by the column name
+         * {@code "imsi"} (case-insensitive) in the raw row.</p>
+         */
+        public String getImsi() {
+            if (columnNames == null || rawRow == null) return null;
+            for (int i = 0; i < columnNames.size(); i++) {
+                if ("imsi".equalsIgnoreCase(columnNames.get(i)) && i < rawRow.size()) {
+                    String v = rawRow.get(i);
+                    return (v != null && !v.isBlank()) ? v : null;
+                }
+            }
+            return null;
+        }
+
         /** Returns the timestamp formatted as {@code yyyy-MM-dd HH:mm:ss} (UTC). */
         public String getFormattedTimestamp() {
             if (timestamp == null) return "\u2013";
@@ -649,10 +807,10 @@ public class DataAnalyzer {
      * A {@link DataPoint} enriched with all domain-specific fields of the
      * {@code response_records} table as they appear in the fqlite serialisation.
      *
-     * <p>All string values are extracted verbatim from the raw row at their
-     * fixed absolute positions (see {@code RR_IDX_*} constants). The
-     * {@code other_information} field is the concatenation of the five
-     * {@code "Key"="Value"} sub-fields.</p>
+     * <p>All string values are extracted verbatim from the raw row, at
+     * positions resolved by column name (see {@link DataAnalyzer#colIndex}).
+     * The {@code other_information} field holds the raw {@code "Key"="Value"}
+     * string as produced by the importer.</p>
      */
     public static class ResponseRecordDataPoint extends DataPoint {
 
@@ -676,46 +834,66 @@ public class DataAnalyzer {
         private String typeOfDataExtra;
         private String durationSeconds;
 
+        /**
+         * Decoded ULI (User Location Information) cell identity, or {@code null}
+         * if {@code user_location_info} could not be parsed.
+         * Populated by {@link DataAnalyzer#analyzeResponseRecords}.
+         */
+        private UliDecoder.CellInfo cellInfo;
+
+        /**
+         * Cell tower resolved from OpenCelliD for this data point.
+         * {@code null} until {@link CellTowerResolver} has completed the lookup.
+         * Resolution is triggered asynchronously by {@link MapView} when the
+         * feature is enabled.
+         */
+        private volatile CellTower cellTower;
+
         // Getters
-        public String getEndTime()          { return endTime;          }
-        public String getPartyType()        { return partyType;        }
-        public String getNwAccessType()     { return nwAccessType;     }
-        public String getNaDeviceId()       { return naDeviceId;       }
-        public String getLtRaw()            { return ltRaw;            }
-        public String getLoRaw()            { return loRaw;            }
-        public String getMapDatum()         { return mapDatum;         }
-        public String getAzimuth()          { return azimuth;          }
-        public String getUserLocationInfo() { return userLocationInfo; }
-        public String getImsi()             { return imsi;             }
-        public String getMsisdn()           { return msisdn;           }
-        public String getApn()              { return apn;              }
-        public String getOtherInformation() { return otherInformation; }
-        public String getCallIndicator()    { return callIndicator;    }
-        public String getCallActionCode()   { return callActionCode;   }
-        public String getCallSubtype()      { return callSubtype;      }
-        public String getSessionId()        { return sessionId;        }
-        public String getTypeOfDataExtra()  { return typeOfDataExtra;  }
-        public String getDurationSeconds()  { return durationSeconds;  }
+        public String getEndTime()              { return endTime;          }
+        public String getPartyType()            { return partyType;        }
+        public String getNwAccessType()         { return nwAccessType;     }
+        public String getNaDeviceId()           { return naDeviceId;       }
+        public String getLtRaw()                { return ltRaw;            }
+        public String getLoRaw()                { return loRaw;            }
+        public String getMapDatum()             { return mapDatum;         }
+        public String getAzimuth()              { return azimuth;          }
+        public String getUserLocationInfo()     { return userLocationInfo; }
+        @Override
+        public String getImsi()                 { return imsi;             }
+        public String getMsisdn()               { return msisdn;           }
+        public String getApn()                  { return apn;              }
+        public String getOtherInformation()     { return otherInformation; }
+        public String getCallIndicator()        { return callIndicator;    }
+        public String getCallActionCode()       { return callActionCode;   }
+        public String getCallSubtype()          { return callSubtype;      }
+        public String getSessionId()            { return sessionId;        }
+        public String getTypeOfDataExtra()      { return typeOfDataExtra;  }
+        public String getDurationSeconds()      { return durationSeconds;  }
+        public UliDecoder.CellInfo getCellInfo(){ return cellInfo;         }
+        public CellTower getCellTower()         { return cellTower;        }
 
         // Setters
-        public void setEndTime(String v)          { endTime          = v; }
-        public void setPartyType(String v)        { partyType        = v; }
-        public void setNwAccessType(String v)     { nwAccessType     = v; }
-        public void setNaDeviceId(String v)       { naDeviceId       = v; }
-        public void setLtRaw(String v)            { ltRaw            = v; }
-        public void setLoRaw(String v)            { loRaw            = v; }
-        public void setMapDatum(String v)         { mapDatum         = v; }
-        public void setAzimuth(String v)          { azimuth          = v; }
-        public void setUserLocationInfo(String v) { userLocationInfo = v; }
-        public void setImsi(String v)             { imsi             = v; }
-        public void setMsisdn(String v)           { msisdn           = v; }
-        public void setApn(String v)              { apn              = v; }
-        public void setOtherInformation(String v) { otherInformation = v; }
-        public void setCallIndicator(String v)    { callIndicator    = v; }
-        public void setCallActionCode(String v)   { callActionCode   = v; }
-        public void setCallSubtype(String v)      { callSubtype      = v; }
-        public void setSessionId(String v)        { sessionId        = v; }
-        public void setTypeOfDataExtra(String v)  { typeOfDataExtra  = v; }
-        public void setDurationSeconds(String v)  { durationSeconds  = v; }
+        public void setEndTime(String v)              { endTime          = v; }
+        public void setPartyType(String v)            { partyType        = v; }
+        public void setNwAccessType(String v)         { nwAccessType     = v; }
+        public void setNaDeviceId(String v)           { naDeviceId       = v; }
+        public void setLtRaw(String v)                { ltRaw            = v; }
+        public void setLoRaw(String v)                { loRaw            = v; }
+        public void setMapDatum(String v)             { mapDatum         = v; }
+        public void setAzimuth(String v)              { azimuth          = v; }
+        public void setUserLocationInfo(String v)     { userLocationInfo = v; }
+        public void setImsi(String v)                 { imsi             = v; }
+        public void setMsisdn(String v)               { msisdn           = v; }
+        public void setApn(String v)                  { apn              = v; }
+        public void setOtherInformation(String v)     { otherInformation = v; }
+        public void setCallIndicator(String v)        { callIndicator    = v; }
+        public void setCallActionCode(String v)       { callActionCode   = v; }
+        public void setCallSubtype(String v)          { callSubtype      = v; }
+        public void setSessionId(String v)            { sessionId        = v; }
+        public void setTypeOfDataExtra(String v)      { typeOfDataExtra  = v; }
+        public void setDurationSeconds(String v)      { durationSeconds  = v; }
+        public void setCellInfo(UliDecoder.CellInfo v){ cellInfo         = v; }
+        public void setCellTower(CellTower v)         { cellTower        = v; }
     }
 }

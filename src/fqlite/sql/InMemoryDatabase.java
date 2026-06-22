@@ -43,6 +43,8 @@ public class InMemoryDatabase {
     private final static String DB_URL = "jdbc:sqlite::memory:";
     private Connection connection;
     private Stage stage;
+    /** The logical database name (= key in {@link DBManager}). */
+    private final String dbName;
 
     /**
      * Constructor. Used to create a new internal database object.
@@ -51,7 +53,7 @@ public class InMemoryDatabase {
      * @param name database name
      */
     public InMemoryDatabase(String name){
-
+        this.dbName = name;
         // create db-connection
         try {
             connection = getConnection(DB_URL);
@@ -66,6 +68,9 @@ public class InMemoryDatabase {
     public Connection getConnectionObject(){
         return connection;
     }
+
+    /** Returns the logical name of this database (= key in {@link DBManager}). */
+    public String getDbName() { return dbName; }
     public Stage getStage(){
         return stage;
     }

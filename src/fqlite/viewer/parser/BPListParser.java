@@ -15,7 +15,8 @@ import java.util.Base64;
 import java.util.List;
 
 /**
- * Parser for Apple Binary Property List format (bplist00 / bplist15 / bplist16).
+ * Parser for Apple Binary Property List format — supports the standard,
+ * documented "bplist00" variant only.
  *
  * Format overview (bplist00):
  *   ┌──────────────────────────────────────────────────────────┐
@@ -30,6 +31,17 @@ import java.util.List;
  * Object encoding:
  *   First byte encodes type (high nibble) and info/count (low nibble).
  *   Counts > 14 use a following INT object to supply the actual count.
+ *
+ * <p><b>bplist15 / bplist16:</b> Es gibt mindestens zwei weitere, von Apple
+ * nicht veröffentlichte Varianten mit dem Magic "bplist15" bzw. "bplist16".
+ * Beide sind intern (CoreFoundation bzw. Foundation/XPC) und strukturell
+ * NICHT mit obigem Format kompatibel — "bplist16" hat z. B. überhaupt
+ * keinen Trailer (Objekte folgen "packed" direkt nach dem Magic) und
+ * zusätzliche, undokumentierte Datentypen (UUID, URL, Sets, NULL). Da es
+ * dafür keine öffentliche Spezifikation gibt, wird hier bewusst NICHT
+ * versucht, diese nach dem bplist00-Schema zu parsen (das würde stillschweigend
+ * falsche Werte liefern) — {@link #parse(byte[])} wirft statt­dessen eine
+ * {@link BPListUnsupportedVersionException}.</p>
  */
 public class BPListParser {
 
@@ -65,8 +77,13 @@ public class BPListParser {
         if (!magic.startsWith("bplist")) {
             throw new BPListParseException("Invalid BPList header (expected 'bplist…')");
         }
-        // We support bplist00 (and treat bplist15/16 the same for scalar objects)
-        // NSKeyedArchiver uses bplist00 always.
+        // Nur bplist00 ist öffentlich spezifiziert (Trailer + Offset-Tabelle
+        // nach CFBinaryPList.c). bplist15/16 sind strukturell anders (siehe
+        // Klassen-Javadoc) und werden bewusst NICHT geraten-geparst.
+        String version = magic.length() >= 8 ? magic.substring(6, 8) : "";
+        if (!version.equals("00")) {
+            throw new BPListUnsupportedVersionException(version);
+        }
 
         if (raw.length < 32) {
             throw new BPListParseException("File too small for a valid BPList trailer");

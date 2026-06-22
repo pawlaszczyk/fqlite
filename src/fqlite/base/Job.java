@@ -16,7 +16,6 @@ import java.util.Collections;
 import java.util.Enumeration;
 import java.util.HashMap;
 import java.util.HashSet;
-// Hashtable import removed — replaced with ConcurrentHashMap throughout
 import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.LinkedList;
@@ -2955,7 +2954,7 @@ public class Job {
 					case JPG  ->  extension = ".jpg";
 					case PDF  ->  extension = ".pdf";
 					case GZIP ->  extension = ".gz";
-					case HEIC ->  extension = ".hic";
+					case HEIC ->  extension = ".heic";
 					case PLIST  -> extension = ".plist";
 					case UNKOWN -> 	extension = ".bin";
 				}

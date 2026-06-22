@@ -9,7 +9,7 @@ plugins {
 
 
 group 'hswm.fqlite'
-version '4.22'
+version '5.0'
 
 def currentOs = org.gradle.internal.os.OperatingSystem.current()
 

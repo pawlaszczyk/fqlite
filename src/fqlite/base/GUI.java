@@ -18,7 +18,7 @@ import javax.swing.*;
 
 import fqlite.descriptor.TableDescriptor;
 import fqlite.export.SQLiteDatabaseCreator;
-import fqlite.nodeql.NodeQlBuilderWindow;
+import fqlite.importer.EtsiXmlImportDialog;
 import fqlite.sqlcipher.*;
 import fqlite.timemap.LocationWindow;
 import fqlite.erm.MermaidHTMLGenerator;
@@ -211,7 +211,6 @@ public class GUI extends Application {
 
 	/* Buttons for toolbar */
 	Button btnSQL;
-	Button btnNodeQL;
 	Button btnLLM;
 	Button btnLocation;
 	Button btnExport;
@@ -226,9 +225,9 @@ public class GUI extends Application {
 	MenuItem mntmExportDB;
 	MenuItem mntmHex;
 	MenuItem mntmSQL;
-	MenuItem mntmNodeQL;
 	MenuItem mntmHTML;
 	MenuItem mntmSchema;
+	MenuItem mntmBinViewer;
 
 	TextFlow hexDumpArea;
 	String hexDumpText;
@@ -367,13 +366,15 @@ public class GUI extends Application {
 		mntmSQL.setDisable(true);
 		mntmSQL.setOnAction(e -> showSqlWindow(null, getDatabaseNode()));
 
-		mntmNodeQL = new MenuItem("NodeQL Builder...");
-		mntmNodeQL.setDisable(true);
-		mntmNodeQL.setOnAction(e -> openNodeQlBuilder());
-
 		mntmHex = new MenuItem("Hex-Viewer...");
 		mntmHex.setDisable(true);
 		mntmHex.setOnAction(e -> openHexViewer());
+
+		// Eigenständiges Analyse-Fenster für Protobuf/BPList/XML/JSON/SEGB/etc.
+		// (Drag&Drop bzw. eigener "Open..."-Dialog im Fenster selbst) — benötigt
+		// keine geöffnete Datenbank, daher nicht Teil der mntm*.setDisable(active)-Gruppe.
+		mntmBinViewer = new MenuItem("BinViewer...");
+		mntmBinViewer.setOnAction(e -> new BinViewer(new Stage()));
 
 		MenuItem mntmHelp = new MenuItem("Help");
 		mntmHelp.setOnAction(e -> showHelp()
@@ -389,7 +390,7 @@ public class GUI extends Application {
 
 		mnFiles.getItems().addAll(mntopen, sep, mntclose, sep2, mntmProp, mntmExit);
 		mnExport.getItems().addAll(cmExport, mntmExportDB, mntmHTML);
-		mnAnalyze.getItems().addAll(mntmSQL, mntmNodeQL, mntmHex, mntmSchema);
+		mnAnalyze.getItems().addAll(mntmSQL, mntmHex, mntmSchema, new SeparatorMenuItem(), mntmBinViewer);
 		mnInfo.getItems().addAll(mntmHelp, mntmLog, mntAbout);
 
 		/* MenuBar */
@@ -559,12 +560,6 @@ public class GUI extends Application {
 		toolBar.getItems().add(btnSQL);
 		btnSQL.setOnAction(e -> showSqlWindow(null, getDatabaseNode()));
 
-		btnNodeQL = new Button("NodeQL");
-		btnNodeQL.setDisable(true);
-		btnNodeQL.setTooltip(new Tooltip("Open NodeQL Builder"));
-		btnNodeQL.setOnAction(e -> openNodeQlBuilder());
-		toolBar.getItems().add(btnNodeQL);
-
 		s = Objects.requireNonNull(GUI.class.getResource("/icon24_reasoning.png")).toExternalForm();
 		btnLLM = new Button();
 		iv = new ImageView(s);
@@ -591,7 +586,7 @@ public class GUI extends Application {
 		btnLocation.setGraphic(iv);
 		btnLocation.setDisable(false);
 		btnLocation.setTooltip(new Tooltip("Show Locations on Map"));
-		//toolBar.getItems().add(btnLocation);
+		toolBar.getItems().add(btnLocation);
 		btnLocation.setOnAction(e -> showMap());
 
 		toolBar.getItems().add(new Separator());
@@ -886,18 +881,94 @@ public class GUI extends Application {
 			return;
 		}
 
+		if(node == null){
+			return;
+		}
+
 		NodeObject nd = node.getValue();
 		String tblname = nd.name;
-
 
 		ObservableList<ObservableList<String>> result = nd.job.resultlist.get(tblname);
 
 		for (TableDescriptor td : nd.job.headers) {
 			if (td.getName().equals(tblname)) {
-				LocationWindow mapview = new LocationWindow(td.getName(),result,td.columnnames);
+
+				LocationWindow mapview = new LocationWindow(td.getName(), result, td.columnnames);
 				Stage configstage = new Stage();
+				configstage.setAlwaysOnTop(true);
+
+				// LLM im Hintergrund initialisieren, falls eine Modell-Konfiguration
+				// vorhanden ist — unabhängig davon ob LLMWindow je geöffnet wurde.
+				initLlmForMapView(mapview);
+
 				mapview.start(configstage);
 			}
+		}
+	}
+
+	/**
+	 * Initialisiert das LLM für das MapView-Fenster im Hintergrund.
+	 * Verwendet getDatabaseNode() — exakt wie showLLMWindow() und prepareLLM().
+	 */
+	private void initLlmForMapView(LocationWindow mapview) {
+
+		// Konfigurationsdatei prüfen — exakt wie in showLLMWindow()
+		if (!Files.exists(Global.llmconfig)) return;
+
+		// Datenbank-Node ermitteln — exakt wie in showLLMWindow()
+		TreeItem<NodeObject> selected = getDatabaseNode();
+		if (selected == null) return;
+
+		Properties props = new Properties();
+		try (InputStream input = new FileInputStream(Global.llmconfig.toFile())) {
+			props.load(input);
+			String model_path = props.getProperty("model_path", Global.llmconfig.toString());
+
+			if (!model_path.isEmpty()) {
+				Path p = Paths.get(model_path);
+
+				if (Files.exists(p)) {
+					final String finalModelPath = model_path;
+					final TreeItem<NodeObject> finalSelected = selected;
+
+					// Hintergrund-Thread: RAGPipeline aufbauen (kann mehrere Sekunden dauern)
+					new Thread(() -> {
+						try {
+							System.out.println("[MapView] Lade LLM für MapView im Hintergrund…");
+
+							// RAGPipeline mit Modellpfad initialisieren — wie in prepareRAG()
+							RAGPipeline pipeline = new RAGPipeline(finalModelPath);
+
+							// InMemoryDatabase ermitteln oder neu anlegen — wie in prepareRAG()
+							String dbname = finalSelected.getValue().name;
+							InMemoryDatabase mdb;
+							if (DBManager.exists(dbname)) {
+								mdb = DBManager.get(dbname);
+							} else {
+								mdb = createInMemoryDB(finalSelected.getValue());
+							}
+
+							if (mdb == null) {
+								System.err.println("[MapView] InMemoryDatabase konnte nicht erstellt werden.");
+								return;
+							}
+
+							// Schema in die Pipeline laden — wie in prepareRAG()
+							pipeline.initializeRetriever(mdb.getConnectionObject());
+
+							// Ins MapView-Fenster einhängen (thread-safe via setRagPipeline)
+							mapview.setRagPipeline(pipeline, mdb);
+
+							System.out.println("[MapView] LLM erfolgreich geladen und mit MapView verbunden.");
+
+						} catch (Exception e) {
+							System.err.println("[MapView] LLM-Initialisierung fehlgeschlagen: " + e.getMessage());
+						}
+					}, "mapview-llm-init").start();
+				}
+			}
+		} catch (IOException | NumberFormatException e) {
+			System.err.println("[MapView] LLM-Konfiguration konnte nicht gelesen werden: " + e.getMessage());
 		}
 	}
 
@@ -1098,27 +1169,6 @@ public class GUI extends Application {
 			});
 		});
 
-	}
-
-	private void openNodeQlBuilder() {
-		if (dbnames.isEmpty()) {
-			Alert alert = new Alert(AlertType.INFORMATION);
-			alert.setTitle("Information");
-			alert.setContentText("You must open at least one database before you can use NodeQL Builder.");
-			alert.showAndWait();
-			return;
-		}
-
-		TreeItem<NodeObject> node = getDatabaseNode();
-		if (node == null || node == root || node.getValue() == null) {
-			Alert alert = new Alert(AlertType.INFORMATION);
-			alert.setTitle("Information");
-			alert.setContentText("Select a database before opening NodeQL Builder.");
-			alert.showAndWait();
-			return;
-		}
-
-		new NodeQlBuilderWindow(this, node, stage).show();
 	}
 
 	private static void showWarning(Stage stage, String details) {
@@ -1364,7 +1414,7 @@ public class GUI extends Application {
 				Global.CSV_SEPARATOR = (String) cvalue;
 			}
 
-				Object lvalue = appProps.get("LOG-LEVEL");
+			Object lvalue = appProps.get("LOG-LEVEL");
 			if (null != lvalue) {
 				Global.LOGLEVEL = Level.parse((String) lvalue);
 			}
@@ -1374,6 +1424,65 @@ public class GUI extends Application {
 
 			if (appProps.containsKey("TIMESTAMP_USE_UTC"))
 				Global.TIMESTAMP_USE_UTC = "true".equals(appProps.getProperty("TIMESTAMP_USE_UTC"));
+
+			// OpenCelliD CSV
+			if (appProps.containsKey("OPENCELLID_CSV")) {
+				String csv = appProps.getProperty("OPENCELLID_CSV");
+				if (csv != null && !csv.isBlank()) {
+					java.nio.file.Path csvPath = Paths.get(csv.trim());
+					if (Files.exists(csvPath)) {
+						fqlite.timemap.CellTowerResolver.getInstance().setCsvPath(csvPath);
+						fqlite.timemap.CellTowerResolver.getInstance().loadAsync();
+						System.out.println("[Config] OpenCelliD CSV geladen: " + csvPath);
+					} else {
+						System.out.println("[Config] OpenCelliD CSV nicht gefunden: " + csvPath);
+					}
+				}
+			}
+
+			// beaconDB Online-Fallback
+			if ("true".equals(appProps.getProperty("BEACONDB_ENABLED"))) {
+				fqlite.timemap.BeaconDbClient.getInstance().setEnabled(true);
+				System.out.println("[Config] beaconDB Online-Fallback aktiviert.");
+			}
+
+			// Lokale TAC-Datenbank
+			if (appProps.containsKey("TACDB_PATH")) {
+				String tacDb = appProps.getProperty("TACDB_PATH");
+				if (tacDb != null && !tacDb.isBlank()) {
+					java.nio.file.Path tacDbPath = Paths.get(tacDb.trim());
+					if (Files.exists(tacDbPath)) {
+						fqlite.timemap.TacLocalDatabase.getInstance().setFilePath(tacDbPath);
+						fqlite.timemap.TacLocalDatabase.getInstance().loadAsync();
+						System.out.println("[Config] Lokale TAC-Datenbank geladen: " + tacDbPath);
+					} else {
+						System.out.println("[Config] Lokale TAC-Datenbank nicht gefunden: " + tacDbPath);
+					}
+				}
+			}
+
+			// IMEI/TAC-Gerätelookup (HiCellTek)
+			if (appProps.containsKey("TACLOOKUP_APIKEY")) {
+				fqlite.timemap.TacLookupService.setApiKey(appProps.getProperty("TACLOOKUP_APIKEY"));
+			}
+			if ("true".equals(appProps.getProperty("TACLOOKUP_ENABLED"))) {
+				fqlite.timemap.TacLookupService.setEnabled(true);
+				System.out.println("[Config] IMEI/TAC-Gerätelookup (HiCellTek) aktiviert.");
+			}
+
+			// MBTiles Offline-Karte
+			if (appProps.containsKey("MBTILES_PATH")) {
+				String mbt = appProps.getProperty("MBTILES_PATH");
+				if (mbt != null && !mbt.isBlank()) {
+					java.nio.file.Path mbtPath = Paths.get(mbt.trim());
+					if (Files.exists(mbtPath)) {
+						fqlite.timemap.TileCache.getInstance().setMbTilesPath(mbtPath);
+						System.out.println("[Config] MBTiles Offline-Karte gesetzt: " + mbtPath);
+					} else {
+						System.out.println("[Config] MBTiles-Datei nicht gefunden: " + mbtPath);
+					}
+				}
+			}
 
 			//Object fn = appProps.get("font_name");
 			//if (null != fn) {
@@ -2617,7 +2726,6 @@ public class GUI extends Application {
 
 			btnLLM.setDisable(active);
 			btnSQL.setDisable(active);
-			btnNodeQL.setDisable(active);
 			btnFTS.setDisable(active);
 			btnExport.setDisable(active);
 			btnExportDB.setDisable(active);
@@ -2629,16 +2737,47 @@ public class GUI extends Application {
 			mntmExportDB.setDisable(active);
 			mntmHex.setDisable(active);
 			mntmSQL.setDisable(active);
-			mntmNodeQL.setDisable(active);
 			mntmSchema.setDisable(active);
 			mntmHTML.setDisable(active);
 		});
 	}
 
 	/**
+	 * Derives a free (non-existing) target path for the SQLite database
+	 * that is created when importing an ETSI Retained Data XML file. The
+	 * database is placed next to the XML file and named after it, e.g.
+	 * {@code daten.xml -> daten.sqlite}. If that name is already taken,
+	 * a numeric suffix is appended.
+	 *
+	 * @param xmlFile the source XML file
+	 * @return a non-existing target file for the converted SQLite database
+	 */
+	private File deriveSqliteTargetForXml(File xmlFile) {
+		String base = xmlFile.getName();
+		int dot = base.lastIndexOf('.');
+		if (dot > 0) {
+			base = base.substring(0, dot);
+		}
+		File parent = xmlFile.getParentFile();
+
+		File target = new File(parent, base + ".sqlite");
+		int counter = 1;
+		while (target.exists()) {
+			target = new File(parent, base + "_" + counter + ".sqlite");
+			counter++;
+		}
+		return target;
+	}
+
+	/**
 	 * Show an open dialog and import <code>sqlite</code>-file.
 	 * After selecting a file, the import will be automatically
 	 * started.
+	 *
+	 * <p>If the selected (or dropped) file is an ETSI Retained Data XML
+	 * export (TS 102 657), it is automatically converted into a SQLite
+	 * database first (see {@link fqlite.importer.EtsiXmlImportDialog}), and
+	 * the resulting database is opened/imported as usual.
 	 *
 	 */
 	public synchronized void open_db(File f){
@@ -2663,6 +2802,7 @@ public class GUI extends Application {
 					new FileChooser.ExtensionFilter("<all>", "*.*")
 					, new FileChooser.ExtensionFilter(".sqlite", "*.sqlite")
 					, new FileChooser.ExtensionFilter(".db", "*.db")
+					, new FileChooser.ExtensionFilter(".xml (ETSI Retained Data)", "*.xml")
 			);
 			file = fileChooser.showOpenDialog(this.stage);
 			if (file != null) {
@@ -2673,6 +2813,21 @@ public class GUI extends Application {
 
 		if (file == null)
 			return;
+
+		/*
+		 * ETSI Retained Data XML export (TS 102 657): convert it into a
+		 * SQLite database first, then continue opening the converted
+		 * database as usual. The conversion runs automatically -- no
+		 * further user interaction is required besides the progress dialog.
+		 */
+		if (file.getName().toLowerCase(Locale.ROOT).endsWith(".xml")) {
+			File targetDb = deriveSqliteTargetForXml(file);
+			File converted = EtsiXmlImportDialog.show(this.stage, file, targetDb);
+			if (converted == null) {
+				return;
+			}
+			file = converted;
+		}
 
 		/* Check if this database is already loaded */
 		final String canonicalPath;
@@ -2739,28 +2894,28 @@ public class GUI extends Application {
 			System.out.println(plainDb);
 			file = plainDb;
 
-            try {
-                SQLCipherForensicExport.Result result =
+			try {
+				SQLCipherForensicExport.Result result =
 
-                        SQLCipherForensicExport.exportAll(
-                                dbFile,
-                                new File(dbFile.getParent()),
-                                params,
-                                (current, total) -> {});
-            } catch (Exception e) {
-                throw new RuntimeException(e);
-            }
+						SQLCipherForensicExport.exportAll(
+								dbFile,
+								new File(dbFile.getParent()),
+								params,
+								(current, total) -> {});
+			} catch (Exception e) {
+				throw new RuntimeException(e);
+			}
 
 
 			// WAL und Journal werden automatisch erkannt und verarbeitet
 			//if (result.walDb() != null) {
-				// WAL war vorhanden – merged DB öffnen
+			// WAL war vorhanden – merged DB öffnen
 			//	loadDatabase(result.walDb());
 			//} else {
 			//	loadDatabase(result.mainDb());
 			//}
 
-        }
+		}
 
 
 		RandomAccessFile raf = null;
