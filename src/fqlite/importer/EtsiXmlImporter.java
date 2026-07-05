@@ -23,6 +23,7 @@ import java.time.LocalDateTime;
 import java.time.OffsetDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.logging.Logger;
@@ -41,17 +42,36 @@ import java.util.regex.Pattern;
 /// @author D. Pawlaszczyk
 public class EtsiXmlImporter {
 
-    /** Namespace of the ETSI RetainedData XML schema (TS 102 657 v1.28.1). */
+    /**
+     * Namespace of the ETSI RetainedData XML schema (TS 102 657 v1.28.1).
+     *
+     * <p><b>Not used to restrict element matching</b> (see
+     * {@link #firstChildByTag}/{@link #findDescendant}): real-world exports
+     * have also been seen under {@code v1.26.1} with an otherwise identical
+     * structure, so all lookups in this class match on local element name
+     * only, regardless of namespace/schema version. Kept around purely for
+     * documentation/reference.</p>
+     */
     public static final String NS_URI = "http://uri.etsi.org/02657/v1.28.1#/RetainedData";
 
     private static final Logger LOG = Logger.getLogger(EtsiXmlImporter.class.getName());
 
     private EtsiXmlImporter() { /* utility class */ }
 
-    /** Reports import progress in terms of processed / total response records. */
+    /** Reports import progress in terms of processed / total response records (per file). */
     @FunctionalInterface
     public interface ProgressCallback {
         void onProgress(int current, int total);
+    }
+
+    /**
+     * Reports that import of a new file (out of a batch) has started, so a
+     * caller importing several files into one database can show which file
+     * is currently being read.
+     */
+    @FunctionalInterface
+    public interface FileProgressCallback {
+        void onFileStart(int fileIndex, int fileCount, String fileName);
     }
 
     // ------------------------------------------------------------------
@@ -105,7 +125,27 @@ public class EtsiXmlImporter {
                     "cell_lac_tac INTEGER," +
                     "cell_ci INTEGER," +
                     "device_brand TEXT," +
-                    "device_model TEXT)",
+                    "device_model TEXT," +
+                    // The following columns cover the tKG96-style otherInformation shape
+                    // (e.g. "A_PRIVATE_IPV4"="...";"DATENSATZART"="2";"CTT"="63";"type"="9";
+                    // "serviceName"="Datendienst"), seen alongside the older, smaller
+                    // Call-Indikator/Call-Action-Code/Call-Subtype/Session-ID key set that
+                    // call_indicator/call_action_code/call_subtype/session_id above already
+                    // cover. See bindRecord() for the extraction.
+                    "a_private_ipv4 TEXT," +
+                    "a_public_ipv6 TEXT," +
+                    "datensatzart TEXT," +
+                    "ctt TEXT," +
+                    "service_type_code TEXT," +
+                    "data_type TEXT," +
+                    "suppl_services TEXT," +
+                    "service_name TEXT," +
+                    "a_party_cell_other_hsrs TEXT," +
+                    "offset_beginn INTEGER," +
+                    "offset_ende INTEGER," +
+                    "quelle TEXT," +
+                    "beam_width INTEGER," +
+                    "source_file TEXT)",
 
             "CREATE INDEX IF NOT EXISTS idx_msisdn ON response_records(msisdn)",
             "CREATE INDEX IF NOT EXISTS idx_imsi ON response_records(imsi)",
@@ -113,7 +153,8 @@ public class EtsiXmlImporter {
             "CREATE INDEX IF NOT EXISTS idx_start_time ON response_records(start_time)",
             "CREATE INDEX IF NOT EXISTS idx_end_time ON response_records(end_time)",
             "CREATE INDEX IF NOT EXISTS idx_apn ON response_records(apn)",
-            "CREATE INDEX IF NOT EXISTS idx_cell ON response_records(cell_mcc, cell_mnc, cell_lac_tac, cell_ci)"
+            "CREATE INDEX IF NOT EXISTS idx_cell ON response_records(cell_mcc, cell_mnc, cell_lac_tac, cell_ci)",
+            "CREATE INDEX IF NOT EXISTS idx_source_file ON response_records(source_file)"
     };
 
     private static final String INSERT_RECORD_SQL =
@@ -124,8 +165,11 @@ public class EtsiXmlImporter {
                     "user_location_info, imsi, msisdn, apn, other_information, " +
                     "call_indicator, call_action_code, call_subtype, session_id, type_of_data_extra, " +
                     "nat_country_code, nat_header_id, type_of_data, party_role, " +
-                    "cell_mcc, cell_mnc, cell_lac_tac, cell_ci, device_brand, device_model" +
-                    ") VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)";
+                    "cell_mcc, cell_mnc, cell_lac_tac, cell_ci, device_brand, device_model, " +
+                    "a_private_ipv4, a_public_ipv6, datensatzart, ctt, service_type_code, data_type, " +
+                    "suppl_services, service_name, a_party_cell_other_hsrs, offset_beginn, offset_ende, quelle, " +
+                    "beam_width, source_file" +
+                    ") VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)";
 
     private static final int BATCH_SIZE = 500;
 
@@ -137,18 +181,42 @@ public class EtsiXmlImporter {
      * Reads the given ETSI RetainedData XML file and imports all
      * {@code ResponseRecord} entries into a freshly created SQLite database.
      *
+     * <p>Convenience wrapper around {@link #importXmlFilesToSqlite} for the
+     * common single-file case.</p>
+     *
      * @param xmlFile    the ETSI XML file to import
      * @param dbFile     target SQLite database (will be created/overwritten)
      * @param onProgress optional progress callback, may be {@code null}
      * @throws Exception on any parsing / database error
      */
     public static void importXmlToSqlite(File xmlFile, File dbFile, ProgressCallback onProgress) throws Exception {
+        importXmlFilesToSqlite(List.of(xmlFile), dbFile, null, onProgress);
+    }
 
-        DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
-        factory.setNamespaceAware(true);
-        DocumentBuilder builder = factory.newDocumentBuilder();
-        Document doc = builder.parse(xmlFile);
-        Element root = doc.getDocumentElement();
+    /**
+     * Reads one or more ETSI RetainedData XML files and imports all of their
+     * {@code ResponseRecord} entries into a single, freshly created SQLite
+     * database (rather than one database per file).
+     *
+     * <p>Each imported row's {@code source_file} column is set to the name
+     * of the XML file it came from (without its file extension), so the
+     * origin of every single record stays identifiable even after merging
+     * several requests into one database.</p>
+     *
+     * @param xmlFiles    the ETSI XML files to import, in order
+     * @param dbFile      target SQLite database (will be created/overwritten)
+     * @param onFileStart optional callback fired once per file, before it is
+     *                    read; may be {@code null}
+     * @param onProgress  optional progress callback, fired per file with
+     *                     that file's own record count; may be {@code null}
+     * @throws Exception on any parsing / database error
+     */
+    public static void importXmlFilesToSqlite(List<File> xmlFiles, File dbFile, FileProgressCallback onFileStart,
+            ProgressCallback onProgress) throws Exception {
+
+        if (xmlFiles == null || xmlFiles.isEmpty()) {
+            throw new IllegalArgumentException("xmlFiles must not be empty");
+        }
 
         Class.forName("org.sqlite.JDBC");
 
@@ -168,38 +236,63 @@ public class EtsiXmlImporter {
 
             conn.setAutoCommit(false);
 
-            long requestId = importRequestMetadata(conn, root);
+            int fileCount = xmlFiles.size();
+            for (int fi = 0; fi < fileCount; fi++) {
+                File xmlFile = xmlFiles.get(fi);
+                if (onFileStart != null) {
+                    onFileStart.onFileStart(fi + 1, fileCount, xmlFile.getName());
+                }
 
-            NodeList records = root.getElementsByTagNameNS(NS_URI, "ResponseRecord");
-            int total = records.getLength();
+                DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
+                factory.setNamespaceAware(true);
+                DocumentBuilder builder = factory.newDocumentBuilder();
+                Document doc = builder.parse(xmlFile);
+                Element root = doc.getDocumentElement();
 
-            try (PreparedStatement ps = conn.prepareStatement(INSERT_RECORD_SQL)) {
-                int pending = 0;
-                for (int i = 0; i < total; i++) {
-                    // A single ResponseRecord can yield more than one row: voice-call/
-                    // SMS records carry one row per party leg (A-/B-Teilnehmer), see
-                    // bindRecord(). addBatch() is called inside bindRecord() itself for
-                    // each row produced, not here.
-                    pending += bindRecord(ps, requestId, (Element) records.item(i));
+                long requestId = importRequestMetadata(conn, root);
+                String sourceFile = stripExtension(xmlFile.getName());
 
-                    if (pending >= BATCH_SIZE) {
-                        ps.executeBatch();
-                        pending = 0;
-                        if (onProgress != null) {
-                            onProgress.onProgress(i + 1, total);
+                // "*" rather than NS_URI: real-world exports use different
+                // schema versions (e.g. v1.26.1 vs. v1.28.1) under different
+                // namespace URIs -- see firstChildByTag()/findDescendant()
+                // below for why matching is namespace-agnostic throughout.
+                NodeList records = root.getElementsByTagNameNS("*", "ResponseRecord");
+                int total = records.getLength();
+
+                try (PreparedStatement ps = conn.prepareStatement(INSERT_RECORD_SQL)) {
+                    int pending = 0;
+                    for (int i = 0; i < total; i++) {
+                        // A single ResponseRecord can yield more than one row: voice-call/
+                        // SMS records carry one row per party leg (A-/B-Teilnehmer), see
+                        // bindRecord(). addBatch() is called inside bindRecord() itself for
+                        // each row produced, not here.
+                        pending += bindRecord(ps, requestId, (Element) records.item(i), sourceFile);
+
+                        if (pending >= BATCH_SIZE) {
+                            ps.executeBatch();
+                            pending = 0;
+                            if (onProgress != null) {
+                                onProgress.onProgress(i + 1, total);
+                            }
                         }
                     }
+                    if (pending > 0) {
+                        ps.executeBatch();
+                    }
                 }
-                if (pending > 0) {
-                    ps.executeBatch();
-                }
-            }
 
-            conn.commit();
-            if (onProgress != null) {
-                onProgress.onProgress(total, total);
+                conn.commit();
+                if (onProgress != null) {
+                    onProgress.onProgress(total, total);
+                }
             }
         }
+    }
+
+    /** Strips the last {@code "."}-delimited extension off a file name, if any. */
+    private static String stripExtension(String fileName) {
+        int dot = fileName.lastIndexOf('.');
+        return dot > 0 ? fileName.substring(0, dot) : fileName;
     }
 
     // ------------------------------------------------------------------
@@ -214,6 +307,8 @@ public class EtsiXmlImporter {
         String requestNumber = findText(header, "requestID/requestNumber");
         String cspId = findText(header, "cSPID");
         String timestamp = findText(header, "timeStamp");
+
+        if (requestNumber == null || cspId == null || timestamp == null) { return -1; }
 
         try (PreparedStatement ps = conn.prepareStatement(
                 "INSERT OR IGNORE INTO request_metadata " +
@@ -270,7 +365,7 @@ public class EtsiXmlImporter {
      *   {@link #bindPartyLegRow}, one row per party leg.</li>
      * </ul>
      */
-    private static int bindRecord(PreparedStatement ps, long requestId, Element rec) throws SQLException {
+    private static int bindRecord(PreparedStatement ps, long requestId, Element rec, String sourceFile) throws SQLException {
 
         final String tsuPath = "recordPayload/telephonyRecord/telephonyServiceUsage";
 
@@ -281,8 +376,32 @@ public class EtsiXmlImporter {
         String callIndicator = oi.get("Call Indikator");
         String callActionCode = oi.get("Call Action Code");
         String callSubtype = oi.get("Call Subtype");
-        String sessionId = oi.get("Session Id");
+        // Key spelling varies between export versions: "Session Id" (space,
+        // seen in v1.28.1 exports) vs. "Session-ID" (hyphen, seen in
+        // v1.26.1 exports) -- accept either so the column isn't silently
+        // left NULL depending on which schema version produced the file.
+        String sessionId = oi.containsKey("Session Id") ? oi.get("Session Id") : oi.get("Session-ID");
         String typeOfDataExtra = oi.get("TypeOfData");
+
+        // tKG96-style otherInformation carries a larger key set on top of the
+        // four above (seen in real-world exports, e.g. mobile-data/roaming
+        // sessions: APN/domain, private/public IP, internal record-type
+        // codes, and a human-readable service name). Not every export uses
+        // these — oi.get() returns null for keys that aren't present, which
+        // is exactly what's wanted here.
+        String aDomainSpvApn = oi.get("A_DOMAIN_SPV_APN");
+        String aPrivateIpv4 = oi.get("A_PRIVATE_IPV4");
+        String aPublicIpv6 = oi.get("A_PUPLIC_IPV6");
+        String datensatzart = oi.get("DATENSATZART");
+        String ctt = oi.get("CTT");
+        String serviceTypeCode = oi.get("type");
+        String dataType = oi.get("dataType");
+        String supplServices = oi.get("suppl_Services");
+        String serviceName = oi.get("serviceName");
+        String aPartyCellOtherHSRs = oi.get("aPartyCellOtherHSRs");
+        Integer offsetBeginn = parseIntOrNull(oi.get("Offset Beginn"));
+        Integer offsetEnde = parseIntOrNull(oi.get("Offset Ende"));
+        String quelle = oi.get("Quelle");
 
         String natCc2 = findText(rec, "nationalRecordPayload/countryCode");
         String natHid2 = findText(rec, "nationalRecordPayload/headerID");
@@ -293,7 +412,9 @@ public class EtsiXmlImporter {
         if (ntsuElem != null) {
             bindNationalUsageRow(ps, requestId, rec, tsuPath, ntsuElem, recordNumber, otherInfo,
                     callIndicator, callActionCode, callSubtype, sessionId, typeOfDataExtra,
-                    natCc2, natHid2, typeOfData);
+                    natCc2, natHid2, typeOfData, aDomainSpvApn, aPrivateIpv4, aPublicIpv6, datensatzart, ctt,
+                    serviceTypeCode, dataType, supplServices, serviceName, aPartyCellOtherHSRs,
+                    offsetBeginn, offsetEnde, quelle, sourceFile);
             return 1;
         }
 
@@ -308,7 +429,9 @@ public class EtsiXmlImporter {
                 if (!"TelephonyPartyInformation".equals(party.getLocalName())) continue;
                 bindPartyLegRow(ps, requestId, party, recordNumber, otherInfo,
                         callIndicator, callActionCode, callSubtype, sessionId, typeOfDataExtra,
-                        natCc2, natHid2, typeOfData);
+                        natCc2, natHid2, typeOfData, aDomainSpvApn, aPrivateIpv4, aPublicIpv6, datensatzart, ctt,
+                        serviceTypeCode, dataType, supplServices, serviceName, aPartyCellOtherHSRs,
+                        offsetBeginn, offsetEnde, quelle, sourceFile);
                 rows++;
             }
         }
@@ -323,8 +446,10 @@ public class EtsiXmlImporter {
                     + "— importing it with no location/identifiers.");
             writeRow(ps, requestId, recordNumber, null, null, null, null, null, null, null, null,
                     null, null, null, null, null, null, null,
-                    null, null, null, otherInfo, callIndicator, callActionCode, callSubtype,
-                    sessionId, typeOfDataExtra, natCc2, natHid2, typeOfData, null);
+                    null, null, aDomainSpvApn, otherInfo, callIndicator, callActionCode, callSubtype,
+                    sessionId, typeOfDataExtra, natCc2, natHid2, typeOfData, null,
+                    aPrivateIpv4, aPublicIpv6, datensatzart, ctt, serviceTypeCode, dataType, supplServices,
+                    serviceName, aPartyCellOtherHSRs, offsetBeginn, offsetEnde, quelle, /* beamWidth */ null, sourceFile);
             rows = 1;
         }
         return rows;
@@ -334,7 +459,10 @@ public class EtsiXmlImporter {
     private static void bindNationalUsageRow(PreparedStatement ps, long requestId, Element rec, String tsuPath,
             Element ntsuElem, Integer recordNumber, String otherInfo, String callIndicator, String callActionCode,
             String callSubtype, String sessionId, String typeOfDataExtra, String natCc2, String natHid2,
-            String typeOfData) throws SQLException {
+            String typeOfData, String aDomainSpvApn, String aPrivateIpv4, String aPublicIpv6, String datensatzart,
+            String ctt, String serviceTypeCode, String dataType, String supplServices, String serviceName,
+            String aPartyCellOtherHSRs, Integer offsetBeginn, Integer offsetEnde, String quelle, String sourceFile)
+            throws SQLException {
 
         Element partyElem = findElement(rec, tsuPath + "/partyInformation/TelephonyPartyInformation/partyType");
         String partyType = firstChildLocalName(partyElem);
@@ -373,8 +501,15 @@ public class EtsiXmlImporter {
         String latRaw = findText(rec, ia + "/location/extendedLocation/spot/gsmLocation/geoCoordinates/latitude");
         String lonRaw = findText(rec, ia + "/location/extendedLocation/spot/gsmLocation/geoCoordinates/longitude");
         Element datumElem = findElement(rec, ia + "/location/extendedLocation/spot/gsmLocation/geoCoordinates/mapDatum");
-        String datum = firstChildLocalName(datumElem);
         Integer azimuth = parseIntOrNull(findText(rec, ia + "/location/extendedLocation/spot/gsmLocation/geoCoordinates/azimuth"));
+        // Fallback: some providers encode location in decimal degrees (<geoCoordinatesDec>) instead of DMS (<geoCoordinates>)
+        if (latRaw == null) {
+            final String locDec = ia + "/location/extendedLocation/spot/gsmLocation/geoCoordinatesDec";
+            latRaw = findText(rec, locDec + "/latitudeDec");
+            lonRaw = findText(rec, locDec + "/longitudeDec");
+            if (datumElem == null) datumElem = findElement(rec, locDec + "/mapDatum");
+            if (azimuth == null) azimuth = parseIntOrNull(findText(rec, locDec + "/azimuth"));
+        }
         String uli = findText(rec, ia + "/location/userLocationInformation");
 
         // iMSI/mSISDN/aPN live under a branch-specific identity container
@@ -389,14 +524,64 @@ public class EtsiXmlImporter {
         if (imsi == null) imsi = findDescendantText(branchElem, "iMSI");
         if (msisdn == null) msisdn = findDescendantText(branchElem, "mSISDN");
         if (apn == null) apn = findDescendantText(branchElem, "aPN");
+        // tKG96-style exports carry the APN/domain in otherInformation
+        // ("A_DOMAIN_SPV_APN") instead of (or in addition to) the XML
+        // gprsInformation/aPN element -- only used when the XML element
+        // itself didn't supply a value, never overwrites it.
+        if (apn == null) apn = aDomainSpvApn;
 
-        Double latDec = parseDmsCoordinate(latRaw);
-        Double lonDec = parseDmsCoordinate(lonRaw);
+        // Hybrid shape confirmed in real-world v1.26.1 exports: the
+        // internetAccess branch only ever carries naDeviceId/gprsInformation
+        // (iMSI/aPN) and has NO interval/location children at all (verified:
+        // 1327/1327 internetAccess elements in a real sample file had zero
+        // inline <location>). The actual session timing and cell location for
+        // these records instead live in a sibling partyInformation/
+        // TelephonyPartyInformation element under the same telephonyServiceUsage
+        // -- the very same element/paths bindPartyLegRow() below reads for the
+        // voice/SMS shape. Without this fallback, start_time/end_time/duration/
+        // lat/lon/uli (and the derived cell_* columns) stayed NULL for ~94% of
+        // that file's records even after the namespace fix, with no exception
+        // to flag it. Only fills in what internetAccess didn't already provide.
+        Element hybridParty = findElement(rec, tsuPath + "/partyInformation/TelephonyPartyInformation");
+        if (hybridParty != null) {
+            final String hloc = "detailedLocation/cellInformation";
+            if (start == null) start = parseEtsiTimestamp(findText(hybridParty, "communicationTime/startTime"));
+            if (end == null) end = parseEtsiTimestamp(findText(hybridParty, "communicationTime/endTime"));
+            if (duration == null) duration = parseIntOrNull(findText(hybridParty, "communicationTime/durationTime"));
+            if (latRaw == null) latRaw = findText(hybridParty, hloc + "/extendedLocation/spot/gsmLocation/geoCoordinates/latitude");
+            if (lonRaw == null) lonRaw = findText(hybridParty, hloc + "/extendedLocation/spot/gsmLocation/geoCoordinates/longitude");
+            if (datumElem == null) datumElem = findElement(hybridParty, hloc + "/extendedLocation/spot/gsmLocation/geoCoordinates/mapDatum");
+            if (azimuth == null) azimuth = parseIntOrNull(findText(hybridParty, hloc + "/extendedLocation/spot/gsmLocation/geoCoordinates/azimuth"));
+            // Fallback: decimal degrees
+            if (latRaw == null) {
+                final String hlocDec = hloc + "/extendedLocation/spot/gsmLocation/geoCoordinatesDec";
+                latRaw = findText(hybridParty, hlocDec + "/latitudeDec");
+                lonRaw = findText(hybridParty, hlocDec + "/longitudeDec");
+                if (datumElem == null) datumElem = findElement(hybridParty, hlocDec + "/mapDatum");
+                if (azimuth == null) azimuth = parseIntOrNull(findText(hybridParty, hlocDec + "/azimuth"));
+            }
+            if (uli == null) uli = findText(hybridParty, hloc + "/userLocationInformation");
+            if (deviceId == null) deviceId = findText(hybridParty, "iMEI");
+            if (imsi == null) imsi = findText(hybridParty, "iMSI");
+            if (msisdn == null) msisdn = findText(hybridParty, "partyNumber");
+        }
+        String datum = firstChildLocalName(datumElem);
+        // beamWidth lives under detailedLocation/transmitterDetails, a sibling of
+        // cellInformation. Present only in the hybrid/partyInformation shape;
+        // the pure internetAccess-only shape has no detailedLocation at all.
+        Integer beamWidth = (hybridParty != null)
+                ? parseIntOrNull(findText(hybridParty, "detailedLocation/transmitterDetails/beamWidth"))
+                : null;
+
+        Double latDec = parseAnyCoordinate(latRaw);
+        Double lonDec = parseAnyCoordinate(lonRaw);
 
         writeRow(ps, requestId, recordNumber, partyType, natCc, natHid, nwAccess, start, end, duration, deviceId,
                 latRaw, lonRaw, latDec, lonDec, datum, azimuth, uli, imsi, msisdn, apn, otherInfo,
                 callIndicator, callActionCode, callSubtype, sessionId, typeOfDataExtra, natCc2, natHid2,
-                typeOfData, /* partyRole */ null);
+                typeOfData, /* partyRole */ null,
+                aPrivateIpv4, aPublicIpv6, datensatzart, ctt, serviceTypeCode, dataType, supplServices,
+                serviceName, aPartyCellOtherHSRs, offsetBeginn, offsetEnde, quelle, beamWidth, sourceFile);
     }
 
     /**
@@ -407,7 +592,10 @@ public class EtsiXmlImporter {
      */
     private static void bindPartyLegRow(PreparedStatement ps, long requestId, Element party, Integer recordNumber,
             String otherInfo, String callIndicator, String callActionCode, String callSubtype, String sessionId,
-            String typeOfDataExtra, String natCc2, String natHid2, String typeOfData) throws SQLException {
+            String typeOfDataExtra, String natCc2, String natHid2, String typeOfData, String aDomainSpvApn,
+            String aPrivateIpv4, String aPublicIpv6, String datensatzart, String ctt, String serviceTypeCode,
+            String dataType, String supplServices, String serviceName, String aPartyCellOtherHSRs,
+            Integer offsetBeginn, Integer offsetEnde, String quelle, String sourceFile) throws SQLException {
 
         String partyRole = firstChildLocalName(findElement(party, "partyRole"));
 
@@ -428,12 +616,21 @@ public class EtsiXmlImporter {
         String latRaw = findText(party, loc + "/extendedLocation/spot/gsmLocation/geoCoordinates/latitude");
         String lonRaw = findText(party, loc + "/extendedLocation/spot/gsmLocation/geoCoordinates/longitude");
         Element datumElem = findElement(party, loc + "/extendedLocation/spot/gsmLocation/geoCoordinates/mapDatum");
-        String datum = firstChildLocalName(datumElem);
         Integer azimuth = parseIntOrNull(findText(party, loc + "/extendedLocation/spot/gsmLocation/geoCoordinates/azimuth"));
+        // Fallback: decimal degrees
+        if (latRaw == null) {
+            final String locDec = loc + "/extendedLocation/spot/gsmLocation/geoCoordinatesDec";
+            latRaw = findText(party, locDec + "/latitudeDec");
+            lonRaw = findText(party, locDec + "/longitudeDec");
+            if (datumElem == null) datumElem = findElement(party, locDec + "/mapDatum");
+            if (azimuth == null) azimuth = parseIntOrNull(findText(party, locDec + "/azimuth"));
+        }
+        String datum = firstChildLocalName(datumElem);
         String uli = findText(party, loc + "/userLocationInformation");
 
-        Double latDec = parseDmsCoordinate(latRaw);
-        Double lonDec = parseDmsCoordinate(lonRaw);
+        Double latDec = parseAnyCoordinate(latRaw);
+        Double lonDec = parseAnyCoordinate(lonRaw);
+        Integer beamWidth = parseIntOrNull(findText(party, "detailedLocation/transmitterDetails/beamWidth"));
 
         // No nationalTelephonyServiceUsage/nwAccessType exists for this shape;
         // derive a readable equivalent from the party role instead so
@@ -449,10 +646,17 @@ public class EtsiXmlImporter {
             nwAccess = partyRole;
         }
 
+        // No gprsInformation/aPN element exists for this shape, but tKG96-style
+        // exports can still carry the APN/domain in otherInformation
+        // ("A_DOMAIN_SPV_APN") -- use it the same way bindNationalUsageRow does.
+        String apn = aDomainSpvApn;
+
         writeRow(ps, requestId, recordNumber, partyType, /* natCc */ null, /* natHid */ null, nwAccess, start, end,
                 duration, deviceId, latRaw, lonRaw, latDec, lonDec, datum, azimuth, uli, imsi, msisdn,
-                /* apn */ null, otherInfo, callIndicator, callActionCode, callSubtype, sessionId, typeOfDataExtra,
-                natCc2, natHid2, typeOfData, partyRole);
+                apn, otherInfo, callIndicator, callActionCode, callSubtype, sessionId, typeOfDataExtra,
+                natCc2, natHid2, typeOfData, partyRole,
+                aPrivateIpv4, aPublicIpv6, datensatzart, ctt, serviceTypeCode, dataType, supplServices,
+                serviceName, aPartyCellOtherHSRs, offsetBeginn, offsetEnde, quelle, beamWidth, sourceFile);
     }
 
     /**
@@ -480,7 +684,10 @@ public class EtsiXmlImporter {
             String deviceId, String latRaw, String lonRaw, Double latDec, Double lonDec, String datum,
             Integer azimuth, String uli, String imsi, String msisdn, String apn, String otherInfo,
             String callIndicator, String callActionCode, String callSubtype, String sessionId,
-            String typeOfDataExtra, String natCc2, String natHid2, String typeOfData, String partyRole)
+            String typeOfDataExtra, String natCc2, String natHid2, String typeOfData, String partyRole,
+            String aPrivateIpv4, String aPublicIpv6, String datensatzart, String ctt, String serviceTypeCode,
+            String dataType, String supplServices, String serviceName, String aPartyCellOtherHSRs,
+            Integer offsetBeginn, Integer offsetEnde, String quelle, Integer beamWidth, String sourceFile)
             throws SQLException {
 
         UliDecoder.CellInfo cellInfo = UliDecoder.decode(uli);
@@ -529,7 +736,21 @@ public class EtsiXmlImporter {
         setNullableInt(ps, idx++, cellLacTac);
         setNullableInt(ps, idx++, cellCi);
         setNullableString(ps, idx++, deviceBrand);
-        setNullableString(ps, idx, deviceModel);
+        setNullableString(ps, idx++, deviceModel);
+        setNullableString(ps, idx++, aPrivateIpv4);
+        setNullableString(ps, idx++, aPublicIpv6);
+        setNullableString(ps, idx++, datensatzart);
+        setNullableString(ps, idx++, ctt);
+        setNullableString(ps, idx++, serviceTypeCode);
+        setNullableString(ps, idx++, dataType);
+        setNullableString(ps, idx++, supplServices);
+        setNullableString(ps, idx++, serviceName);
+        setNullableString(ps, idx++, aPartyCellOtherHSRs);
+        setNullableInt(ps, idx++, offsetBeginn);
+        setNullableInt(ps, idx++, offsetEnde);
+        setNullableString(ps, idx++, quelle);
+        setNullableInt(ps, idx++, beamWidth);
+        setNullableString(ps, idx, sourceFile);
         ps.addBatch();
     }
 
@@ -561,6 +782,20 @@ public class EtsiXmlImporter {
         return text.isEmpty() ? null : text;
     }
 
+    /**
+     * Matches purely on the element's local name, ignoring its namespace
+     * URI. Real-world ETSI exports have been observed under at least two
+     * different schema versions/namespaces ({@code v1.26.1} and
+     * {@code v1.28.1}, confirmed against actual exports rather than the
+     * XSD alone), with otherwise-identical element structure. Since every
+     * lookup here already follows an explicit "/"-separated path of local
+     * element names (see {@link #findElement}), matching on local name
+     * alone is enough to resolve the right element regardless of which
+     * schema version produced the document — and avoids every field
+     * silently coming back {@code null} (as happened for {@code v1.26.1}
+     * exports while this matched strictly against the {@code v1.28.1}
+     * {@link #NS_URI}).
+     */
     private static Element firstChildByTag(Element parent, String localName) {
         if (parent == null) return null;
         NodeList children = parent.getChildNodes();
@@ -568,7 +803,7 @@ public class EtsiXmlImporter {
             Node n = children.item(i);
             if (n.getNodeType() == Node.ELEMENT_NODE) {
                 Element e = (Element) n;
-                if (localName.equals(e.getLocalName()) && NS_URI.equals(e.getNamespaceURI())) {
+                if (localName.equals(e.getLocalName())) {
                     return e;
                 }
             }
@@ -593,7 +828,7 @@ public class EtsiXmlImporter {
             Node n = children.item(i);
             if (n.getNodeType() != Node.ELEMENT_NODE) continue;
             Element e = (Element) n;
-            if (localName.equals(e.getLocalName()) && NS_URI.equals(e.getNamespaceURI())) {
+            if (localName.equals(e.getLocalName())) {
                 return e;
             }
             Element found = findDescendant(e, localName);
@@ -700,15 +935,29 @@ public class EtsiXmlImporter {
         String digits = raw.substring(1);
         int deg, min, sec;
 
+        // Some real-world exports (v1.26.1, hybrid NTSU+partyInformation shape)
+        // append decimal fractional seconds to the integer DMS string, e.g.
+        // "N513746.02" (= 51°37'46.02") or "E0133743.91" (= 13°37'43.91").
+        // Split on the decimal point so the length check below only sees the
+        // integer digits, then fold the fraction back in during degree conversion.
+        double fracSec = 0.0;
+        int dotIdx = digits.indexOf('.');
+        if (dotIdx >= 0) {
+            String fracStr = digits.substring(dotIdx); // ".02"
+            try { fracSec = Double.parseDouble("0" + fracStr); } catch (NumberFormatException ignored) { }
+            digits = digits.substring(0, dotIdx);
+        }
+
         if (hemi == 'N' || hemi == 'S') {
             if (digits.length() != 6) return null;
             deg = Integer.parseInt(digits.substring(0, 2));
             min = Integer.parseInt(digits.substring(2, 4));
             sec = Integer.parseInt(digits.substring(4, 6));
         } else if (hemi == 'E' || hemi == 'W') {
-            while (digits.length() < 7) {
-                digits = "0" + digits;
-            }
+            // Allow exactly one optional leading-zero omission (6 → 7 digits).
+            // Do NOT pad shorter strings: "013" from "E013.7655" (decimal degrees)
+            // must fall through to parseDecDegCoordinate, not be mis-parsed as DMS.
+            if (digits.length() == 6) digits = "0" + digits;
             if (digits.length() != 7) return null;
             deg = Integer.parseInt(digits.substring(0, 3));
             min = Integer.parseInt(digits.substring(3, 5));
@@ -717,11 +966,44 @@ public class EtsiXmlImporter {
             return null;
         }
 
-        double decimal = deg + min / 60.0 + sec / 3600.0;
+        double decimal = deg + min / 60.0 + (sec + fracSec) / 3600.0;
         if (hemi == 'S' || hemi == 'W') {
             decimal = -decimal;
         }
         return Math.round(decimal * 1_000_000.0) / 1_000_000.0;
+    }
+
+    /**
+     * Converts a decimal-degree coordinate string as used by
+     * {@code <geoCoordinatesDec>} (e.g. {@code N51.5046}, {@code E013.7854})
+     * into a signed decimal degree value, rounded to 6 decimal places.
+     * Returns {@code null} if the input cannot be parsed.
+     */
+    static Double parseDecDegCoordinate(String raw) {
+        if (raw == null) return null;
+        raw = raw.trim();
+        if (raw.isEmpty()) return null;
+        char hemi = Character.toUpperCase(raw.charAt(0));
+        if (hemi != 'N' && hemi != 'S' && hemi != 'E' && hemi != 'W') return null;
+        try {
+            double val = Double.parseDouble(raw.substring(1));
+            if (hemi == 'S' || hemi == 'W') val = -val;
+            return Math.round(val * 1_000_000.0) / 1_000_000.0;
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
+    /**
+     * Tries DMS parsing first ({@link #parseDmsCoordinate}); if that returns
+     * {@code null} (e.g. for a decimal-degree value like {@code N51.5046}),
+     * falls back to {@link #parseDecDegCoordinate}. Handles both
+     * {@code <geoCoordinates>} and {@code <geoCoordinatesDec>} raw values.
+     */
+    static Double parseAnyCoordinate(String raw) {
+        if (raw == null) return null;
+        Double dms = parseDmsCoordinate(raw);
+        return (dms != null) ? dms : parseDecDegCoordinate(raw);
     }
 
     private static final Pattern KEY_VALUE_PATTERN = Pattern.compile("\"([^\"]+)\"\\s*=\\s*\"([^\"]*)\"");
@@ -734,10 +1016,21 @@ public class EtsiXmlImporter {
             pair = pair.trim();
             Matcher m = KEY_VALUE_PATTERN.matcher(pair);
             if (m.lookingAt()) {
-                result.put(m.group(1), m.group(2));
+                result.put(m.group(1), normalizeLeer(m.group(2)));
             }
         }
         return result;
+    }
+
+    /**
+     * Some tKG96-style exports use the literal placeholder text {@code <leer>}
+     * ("empty") for a key instead of omitting it entirely (e.g.
+     * {@code "dataType"="<leer>"}, {@code "suppl_Services"="<leer>"}).
+     * Normalize that to {@code null} so it isn't stored as literal placeholder
+     * text in the database.
+     */
+    private static String normalizeLeer(String value) {
+        return (value == null || value.trim().equalsIgnoreCase("<leer>")) ? null : value;
     }
 
     private static Integer parseIntOrNull(String raw) {

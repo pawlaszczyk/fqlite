@@ -3,12 +3,20 @@ package fqlite.timemap;
 import fqlite.rag.RAGPipeline;
 import fqlite.sql.DBManager;
 import fqlite.sql.InMemoryDatabase;
+import javafx.animation.PauseTransition;
 import javafx.application.Application;
 import javafx.collections.FXCollections;
 import javafx.collections.ObservableList;
+import javafx.geometry.Pos;
 import javafx.scene.Scene;
+import javafx.scene.control.Label;
+import javafx.scene.image.Image;
+import javafx.scene.image.ImageView;
+import javafx.scene.layout.StackPane;
 import javafx.stage.Stage;
+import javafx.stage.StageStyle;
 import javafx.stage.Screen;
+import javafx.util.Duration;
 
 
 import java.util.*;
@@ -142,6 +150,18 @@ public class LocationWindow extends Application {
         // If no data was injected via the constructor, use synthetic samples.
         if (data.isEmpty()) buildSampleData();
 
+        // Show a brief splash (lighthouse logo + version badge) before the
+        // actual MapView window opens — purely cosmetic, doesn't delay/block
+        // anything else (the heavier MapViewPane construction below already
+        // happens asynchronously inside MapViewPane itself).
+        showSplash(() -> openMapView(primaryStage));
+    }
+
+    /**
+     * Builds and shows the actual MapView window. Split out of {@link #start}
+     * so the splash screen (see {@link #showSplash}) can run first.
+     */
+    private void openMapView(Stage primaryStage) {
         MapViewPane analyzerPane = new MapViewPane();
         livePane = analyzerPane;   // ermöglicht live-attach via setRagPipeline()
         activePane = analyzerPane; // ermöglicht Zugriff von außen, siehe getActivePane()
@@ -157,13 +177,52 @@ public class LocationWindow extends Application {
         }
 
         Scene scene = new Scene(analyzerPane, Screen.getPrimary().getVisualBounds().getWidth() * 0.8, Screen.getPrimary().getVisualBounds().getHeight() * 0.8);
-        primaryStage.setTitle("FQLite – MapView");
+        primaryStage.setTitle("FQLite – Lighthouse");
         primaryStage.setScene(scene);
         primaryStage.setOnCloseRequest(e -> {
             livePane = null;    // aufräumen
             if (activePane == analyzerPane) activePane = null;
         });
         primaryStage.show();
+    }
+
+    /**
+     * Shows a borderless splash window with the "lighthouse_logo.png" artwork
+     * and a "Lighthouse Plugin 0.5 Beta" version badge anchored to its bottom
+     * edge for about two seconds, then runs {@code onDone} (which opens the
+     * real MapView window) on the FX thread.
+     *
+     * @param onDone called once the splash has been shown and dismissed
+     */
+    private void showSplash(Runnable onDone) {
+        Stage splash = new Stage(StageStyle.UNDECORATED);
+        splash.setAlwaysOnTop(true);
+
+        ImageView logo = new ImageView(new Image(Objects.requireNonNull(
+                LocationWindow.class.getResourceAsStream("/lighthouse_logo.png"))));
+        logo.setPreserveRatio(true);
+        logo.setFitWidth(380);
+
+        Label version = new Label("Lighthouse Plugin 0.5 Beta");
+        version.setStyle(
+                "-fx-text-fill: white;"
+              + "-fx-font-size: 12px;"
+              + "-fx-font-weight: bold;"
+              + "-fx-padding: 0 0 14 0;"
+              + "-fx-effect: dropshadow(gaussian, black, 6, 0.7, 0, 0);");
+        StackPane.setAlignment(version, Pos.BOTTOM_CENTER);
+
+        StackPane root = new StackPane(logo, version);
+        splash.setScene(new Scene(root));
+        splash.centerOnScreen();
+        splash.show();
+
+        PauseTransition pause = new PauseTransition(Duration.seconds(2));
+        pause.setOnFinished(e -> {
+            splash.close();
+            onDone.run();
+        });
+        pause.play();
     }
 
     /**

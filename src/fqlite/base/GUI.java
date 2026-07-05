@@ -575,7 +575,7 @@ public class GUI extends Application {
 		btnLLM.setOnAction(e -> showLLMWindow());
 
 
-		s = Objects.requireNonNull(GUI.class.getResource("/icon24_location.png")).toExternalForm();
+		s = Objects.requireNonNull(GUI.class.getResource("/icon24_lighthouse.png")).toExternalForm();
 		btnLocation = new Button();
 		iv = new ImageView(s);
 		iv.smoothProperty().setValue(true);
@@ -584,8 +584,8 @@ public class GUI extends Application {
 		iv.setFitHeight(icon_size_in_pixels);
 		iv.setFitWidth(icon_size_in_pixels);
 		btnLocation.setGraphic(iv);
-		btnLocation.setDisable(false);
-		btnLocation.setTooltip(new Tooltip("Show Locations on Map"));
+		btnLocation.setDisable(true);
+		btnLocation.setTooltip(new Tooltip("Call the Lighthouse Plugin for cell tower analysis"));
 		toolBar.getItems().add(btnLocation);
 		btnLocation.setOnAction(e -> showMap());
 
@@ -779,9 +779,25 @@ public class GUI extends Application {
 			boolean success = false;
 			if (db.hasFiles()) {
 				success = true;
-				String filePath = null;
+				/*
+				 * Several files can be dropped at once. All .xml files among
+				 * them are imported together into one shared SQLite database
+				 * (see importXmlFilesCombined); everything else continues to
+				 * be opened individually, same as before.
+				 */
+				List<File> xmlDropped = new ArrayList<>();
+				List<File> otherDropped = new ArrayList<>();
 				for (File file : db.getFiles()) {
-					filePath = file.getAbsolutePath();
+					if (file.getName().toLowerCase(Locale.ROOT).endsWith(".xml")) {
+						xmlDropped.add(file);
+					} else {
+						otherDropped.add(file);
+					}
+				}
+				if (!xmlDropped.isEmpty()) {
+					importXmlFilesCombined(xmlDropped);
+				}
+				for (File file : otherDropped) {
 					open_db(file);
 				}
 			}
@@ -932,7 +948,7 @@ public class GUI extends Application {
 					final TreeItem<NodeObject> finalSelected = selected;
 
 					// Hintergrund-Thread: RAGPipeline aufbauen (kann mehrere Sekunden dauern)
-					new Thread(() -> {
+					Thread llmInitThread = new Thread(() -> {
 						try {
 							System.out.println("[MapView] Lade LLM für MapView im Hintergrund…");
 
@@ -964,7 +980,14 @@ public class GUI extends Application {
 						} catch (Exception e) {
 							System.err.println("[MapView] LLM-Initialisierung fehlgeschlagen: " + e.getMessage());
 						}
-					}, "mapview-llm-init").start();
+					}, "mapview-llm-init");
+					// Niedrige Priorität: lässt dem FX Application Thread während des
+					// (CPU-intensiven) Modell-Ladens genug Zeitscheiben, damit die
+					// Event-Loop weiterläuft und das BS das Fenster nicht als
+					// "Keine Rückmeldung" markiert.
+					llmInitThread.setPriority(Thread.MIN_PRIORITY);
+					llmInitThread.setDaemon(true);
+					llmInitThread.start();
 				}
 			}
 		} catch (IOException | NumberFormatException e) {
@@ -1057,7 +1080,7 @@ public class GUI extends Application {
 		popup.show(llmw.getPrimaryStage(), "Starting Agent...");
 
 		// Zeitintensive Aufgabe in separatem Thread
-		new Thread(() -> {
+		Thread llmPrepareThread = new Thread(() -> {
 			try {
 				llmw.prepareRAG(model_path);
 				// Deine zeitintensive Aufgabe hier
@@ -1076,7 +1099,14 @@ public class GUI extends Application {
 				// Popup schließen
 				popup.close();
 			}
-		}).start();
+		});
+		// Niedrige Priorität: lässt dem FX Application Thread während des
+		// (CPU-intensiven) Modell-Ladens genug Zeitscheiben, damit die
+		// Event-Loop weiterläuft und das BS das Fenster nicht als
+		// "Keine Rückmeldung" markiert.
+		llmPrepareThread.setPriority(Thread.MIN_PRIORITY);
+		llmPrepareThread.setDaemon(true);
+		llmPrepareThread.start();
 	}
 
 	private void showConfigDialog() {
@@ -2060,11 +2090,11 @@ public class GUI extends Application {
 					delta = table.getSelectionModel().getTableView().getColumns().size() - table.sqltypes.size();
 					if (pos.getColumn() >= delta) {
 						String type = table.sqltypes.get(pos.getColumn() - delta);
-						updateHexDump(Integer.parseInt(firstCellValue) - 1, colIndex, job, tablename, type);
+						updateHexDump(Integer.parseInt(firstCellValue) - 1, colIndex, job, tablename, type, rowData);
 					} else
 						updateStandardColumns(pos, delta);
 				} else if (tablename.equals("sqlite_master")) {
-					updateHexDump(Integer.parseInt(firstCellValue) - 1, colIndex, job, tablename, "TEXT");
+					updateHexDump(Integer.parseInt(firstCellValue) - 1, colIndex, job, tablename, "TEXT", rowData);
 				} else {
 					btnBinViewer.setDisable(true);
 					updateStandardColumns(pos, 0);
@@ -2170,11 +2200,11 @@ public class GUI extends Application {
 						delta = table.getSelectionModel().getTableView().getColumns().size() - table.sqltypes.size();
 						if (cpos.getColumn() >= delta) {
 							String type = table.sqltypes.get(cpos.getColumn() - delta);
-							updateHexDump(Integer.parseInt(firstCellValue) - 1, colIndex, job, tablename, type);
+							updateHexDump(Integer.parseInt(firstCellValue) - 1, colIndex, job, tablename, type, rowData);
 						} else
 							updateStandardColumns(cpos, delta);
 					} else if (tablename.equals("sqlite_master")) {
-						updateHexDump(Integer.parseInt(firstCellValue) - 1, colIndex, job, tablename, "TEXT");
+						updateHexDump(Integer.parseInt(firstCellValue) - 1, colIndex, job, tablename, "TEXT", rowData);
 					} else {
 						btnBinViewer.setDisable(true);
 						updateStandardColumns(cpos, 0);
@@ -2648,6 +2678,8 @@ public class GUI extends Application {
 					VBox.setVgrow(node.tablePane, Priority.ALWAYS);
 
 					disableButtons(false);
+					// Lighthouse button only makes sense for response_records
+					btnLocation.setDisable(!"response_records".equals(node.name));
 
 				});
 			}
@@ -2659,9 +2691,11 @@ public class GUI extends Application {
 					rightSide.getChildren().add(rootPane);
 
 					disableButtons(true);
+					Platform.runLater(() -> btnLocation.setDisable(true));
 
 				} else {
 					disableButtons(false);
+					Platform.runLater(() -> btnLocation.setDisable(true));
 
 					Platform.runLater(() -> {
 						String tp = getPath(selectedItem);
@@ -2770,6 +2804,33 @@ public class GUI extends Application {
 	}
 
 	/**
+	 * Imports one or more ETSI Retained Data XML files into a single,
+	 * shared SQLite database (see {@link fqlite.importer.EtsiXmlImportDialog}
+	 * and {@link fqlite.importer.EtsiXmlImporter#importXmlFilesToSqlite}),
+	 * then opens the resulting database exactly like any other SQLite file.
+	 *
+	 * <p>The target database is named after the first file in
+	 * {@code xmlFiles} (see {@link #deriveSqliteTargetForXml}). Every
+	 * imported row carries a {@code source_file} column identifying which
+	 * of the {@code xmlFiles} it came from, so records from different
+	 * source files remain distinguishable even after being merged into the
+	 * same database.</p>
+	 *
+	 * @param xmlFiles the ETSI XML file(s) to import; must not be empty
+	 */
+	private void importXmlFilesCombined(List<File> xmlFiles) {
+		if (xmlFiles == null || xmlFiles.isEmpty()) {
+			return;
+		}
+		File targetDb = deriveSqliteTargetForXml(xmlFiles.get(0));
+		File converted = EtsiXmlImportDialog.show(this.stage, xmlFiles, targetDb);
+		if (converted == null) {
+			return;
+		}
+		open_db(converted);
+	}
+
+	/**
 	 * Show an open dialog and import <code>sqlite</code>-file.
 	 * After selecting a file, the import will be automatically
 	 * started.
@@ -2804,29 +2865,47 @@ public class GUI extends Application {
 					, new FileChooser.ExtensionFilter(".db", "*.db")
 					, new FileChooser.ExtensionFilter(".xml (ETSI Retained Data)", "*.xml")
 			);
-			file = fileChooser.showOpenDialog(this.stage);
-			if (file != null) {
-				fileChooser.setInitialDirectory(file.getParentFile());
+			List<File> selected = fileChooser.showOpenMultipleDialog(this.stage);
+			if (selected == null || selected.isEmpty()) {
+				return;
 			}
-		}
+			fileChooser.setInitialDirectory(selected.get(0).getParentFile());
 
-
-		if (file == null)
+			/*
+			 * Several files can be selected at once. All .xml files among
+			 * them are imported together into one shared SQLite database
+			 * (see importXmlFilesCombined); any other selected files
+			 * (.sqlite/.db/...) are opened individually, same as before.
+			 */
+			List<File> xmlSelection = new ArrayList<>();
+			List<File> otherSelection = new ArrayList<>();
+			for (File selectedFile : selected) {
+				if (selectedFile.getName().toLowerCase(Locale.ROOT).endsWith(".xml")) {
+					xmlSelection.add(selectedFile);
+				} else {
+					otherSelection.add(selectedFile);
+				}
+			}
+			if (!xmlSelection.isEmpty()) {
+				importXmlFilesCombined(xmlSelection);
+			}
+			for (File other : otherSelection) {
+				open_db(other);
+			}
 			return;
+		}
 
 		/*
 		 * ETSI Retained Data XML export (TS 102 657): convert it into a
 		 * SQLite database first, then continue opening the converted
 		 * database as usual. The conversion runs automatically -- no
 		 * further user interaction is required besides the progress dialog.
+		 * (A single passed-in .xml file -- e.g. from drag & drop -- is just
+		 * a one-element batch; see importXmlFilesCombined.)
 		 */
 		if (file.getName().toLowerCase(Locale.ROOT).endsWith(".xml")) {
-			File targetDb = deriveSqliteTargetForXml(file);
-			File converted = EtsiXmlImportDialog.show(this.stage, file, targetDb);
-			if (converted == null) {
-				return;
-			}
-			file = converted;
+			importXmlFilesCombined(List.of(file));
+			return;
 		}
 
 		/* Check if this database is already loaded */
@@ -3417,6 +3496,26 @@ public class GUI extends Application {
 				}
 				c++;
 			}
+			// NOTE: `rawbytes` (the hexdumplist row used later by
+			// getBytesForCell()/click-handlers to look up raw bytes for the
+			// selected cell) is looked up by TableColumn *position*
+			// (colIndex = pos.getColumn()), not by `row`'s data index. The 5
+			// fixed meta TableColumns (line number, status, offset, pll,
+			// rowid) occupy positions 0-4, and dynamic data columns start at
+			// position 5 — which already lines up with the 5 meta entries
+			// (table name/pll/rowid/status/offset) that Auxiliary/Carver
+			// place at the front of every hexdumplist row, so dynamic column
+			// i sits at rawbytes index (5 + i), exactly matching its
+			// TableColumn position. `row` (the String data) gets an extra
+			// line-number column prepended below because its cellValueFactory
+			// callbacks address fixed indices (get(0), get(2)..get(5), get(i+6))
+			// rather than TableColumn position - but `rawbytes` must NOT get
+			// that same prepend, since nothing reads it by that shifted
+			// indexing scheme. Inserting a matching null here (as a previous
+			// fix attempted) shifts every dynamic column's raw bytes one slot
+			// to the right relative to colIndex, so selecting a cell ends up
+			// reading the *previous* column's hex value - exactly the
+			// "hexdump shows the column to the left" bug.
 			r++;
 			row.add(0, String.valueOf(++linenumber));
 		}
@@ -3707,6 +3806,11 @@ public class GUI extends Application {
 	}
 
 	private void updateHexDump(int row, int column, Job job, String tablename, String type) {
+		updateHexDump(row, column, job, tablename, type, null);
+	}
+
+	private void updateHexDump(int row, int column, Job job, String tablename, String type,
+			ObservableList<String> rowData) {
 
 		/* add missing type information for table sqlite_sequence */
 		if (tablename.equals("sqlite_sequence")) {
@@ -3726,7 +3830,25 @@ public class GUI extends Application {
 		}
 
 		String t = type;
-		byte[] value = getBytesForCell(job, tablename, row, column);
+		byte[] fetchedValue = getBytesForCell(job, tablename, row, column);
+
+		// Non-BLOB cells no longer retain their raw on-disk bytes eagerly
+		// (see Auxiliary.appendValue/appendColumn) — that duplicated the
+		// whole dataset in RAM and was a major source of GC pressure during
+		// big imports. Derive display bytes for the hex pane lazily, on
+		// demand, straight from the already-visible String cell value
+		// instead. Real BLOB cells are unaffected: their exact bytes are
+		// still stored eagerly (needed for image/PDF preview detection), so
+		// getBytesForCell() already returned non-null for those above.
+		if (fetchedValue == null && rowData != null && column >= 0 && column < rowData.size()) {
+			String cellText = rowData.get(column+1);
+			if (cellText != null && !cellText.isEmpty() && !cellText.startsWith("[BLOB")) {
+				fetchedValue = cellText.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+			}
+		}
+		// effectively-final copy: the lambda below captures this value, and
+		// it must not be reassigned after this point.
+		final byte[] value = fetchedValue;
 
 		if (value != null) {
 
@@ -4038,6 +4160,20 @@ public class GUI extends Application {
 		return null;
 	}
 
+	/**
+	 * Upper bound on how many rows are sampled to determine a column's
+	 * auto-sized width. Measuring every row was O(rows * columns) — each
+	 * measurement allocates a JavaFX {@code Text} node and forces a CSS/font
+	 * layout pass via {@code getBoundsInLocal()}, which is expensive per
+	 * call. For forensic imports of large databases a table can easily have
+	 * hundreds of thousands of recovered rows (live + deleted), which made
+	 * this loop, run synchronously on the FX Application Thread once per
+	 * column right after import, the actual cause of multi-minute UI
+	 * freezes ("not responding") that looked like a hang. A bounded sample
+	 * gives a visually equivalent column width in practice.
+	 */
+	private static final int COLUMN_RESIZE_SAMPLE_ROWS = 200;
+
 	private void resizeColumnManually(TableColumn<?, ?> column) {
 		double maxWidth = 10; // Mindestbreite
 
@@ -4046,8 +4182,11 @@ public class GUI extends Application {
 
 		maxWidth = Math.max(maxWidth, headerText.getBoundsInLocal().getWidth() + 20);
 
-		// Zellen-Inhalt messen
-		for (int i = 0; i < column.getTableView().getItems().size(); i++) {
+		// Zellen-Inhalt messen (nur eine Stichprobe statt aller Zeilen — siehe
+		// COLUMN_RESIZE_SAMPLE_ROWS)
+		int rowCount = column.getTableView().getItems().size();
+		int sampleSize = Math.min(rowCount, COLUMN_RESIZE_SAMPLE_ROWS);
+		for (int i = 0; i < sampleSize; i++) {
 			if (column.getCellData(i) == null) continue;
 
 			String t = column.getCellData(i).toString();

@@ -37,9 +37,6 @@ import fqlite.types.BLOBTYPE;
 import fqlite.types.SerialTypes;
 import fqlite.types.StorageClass;
 import fqlite.types.TimeStamp;
-import fqlite.viewer.util.HexDump;
-import javafx.embed.swing.SwingFXUtils;
-import javafx.scene.image.Image;
 
 /**
  * This class offers several useful methods that are needed from time to time
@@ -698,8 +695,11 @@ public class Auxiliary {
                               BitSet bs, int maxlength, boolean withoutROWID,
                               int filetype, long offset, String tblname) throws IOException {
 
-        LinkedList<String> record = new LinkedList<>();
-        LinkedList<byte[]> hexdump = new LinkedList<>();
+        // ArrayList, not LinkedList: this is the dominant per-row allocation
+        // for a normal (non-deleted-record) import — see the comment on
+        // DataRow for why RandomAccess backing matters here at scale.
+        ArrayList<String> record = new ArrayList<>();
+        ArrayList<byte[]> hexdump = new ArrayList<>();
 
         boolean  unknown    = false;
         boolean  isVT       = false;
@@ -1000,13 +1000,21 @@ public class Auxiliary {
      * Appends a single column value to {@code record}, handling BLOB detection and
      * BLOB caching. Returns the updated {@code blobcolidx}.
      */
-    private int appendColumn(LinkedList<String> record, LinkedList<byte[]> raw, SqliteElement en, byte[] value,
+    private int appendColumn(List<String> record, List<byte[]> raw, SqliteElement en, byte[] value,
                              int blobcolidx, boolean isVT, int offsetidx) {
         if (en.serial == StorageClass.BLOB) {
             return appendBlobColumn(record, raw, en, value, blobcolidx, isVT, offsetidx);
         }
         record.add(en.toString(value, false, true));
-        raw.add(value);
+        // Don't retain the raw on-disk bytes for non-BLOB columns: the parsed
+        // String above is already the full forensic value, and storing a
+        // byte[] per cell here too means every recovered row pays for its
+        // data twice. At forensic-recovery scale (hundreds of thousands of
+        // rows, many columns) this duplication was the dominant source of
+        // sustained heap pressure / GC thrashing during big imports. The hex
+        // viewer (GUI.updateHexDump) falls back to deriving display bytes
+        // from the String on demand for the one cell the user clicks instead.
+        raw.add(null);
         return blobcolidx;
     }
 
@@ -1014,17 +1022,34 @@ public class Auxiliary {
      * Like {@link #appendColumn} but additionally handles TIMESTAMP columns using
      * the table descriptor {@code td}.
      */
-    private int appendValue(LinkedList<String> record, LinkedList<byte[]> hexdump, SqliteElement en,
+    private int appendValue(List<String> record, List<byte[]> hexdump, SqliteElement en,
                             byte[] value, int blobcolidx, boolean isVT,
                             AbstractDescriptor td, int co, int offsetidx) {
         if (en.serial == StorageClass.BLOB) {
-            hexdump.add(value);
+            // NOTE: appendBlobColumn() is solely responsible for adding to
+            // `hexdump` - exactly one entry, matching the one entry it adds
+            // to `record`. Adding here as well used to double-count
+            // whenever en.getBLOB() returned an empty string (e.g. a
+            // zero-length BLOB cell): record got +1 but hexdump got +2,
+            // pushing every later column's hexdump entry one slot ahead of
+            // its TableColumn position. That is what caused the hexdump to
+            // show the previous column's value for any row containing such
+            // a BLOB column (e.g. typical for cell-tower/location BLOBs
+            // that are often empty).
             return appendBlobColumn(record, hexdump, en, value, blobcolidx, isVT, offsetidx);
         }
 
+        // For non-BLOB columns we intentionally do NOT retain the raw on-disk
+        // bytes here (hexdump.add(null) below instead of hexdump.add(value)).
+        // The parsed String already fully represents the value, and keeping
+        // a byte[] per cell as well duplicated the entire dataset in RAM —
+        // at forensic-recovery scale (hundreds of thousands of rows) this was
+        // the dominant source of sustained GC pressure during big imports.
+        // GUI.updateHexDump() derives display bytes from the String on
+        // demand, lazily, only for the single cell the user actually clicks.
         if (td == null) {
             record.add(en.toString(value, false, true).intern());
-            hexdump.add(value);
+                hexdump.add(null);
             return blobcolidx;
         }
 
@@ -1038,7 +1063,7 @@ public class Auxiliary {
                     if (ts != null) {
                         job.timestamps.put(ts.text, found);
                         record.add(ts.text.intern());
-                        hexdump.add(value);
+                        hexdump.add(null);
                         return blobcolidx;
                     }
                 }
@@ -1051,12 +1076,7 @@ public class Auxiliary {
         } else {
             String vv = en.toString(value, false, true);
             record.add(vv != null ? vv : "null".intern());
-            if (vv != null) {
-                hexdump.add(value);
-            }
-            else{
-                hexdump.add(null);
-            }
+            hexdump.add(null);
         }
         return blobcolidx;
     }
@@ -1065,7 +1085,7 @@ public class Auxiliary {
      * Appends a BLOB column entry to {@code record} and caches the binary data.
      * Returns the updated blob index.
      */
-    private int appendBlobColumn(LinkedList<String> record,LinkedList<byte[]> raw, SqliteElement en, byte[] value,
+    private int appendBlobColumn(List<String> record,List<byte[]> raw, SqliteElement en, byte[] value,
                                  int blobcolidx, boolean isVT, int offsetidx) {
         String text = en.getBLOB(value, !isVT);
         if (!text.isEmpty()) {
@@ -1075,6 +1095,15 @@ public class Auxiliary {
                 display = "..";
             record.add(display);
             storeBLOB(record, blobcolidx, text, value, offsetidx);
+            // Keep `raw` 1:1 with `record`: every branch of this method adds
+            // exactly one `record` entry, so it must add exactly one `raw`
+            // entry too. This branch used to add nothing to `raw` at all,
+            // which - for callers that don't pre-add (appendColumn(), used
+            // for carved/deleted rows) - left `raw` one entry short from
+            // here on, shifting every later column's hexdump index one slot
+            // behind its TableColumn position (showing the *next* column's
+            // value instead of the clicked one).
+            raw.add(value);
             return blobcolidx + 1;
         }
 
@@ -1087,7 +1116,7 @@ public class Auxiliary {
     // BLOB storage & thumbnail generation
     // -------------------------------------------------------------------------
 
-    private void storeBLOB(LinkedList<String> record, int blobcolidx,
+    private void storeBLOB(List<String> record, int blobcolidx,
                            String tablecelltext, byte[] value, int offsetidx) {
         long hash = -1;
         if (record.get(offsetidx).length() > 2) {
@@ -1315,7 +1344,7 @@ public class Auxiliary {
      * Computes a hash over the data columns of a record (skipping the first 5
      * metadata columns).
      */
-    public static int computeHash(LinkedList<String> record) {
+    public static int computeHash(List<String> record) {
         return record.subList(5, record.size()).hashCode();
     }
 

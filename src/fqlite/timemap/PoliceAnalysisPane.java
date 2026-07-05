@@ -119,7 +119,7 @@ public class PoliceAnalysisPane extends BorderPane {
 
     public PoliceAnalysisPane() {
 
-        Label title = new Label("🔎 Polizeiliche Auswertung");
+        Label title = new Label("🔎 Statistiken");
         title.setFont(Font.font("Monospace", FontWeight.BOLD, 14));
 
         typeBox.getItems().addAll(AnalysisType.values());

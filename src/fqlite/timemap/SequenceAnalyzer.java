@@ -54,6 +54,23 @@ public final class SequenceAnalyzer {
     }
 
     /**
+     * Returns all distinct, non-blank device identities (IMEI, exposed as
+     * {@link ResponseRecordDataPoint#getNaDeviceId()}) found in {@code points},
+     * sorted ascending — same role as {@link #listImsis} but keyed by the
+     * handset's own identity instead of the subscriber's, for the IMEI
+     * storyboard animation in {@link MapView}.
+     */
+    public static List<String> listImeis(List<DataPoint> points) {
+        return points.stream()
+                .filter(p -> p instanceof ResponseRecordDataPoint)
+                .map(p -> ((ResponseRecordDataPoint) p).getNaDeviceId())
+                .filter(s -> s != null && !s.isBlank())
+                .distinct()
+                .sorted()
+                .collect(Collectors.toList());
+    }
+
+    /**
      * Builds the chronological movement sequence for one IMSI.
      *
      * @param points all loaded data points (any table); rows that are not a
@@ -107,6 +124,66 @@ public final class SequenceAnalyzer {
         return stops;
     }
 
+    /**
+     * Builds the chronological <b>activity</b> sequence for one IMEI (handset
+     * identity, {@link ResponseRecordDataPoint#getNaDeviceId()}), for the
+     * IMEI storyboard animation in {@link MapView}.
+     *
+     * <p>Unlike {@link #buildSequence}, which collapses consecutive same-site
+     * records into one dwell {@link Stop} because it answers "where did this
+     * subscriber go", this method keeps exactly one {@link Stop} per raw
+     * record (recordCount is always 1) and copies the record's call-type
+     * fields ({@code call_indicator}/{@code call_action_code}/
+     * {@code call_subtype}) onto the stop. The storyboard is answering
+     * "what did this handset do, and in what order" — collapsing same-site
+     * activities together would hide exactly what an analyst wants to step
+     * or play through, e.g. a GPRS session's First/Interim/Interim/Last
+     * records all attached to the same mast.</p>
+     *
+     * @param points all loaded data points (any table); rows that are not a
+     *               {@link ResponseRecordDataPoint}, lack a coordinate, or
+     *               don't match {@code imei} are ignored
+     * @param imei   the device id (IMEI) to analyse (exact match)
+     * @return        ordered list of one-record activity stops, oldest
+     *                first; empty if the IMEI has no geo-tagged records
+     */
+    public static List<Stop> buildImeiActivitySequence(List<DataPoint> points, String imei) {
+        if (imei == null || imei.isBlank()) return List.of();
+
+        List<ResponseRecordDataPoint> records = points.stream()
+                .filter(p -> p instanceof ResponseRecordDataPoint)
+                .map(p -> (ResponseRecordDataPoint) p)
+                .filter(p -> imei.equals(p.getNaDeviceId()))
+                .filter(p -> p.getCoordinate() != null)
+                .sorted(Comparator.comparing(
+                        DataPoint::getTimestamp,
+                        Comparator.nullsLast(Comparator.naturalOrder())))
+                .collect(Collectors.toList());
+
+        List<Stop> stops = new ArrayList<>();
+        Stop last = null;
+        for (ResponseRecordDataPoint rr : records) {
+            GeoCoordinate c = rr.getCoordinate();
+            Stop s = new Stop();
+            s.lat            = c.getLatitude();
+            s.lon            = c.getLongitude();
+            s.firstSeen      = rr.getTimestamp();
+            s.lastSeen       = rr.getTimestamp();
+            s.recordCount    = 1;
+            s.cellInfo       = rr.getCellInfo();
+            s.cellTower      = rr.getCellTower();
+            s.callIndicator  = rr.getCallIndicator();
+            s.callActionCode = rr.getCallActionCode();
+            s.callSubtype    = rr.getCallSubtype();
+            if (last != null) {
+                s.distanceFromPreviousKm = haversineKm(last.lat, last.lon, s.lat, s.lon);
+            }
+            stops.add(s);
+            last = s;
+        }
+        return stops;
+    }
+
     /** Great-circle distance in km between two WGS-84 points. */
     public static double haversineKm(double lat1, double lon1, double lat2, double lon2) {
         double R = 6371.0;
@@ -127,6 +204,17 @@ public final class SequenceAnalyzer {
         public double  distanceFromPreviousKm = 0.0;
         public UliDecoder.CellInfo cellInfo;
         public CellTower cellTower;
+
+        /**
+         * Raw Call Indicator / Action Code / Subtype of the record this stop
+         * was built from. Populated only by {@link SequenceAnalyzer#buildImeiActivitySequence}
+         * (IMEI storyboard); always {@code null} for stops built by
+         * {@link SequenceAnalyzer#buildSequence} (plain IMSI movement path),
+         * since those can span several records with different call types.
+         */
+        public String callIndicator;
+        public String callActionCode;
+        public String callSubtype;
 
         /** Duration between this stop's first and last record (zero if only one). */
         public Duration dwell() {
@@ -160,6 +248,62 @@ public final class SequenceAnalyzer {
                 return "LAC " + cellInfo.lac + " / CI " + cellInfo.cellId;
             }
             return "–";
+        }
+
+        /**
+         * Human-readable meaning of {@link #callIndicator}, based on
+         * forensic analysis of an ETSI-TS-102-232-style lawful-interception
+         * export (Session GPRS/packet-data and SMS originated/terminated are
+         * the high-confidence mappings observed so far); returns the raw
+         * code unchanged if it isn't one of the known values, or {@code null}
+         * if no call indicator is present on this stop.
+         */
+        public String callIndicatorLabel() {
+            if (callIndicator == null) return null;
+            return switch (callIndicator) {
+                case "SGP" -> "Session GPRS / Packetdaten";
+                case "MOM" -> "Mobile Originated Message (gesendete SMS)";
+                case "MTM" -> "Mobile Terminated Message (empfangene SMS)";
+                default    -> callIndicator;
+            };
+        }
+
+        /** Human-readable meaning of {@link #callActionCode}, or {@code null} if absent. */
+        public String callActionCodeLabel() {
+            if (callActionCode == null) return null;
+            return switch (callActionCode) {
+                case "1" -> "terminierend (eingehend)";
+                case "2" -> "originierend (ausgehend)";
+                default  -> callActionCode;
+            };
+        }
+
+        /** Human-readable meaning of {@link #callSubtype}, or {@code null} if absent. */
+        public String callSubtypeLabel() {
+            if (callSubtype == null) return null;
+            return switch (callSubtype) {
+                case "S" -> "Single Accounting Record (vollständiger Vorgang)";
+                case "F" -> "First Record (Sitzungsbeginn)";
+                case "I" -> "Interim Record (Zwischenintervall)";
+                case "L" -> "Last Record (Sitzungsende)";
+                default  -> callSubtype;
+            };
+        }
+
+        /**
+         * One-line activity summary combining {@link #callIndicatorLabel},
+         * {@link #callSubtypeLabel} and {@link #callActionCodeLabel} for
+         * display in the storyboard's result table/tooltip, or {@code null}
+         * if this stop carries no call-type metadata at all (plain IMSI
+         * movement stops).
+         */
+        public String activityLabel() {
+            if (callIndicator == null && callActionCode == null && callSubtype == null) return null;
+            StringBuilder sb = new StringBuilder();
+            if (callIndicatorLabel() != null) sb.append(callIndicatorLabel());
+            if (callSubtypeLabel() != null)   sb.append(sb.length() > 0 ? " · " : "").append(callSubtypeLabel());
+            if (callActionCodeLabel() != null) sb.append(sb.length() > 0 ? " · " : "").append(callActionCodeLabel());
+            return sb.length() > 0 ? sb.toString() : null;
         }
 
         @Override

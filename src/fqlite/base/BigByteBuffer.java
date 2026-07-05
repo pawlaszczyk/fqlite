@@ -40,12 +40,25 @@ public class BigByteBuffer {
 	// Tuneable defaults
 	// -----------------------------------------------------------------------
 
-	/** Default page size: 8 MiB — large enough to amortise mmap overhead,
+	/** Default page size: 16 MiB — large enough to amortise mmap overhead,
 	 *  small enough to keep per-page cost low. */
-	public static final int DEFAULT_PAGE_SIZE = 8 * 1024 * 1024;
+	public static final int DEFAULT_PAGE_SIZE = 16 * 1024 * 1024;
 
-	/** Default number of resident pages (LRU cache capacity). */
-	public static final int DEFAULT_MAX_PAGES = 8;
+	/**
+	 * Default number of resident pages (LRU cache capacity).
+	 * 64 pages * 16 MiB = 1 GiB resident cap. The forensic scan does not
+	 * access pages strictly sequentially — B-tree overflow chains, the
+	 * freelist trunk/leaf chain, and WAL/rollback-journal reads can all jump
+	 * to page numbers far from the page currently being processed. With a
+	 * small window budget (the previous default was only 8 * 8 MiB = 64 MiB)
+	 * this caused constant evict/remap churn even on moderately sized
+	 * databases, and each evicted window becomes a new MappedByteBuffer that
+	 * needs unmapping (see tryUnmap()) — heavy churn shows up as the JVM's
+	 * Reference Handler thread running continuously. 1 GiB covers most
+	 * real-world SQLite files (or a useful chunk of larger ones) while
+	 * staying well bounded for multi-GB/TB forensic images.
+	 */
+	public static final int DEFAULT_MAX_PAGES = 64;
 
 	// -----------------------------------------------------------------------
 	// State
@@ -157,26 +170,44 @@ public class BigByteBuffer {
 	// Buffer-state API (mirrors java.nio.Buffer)
 	// -----------------------------------------------------------------------
 
-	public final long capacity()        { return cap;   }
-	public final long limit()           { return limit; }
-	public final long position()        { return pos;   }
-	public final long remaining()       { return limit - pos; }
-	public final boolean hasRemaining() { return pos < limit; }
+	// NOTE on synchronization: a single BigByteBuffer (Job.db) is shared by
+	// every worker thread in the multi-threaded recovery scan (see
+	// Job.scan(): worker[].addTask()/executor.execute(w), and
+	// exploreBTree() being called from those tasks). pos/limit/mark and the
+	// pageCache LRU map below are ALL plain, unsynchronized instance state,
+	// so concurrent calls from different worker threads race on them —
+	// e.g. one thread's position(...)/get() can be interleaved with
+	// another thread's getPage(), which can evict (and tryUnmap()!) the
+	// very page the first thread is mid-read on. A JVM crash log captured
+	// during testing (hs_err_pid*.log) showed exactly this: a SIGSEGV
+	// inside ByteBuffer.get([BII) called from Job.exploreBTree, i.e. a
+	// bulk read into a window that had already been unmapped out from
+	// under the reading thread. Every method that touches pos/limit/mark/
+	// pageCache is now `synchronized` on `this` so a seek+read is atomic
+	// with respect to other worker threads. Each call only holds the lock
+	// for a quick cache lookup + memory copy (not the CPU-bound parsing
+	// work workers do between reads), so this should add only modest
+	// contention while making concurrent use of one BigByteBuffer safe.
+	public final synchronized long capacity()        { return cap;   }
+	public final synchronized long limit()           { return limit; }
+	public final synchronized long position()        { return pos;   }
+	public final synchronized long remaining()       { return limit - pos; }
+	public final synchronized boolean hasRemaining() { return pos < limit; }
 
-	public final void clear() {
+	public final synchronized void clear() {
 		limit = cap;
 		pos   = 0;
 		mark  = -1;
 	}
 
-	public final BigByteBuffer flip() {
+	public final synchronized BigByteBuffer flip() {
 		limit = pos;
 		pos   = 0;
 		mark  = -1;
 		return this;
 	}
 
-	public final BigByteBuffer limit(long newLimit) {
+	public final synchronized BigByteBuffer limit(long newLimit) {
 		if (newLimit < 0 || newLimit > cap) throw new IllegalArgumentException();
 		if (newLimit < mark) mark = -1;
 		if (pos > newLimit)  pos  = newLimit;
@@ -184,7 +215,7 @@ public class BigByteBuffer {
 		return this;
 	}
 
-	public final BigByteBuffer position(long newPosition) {
+	public final synchronized BigByteBuffer position(long newPosition) {
 		if (newPosition < 0 || newPosition > limit) {
 			System.err.println(" new Position is " + newPosition);
 			throw new IllegalArgumentException();
@@ -201,7 +232,7 @@ public class BigByteBuffer {
 	/**
 	 * Returns the byte at the current position and advances position by 1.
 	 */
-	public byte get() {
+	public synchronized byte get() {
 		checkUnderflow(1);
 		byte b = readByteAt(pos);
 		pos++;
@@ -211,7 +242,7 @@ public class BigByteBuffer {
 	/**
 	 * Seeks to {@code position} then returns the byte there, advancing by 1.
 	 */
-	public byte get(long position) {
+	public synchronized byte get(long position) {
 		position(position);
 		return get();
 	}
@@ -219,7 +250,7 @@ public class BigByteBuffer {
 	/**
 	 * Reads {@code dst.length} bytes from the current position into {@code dst}.
 	 */
-	public BigByteBuffer get(byte[] dst) {
+	public synchronized BigByteBuffer get(byte[] dst) {
 		return get(dst, 0, dst.length);
 	}
 
@@ -227,7 +258,7 @@ public class BigByteBuffer {
 	 * Reads {@code length} bytes from the current position into {@code dst}
 	 * starting at {@code offset}.
 	 */
-	public BigByteBuffer get(byte[] dst, int offset, int length) {
+	public synchronized BigByteBuffer get(byte[] dst, int offset, int length) {
 		if (length > remaining())
 			throw new BufferUnderflowException();
 
@@ -250,7 +281,7 @@ public class BigByteBuffer {
 	/**
 	 * Returns the big-endian {@code int} at {@code position} and advances by 4.
 	 */
-	public int getInt(long position) {
+	public synchronized int getInt(long position) {
 		this.pos = position;
 		checkUnderflow(4);
 
@@ -282,7 +313,7 @@ public class BigByteBuffer {
 	 * LRU cache. It remains valid as long as that page is not evicted. Callers
 	 * that need a long-lived view should copy the data out explicitly.
 	 */
-	public ByteBuffer slice() {
+	public synchronized ByteBuffer slice() {
 		int        pageIdx = (int) (pos / pageSize);
 		int        pageOff = (int) (pos % pageSize);
 		ByteBuffer page    = getPage(pageIdx);
@@ -294,7 +325,7 @@ public class BigByteBuffer {
 	 * Reads {@code b.capacity()} bytes from {@code position} into {@code b},
 	 * then rewinds {@code b} to position 0.
 	 */
-	public ByteBuffer read(ByteBuffer b, long position) {
+	public synchronized ByteBuffer read(ByteBuffer b, long position) {
 		this.pos = position;
 		int    howmany = b.capacity();
 		byte[] dst     = new byte[howmany];
@@ -350,10 +381,24 @@ public class BigByteBuffer {
 	// Best-effort unmap
 	// -----------------------------------------------------------------------
 
+	/** Logged at most once — see catch block below. */
+	private static final java.util.concurrent.atomic.AtomicBoolean unmapWarningLogged =
+			new java.util.concurrent.atomic.AtomicBoolean(false);
+
 	/**
 	 * Attempts to force-unmap a MappedByteBuffer via the internal Cleaner so
-	 * that native memory is released before the next GC cycle.
-	 * Silently ignored on JDK versions that restrict reflective access.
+	 * that native memory is released immediately instead of waiting on GC +
+	 * the JVM's Reference Handler thread.
+	 * <p>
+	 * Requires the JVM to be launched with
+	 * {@code --add-opens java.base/jdk.internal.ref=ALL-UNNAMED} and
+	 * {@code --add-opens java.base/sun.nio.ch=ALL-UNNAMED} (see build.gradle).
+	 * Without these flags, JDK 16+ throws InaccessibleObjectException on the
+	 * setAccessible() calls below, this method silently becomes a no-op, and
+	 * every evicted window's native unmap is deferred to GC instead — under
+	 * heavy eviction churn this can manifest as the Reference Handler thread
+	 * running continuously (looks like a hang, even though nothing is
+	 * deadlocked).
 	 */
 	private static void tryUnmap(ByteBuffer buffer) {
 		if (!buffer.isDirect()) return;
@@ -368,8 +413,19 @@ public class BigByteBuffer {
 				cleanMethod.setAccessible(true);
 				cleanMethod.invoke(cleaner);
 			}
-		} catch (Exception ignored) {
+		} catch (Exception e) {
 			// JDK 9+ without --add-opens, or non-Sun JVM: let GC handle it.
+			// Log once (not per-eviction — this can fire thousands of times)
+			// so a missing --add-opens flag is visible instead of silently
+			// pushing all unmap work onto the Reference Handler thread.
+			if (unmapWarningLogged.compareAndSet(false, true)) {
+				System.err.println(
+						"BigByteBuffer: explicit unmap unavailable (" + e.getClass().getSimpleName()
+						+ "); falling back to GC for native memory release. "
+						+ "Add '--add-opens java.base/jdk.internal.ref=ALL-UNNAMED' and "
+						+ "'--add-opens java.base/sun.nio.ch=ALL-UNNAMED' to the JVM launch "
+						+ "options to avoid this.");
+			}
 		}
 	}
 
@@ -383,7 +439,7 @@ public class BigByteBuffer {
 	 * <p>
 	 * The buffer must not be used after this call.
 	 */
-	public void close() throws IOException {
+	public synchronized void close() throws IOException {
 		for (ByteBuffer buf : pageCache.values()) {
 			tryUnmap(buf);
 		}

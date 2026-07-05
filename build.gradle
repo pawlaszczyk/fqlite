@@ -87,13 +87,66 @@ tasks.jpackage.doFirst {
 }
 
 // increase heap size for better performance
+//
+// Was a fixed '-Xmx4G': fine for normal-sized databases, but the forensic
+// recovery engine (Job/Importer) builds its results in memory, so very
+// large source databases can need well over 4 GB and hit
+// "OutOfMemoryError: Java heap space" regardless of how much RAM the
+// machine actually has. Use a RAM percentage instead of a fixed cap so the
+// heap scales with the host machine (75% leaves headroom for the OS/other
+// apps) rather than hitting an arbitrary wall on big imports.
+//
+// --add-opens: BigByteBuffer memory-maps the source file in windows and
+// explicitly unmaps evicted windows via reflection on the internal
+// MappedByteBuffer Cleaner (see BigByteBuffer.tryUnmap()). The concrete
+// runtime class behind a mapped buffer is java.nio.DirectByteBuffer (package
+// java.nio, NOT sun.nio.ch — sun.nio.ch only declares the DirectBuffer
+// interface that class implements), and the cleaner object it returns is a
+// jdk.internal.ref.Cleaner. On JDK 16+, reflective setAccessible() on
+// members of either package throws InaccessibleObjectException unless the
+// package is opened, so on a stock JDK 21 launch tryUnmap() silently fails
+// every single time and ALL native unmap work falls back to the JVM's own
+// Reference Handler thread once GC eventually collects each evicted buffer.
+// Under heavy eviction churn (large DB, lots of freelist/overflow page
+// jumps) this thread can end up pegged at ~100% for a long time — looking
+// like a hang even though nothing is deadlocked. Opening java.nio (the
+// actually relevant package) plus jdk.internal.ref lets tryUnmap() run for
+// real, unmapping windows immediately instead of queueing the work for the
+// GC/Reference Handler. sun.nio.ch is also opened defensively in case a
+// given JDK build resolves the Cleaner lookup through it instead.
+// GC: ZGC was tried here briefly and reverted — back to G1.
+//
+// Rounds 2-5 cut GC wall-clock time from ~31% to ~20% by fixing real
+// allocation hotspots, but the OS still reported "Application Not
+// Responding" (Sanduhr) on a large-import test, presumably because a
+// couple of long individual G1 STW pauses (not the ~20% average) tripped
+// the watchdog. ZGC (sub-millisecond pause target) was tried as a fix —
+// but ZGC requires uncompressed 64-bit object pointers (no
+// -XX:+UseCompressedOops support), which inflates the size of every
+// object reference. For this app's working set (huge ObservableLists of
+// Strings, multiple large HashMap indexes in CellTowerResolver, the
+// InMemoryDatabase row copies) that overhead was enough to turn a
+// large-import test that previously only froze into one that threw a
+// genuine "OutOfMemoryError: Java heap space" — strictly worse than the
+// ANR it was meant to fix, since an OOM can abort the import outright.
+// Reverted to G1 (proven across rounds 1-5 to only ever produce the
+// recoverable ANR symptom, never an OOM, at the same data scale) and
+// added UseStringDeduplication instead: forensic data is full of
+// repeated String values (table names, IMSI/cell-ID prefixes, timestamp
+// formats), so deduplicating identical char[] backing arrays directly
+// reduces live heap footprint — addressing the memory-pressure side of
+// the problem without the GC-pause trade-off ZGC would have required.
 tasks.withType(JavaExec) {
     jvmArgs = [
             '-XX:NativeMemoryTracking=detail',
             '-Xms32m',
-            '-Xmx4G',
+            '-XX:MaxRAMPercentage=75.0',
             '-XX:G1PeriodicGCInterval=10000',  // GC every 10s when idle
-            '-XX:GCTimeRatio=4'
+            '-XX:GCTimeRatio=4',
+            '-XX:+UseStringDeduplication',
+            '--add-opens=java.base/java.nio=ALL-UNNAMED',
+            '--add-opens=java.base/jdk.internal.ref=ALL-UNNAMED',
+            '--add-opens=java.base/sun.nio.ch=ALL-UNNAMED'
     ]
 }
 
@@ -124,7 +177,28 @@ runtime {
     jpackage {
         installerOptions += ['--resource-dir', "resources"]
         imageOptions += [
-                '--java-options', '-Xmx4G'
+                // see comments above tasks.withType(JavaExec): scale heap with
+                // the host machine instead of a fixed 4G cap, so large-database
+                // imports don't run into "OutOfMemoryError: Java heap space"
+                // on machines with more RAM available, and open the internal
+                // packages BigByteBuffer.tryUnmap() needs so mmap'd windows are
+                // unmapped immediately instead of piling up on the JVM's
+                // Reference Handler thread.
+                //
+                // This is the JVM the user actually runs (the packaged .app),
+                // so it has to mirror the dev-run jvmArgs block above: ZGC
+                // was tried and reverted to G1 because ZGC's lack of
+                // compressed-oops support inflated this app's reference-
+                // heavy working set enough to cause a genuine
+                // OutOfMemoryError on a large import — strictly worse than
+                // the ANR it was meant to fix. UseStringDeduplication is
+                // added instead to reduce heap footprint from repeated
+                // forensic strings without ZGC's pause/memory trade-off.
+                '--java-options', '-XX:MaxRAMPercentage=75.0',
+                '--java-options', '-XX:+UseStringDeduplication',
+                '--java-options', '--add-opens=java.base/java.nio=ALL-UNNAMED',
+                '--java-options', '--add-opens=java.base/jdk.internal.ref=ALL-UNNAMED',
+                '--java-options', '--add-opens=java.base/sun.nio.ch=ALL-UNNAMED'
         ]
 
         if (currentOs.windows) {

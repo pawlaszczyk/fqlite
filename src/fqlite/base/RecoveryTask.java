@@ -203,6 +203,8 @@ public class RecoveryTask implements Runnable {
 			int pageheaderend = 8 + (cp * 2);
 			visit.set(0, pageheaderend);
 
+			boolean celltower_table = false;
+
 			/* first, add component name if known */
 			if (null != job.pages[pagenumber]) {
 
@@ -214,6 +216,11 @@ public class RecoveryTask implements Runnable {
 						if (td.rowidcolumn.equals(td.columnnames.get(0))){
 							firstColumnIsROWID = true;
 						}
+
+					if(td.celltower_analysis){
+						celltower_table = true;
+					}
+
 				}
 
 
@@ -221,7 +228,11 @@ public class RecoveryTask implements Runnable {
 			}
 
 			//String rc;
-			LinkedList<String> record;
+			// List, not LinkedList: holds DataRow.line(), which is now
+			// ArrayList-backed for the dominant readRecord() path (see
+			// DataRow.java) — keep the declared type as the interface so it
+			// accepts that without a cast.
+			List<String> record;
 
 
 			//SQLitePageAnalyzer.parseFreeBlocks(buffer,job.ps);
@@ -545,9 +556,9 @@ public class RecoveryTask implements Runnable {
 
 
 
-
-
-
+			if(celltower_table) {
+				return 0;
+			}
 
 			/*
 			 * STEP 3:
@@ -847,10 +858,6 @@ public class RecoveryTask implements Runnable {
 
 
 	}
-
-
-
-
 
 
 }

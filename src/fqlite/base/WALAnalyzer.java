@@ -406,7 +406,16 @@ public class WALAnalyzer {
             else if (st == 7)                  { dataPos+=8; }
             else if (st == 8)                  { if(col==3) rootPage=0; }
             else if (st == 9)                  { if(col==3) rootPage=1; }
-            else if (st >= 13 && st % 2 == 1) { int len=(int)((st-13)/2); txt[col]=new String(payload,dataPos,len,StandardCharsets.UTF_8); dataPos+=len; }
+            // Use the database's actual text encoding (SqliteElement.db_encoding,
+            // detected from the file header by Job.parseHeader()), not a
+            // hardcoded UTF-8 - same bug/fix as RollbackjournalAnalyzer's
+            // parseSchemaCellAt(). For a UTF-16BE/LE database this hardcoded
+            // UTF-8 read garbled the table/index name (every real character
+            // followed by a stray byte), which then became the table key
+            // used downstream for WAL frame rows (see ownerName()/tname in
+            // WALReader.java) - rows would get filed under the garbled name
+            // and never merge with the correctly-decoded table.
+            else if (st >= 13 && st % 2 == 1) { int len=(int)((st-13)/2); txt[col]=new String(payload,dataPos,len,SqliteElement.db_encoding); dataPos+=len; }
             else if (st >= 12 && st % 2 == 0) { dataPos+=(int)((st-12)/2); }
         }
 

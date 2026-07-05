@@ -44,6 +44,7 @@ public class TableDescriptor extends AbstractDescriptor implements Comparable<Ta
 	public String sql = "";
 	
 	public String rowidcolumn = null;
+	public boolean celltower_analysis = false;
 
 	public boolean checkMatch(String match) {
 		

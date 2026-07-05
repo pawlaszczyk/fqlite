@@ -455,20 +455,20 @@ public final class PoliceAnalysisQueries {
 
             case DEVICE_SIM_SWAP:
                 return "SELECT 'Geräte-Wechsel (gleiche SIM, mehrere Geräte)' AS Wechseltyp, "
-                        + "imsi AS Kennung, COUNT(DISTINCT na_device_id) AS Anzahl_Wechsel, "
-                        + "GROUP_CONCAT(DISTINCT na_device_id) AS Details "
+                        + "imsi AS Kennung, COUNT(DISTINCT TRIM(na_device_id)) AS Anzahl_Wechsel, "
+                        + "GROUP_CONCAT(DISTINCT TRIM(na_device_id)) AS Details "
                         + "FROM response_records "
-                        + "WHERE imsi IS NOT NULL AND imsi <> '' AND na_device_id IS NOT NULL AND na_device_id <> '' " + t
+                        + "WHERE imsi IS NOT NULL AND TRIM(imsi) <> '' AND na_device_id IS NOT NULL AND TRIM(na_device_id) <> '' " + t
                         + "GROUP BY imsi "
-                        + "HAVING COUNT(DISTINCT na_device_id) > 1 "
+                        + "HAVING COUNT(DISTINCT TRIM(na_device_id)) > 1 "
                         + "UNION ALL "
                         + "SELECT 'SIM-Wechsel (gleiches Gerät, mehrere SIM-Karten)' AS Wechseltyp, "
-                        + "na_device_id AS Kennung, COUNT(DISTINCT imsi) AS Anzahl_Wechsel, "
-                        + "GROUP_CONCAT(DISTINCT imsi) AS Details "
+                        + "na_device_id AS Kennung, COUNT(DISTINCT TRIM(imsi)) AS Anzahl_Wechsel, "
+                        + "GROUP_CONCAT(DISTINCT TRIM(imsi)) AS Details "
                         + "FROM response_records "
-                        + "WHERE na_device_id IS NOT NULL AND na_device_id <> '' AND imsi IS NOT NULL AND imsi <> '' " + t
+                        + "WHERE na_device_id IS NOT NULL AND TRIM(na_device_id) <> '' AND imsi IS NOT NULL AND TRIM(imsi) <> '' " + t
                         + "GROUP BY na_device_id "
-                        + "HAVING COUNT(DISTINCT imsi) > 1 "
+                        + "HAVING COUNT(DISTINCT TRIM(imsi)) > 1 "
                         + "ORDER BY Anzahl_Wechsel DESC;";
 
             case CROSS_HITS:
@@ -497,12 +497,12 @@ public final class PoliceAnalysisQueries {
                 // startsWith("Funkzelle") convention picks it up; that method
                 // also knows to parse this '|'-delimited multi-site format
                 // and jump to the first listed site.
-                return "SELECT imsi AS IMSI, msisdn AS Rufnummer, "
+                return "SELECT imsi AS IMSI, MIN(msisdn) AS Rufnummer, "
                         + "COUNT(DISTINCT latitude_dec || ',' || longitude_dec) AS Anzahl_Funkzellen, "
                         + "GROUP_CONCAT(DISTINCT ROUND(latitude_dec,5) || '|' || ROUND(longitude_dec,5)) AS Funkzellen, "
                         + "MIN(start_time) AS Von, MAX(start_time) AS Bis "
                         + "FROM response_records "
-                        + "WHERE imsi IS NOT NULL AND imsi <> '' AND latitude_dec IS NOT NULL AND longitude_dec IS NOT NULL " + t
+                        + "WHERE imsi IS NOT NULL AND TRIM(imsi) <> '' AND latitude_dec IS NOT NULL AND longitude_dec IS NOT NULL " + t
                         + "GROUP BY imsi "
                         + "HAVING COUNT(DISTINCT latitude_dec || ',' || longitude_dec) > 1 "
                         + "ORDER BY Anzahl_Funkzellen DESC;";

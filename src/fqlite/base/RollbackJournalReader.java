@@ -408,7 +408,9 @@ public class RollbackJournalReader{
 				AppLog.debug(page + " -> " + celloff + " " + "0" + hls);
 			hls.trim();
 			
-            LinkedList<String> record = null;
+            // List, not LinkedList: holds DataRow.line(), now ArrayList-backed
+            // for the dominant readRecord() path (see DataRow.java).
+            List<String> record = null;
 
 			String tname = null;
 
@@ -425,7 +427,17 @@ public class RollbackJournalReader{
 			try {
 				DataRow r = ct.readRecord(celloff, buffer, pagenumber_maindb, visit, Integer.MAX_VALUE, withoutROWID, Global.ROLLBACK_JOURNAL_FILE, pageoffset + celloff, tname);
 				if (r == null)
-					return -1;
+					// A single unreadable cell does not invalidate the rest of
+					// the page: readRecord() legitimately returns null for
+					// ordinary, non-fatal reasons (header parse failure,
+					// buffer underflow, etc.) on individual cells. Aborting
+					// the whole page here (the old "return -1") silently
+					// dropped every other, perfectly valid record on the
+					// page as soon as the first bad cell was hit - this was
+					// the cause of journal-file tables being created but
+					// left empty. WALReader/RecoveryTask already just skip
+					// the bad cell and keep going; do the same here.
+					continue;
 				record = r.line();
 
 				// add new line to output

@@ -114,6 +114,23 @@ public class TimelineView extends BorderPane {
     private double[] dotX;
     private double[] dotY;
 
+    /**
+     * Logical (pre-scroll) Y position of each point in {@link #visible},
+     * indexed the same way as {@code visible} itself (i.e. {@code
+     * dotLogicalYCache[i]} belongs to {@code visible.get(i)}).
+     *
+     * <p>Computed once per {@link #updateVirtualHeight()} call rather than
+     * from a plain time-fraction formula at render time: when two records
+     * are far apart in time, a pure proportional mapping squeezes every
+     * point that falls in between into a near-identical Y position (they
+     * render on top of each other). This cache instead walks the points in
+     * timestamp order and pushes any point that would land closer than
+     * {@link #MIN_DOT_SPACING} to its temporal predecessor further down,
+     * so points stay visually distinguishable regardless of how the
+     * overall time range is distributed.</p>
+     */
+    private double[] dotLogicalYCache = new double[0];
+
     // ── Filter field options ─────────────────────────────────────────────────
 
     private static final String FF_IMSI      = "IMSI";
@@ -394,11 +411,46 @@ public class TimelineView extends BorderPane {
     // ── Virtual scrolling ────────────────────────────────────────────────────
 
     private void updateVirtualHeight() {
-        double viewH  = canvas.getHeight() > 0 ? canvas.getHeight() : 600;
-        double needed = visible.isEmpty()
-                ? viewH
-                : PADDING_TOP + PADDING_BOTTOM + (long) visible.size() * MIN_DOT_SPACING;
-        virtualHeight = Math.max(viewH, needed);
+        double viewH = canvas.getHeight() > 0 ? canvas.getHeight() : 600;
+        int    n     = visible.size();
+
+        if (n == 0 || minTs == null) {
+            virtualHeight    = viewH;
+            dotLogicalYCache = new double[0];
+        } else {
+            // Lower bound on the available drawing height: enough room for
+            // every point to get at least MIN_DOT_SPACING if they were
+            // evenly distributed (matches the previous, count-only formula).
+            double countBasedNeeded = PADDING_TOP + PADDING_BOTTOM + (long) n * MIN_DOT_SPACING;
+            double baseHeight       = Math.max(viewH, countBasedNeeded);
+
+            long minMs   = minTs.toEpochMilli();
+            long rangeMs = maxTs.toEpochMilli() - minMs;
+
+            // Process points in timestamp order so a minimum pixel gap can
+            // be enforced between temporally adjacent points -- otherwise,
+            // if two records are far apart in time, the proportional
+            // mapping below squeezes any points in between to (almost) the
+            // same Y and they render on top of each other.
+            Integer[] order = new Integer[n];
+            for (int i = 0; i < n; i++) order[i] = i;
+            Arrays.sort(order, Comparator.comparing(i -> visible.get(i).getTimestamp()));
+
+            double[] y = new double[n];
+            double prevY = Double.NEGATIVE_INFINITY;
+            for (int k = 0; k < n; k++) {
+                int idx = order[k];
+                double frac = rangeMs == 0 ? 0.5
+                        : (double) (visible.get(idx).getTimestamp().toEpochMilli() - minMs) / rangeMs;
+                double idealY = PADDING_TOP + (baseHeight - PADDING_TOP - PADDING_BOTTOM) * frac;
+                double yy = (k == 0) ? idealY : Math.max(idealY, prevY + MIN_DOT_SPACING);
+                y[idx] = yy;
+                prevY  = yy;
+            }
+
+            dotLogicalYCache = y;
+            virtualHeight    = Math.max(baseHeight, prevY + PADDING_BOTTOM);
+        }
 
         double maxScroll = Math.max(0, virtualHeight - viewH);
         scrollOffset = Math.min(scrollOffset, maxScroll);
@@ -421,13 +473,10 @@ public class TimelineView extends BorderPane {
         vScrollBar.setValue(scrollOffset);
     }
 
+    /** Pre-computed, collision-resolved logical Y position for {@code visible.get(i)}. */
     private double dotLogicalY(int i) {
-        if (visible.isEmpty() || minTs == null) return PADDING_TOP;
-        long minMs   = minTs.toEpochMilli();
-        long rangeMs = maxTs.toEpochMilli() - minMs;
-        double frac  = rangeMs == 0 ? 0.5
-                : (double)(visible.get(i).getTimestamp().toEpochMilli() - minMs) / rangeMs;
-        return PADDING_TOP + (virtualHeight - PADDING_TOP - PADDING_BOTTOM) * frac;
+        if (dotLogicalYCache == null || i < 0 || i >= dotLogicalYCache.length) return PADDING_TOP;
+        return dotLogicalYCache[i];
     }
 
     // ── Rendering ────────────────────────────────────────────────────────────
@@ -516,18 +565,12 @@ public class TimelineView extends BorderPane {
             return;
         }
 
-        long minMs   = minTs.toEpochMilli();
-        long rangeMs = maxTs.toEpochMilli() - minMs;
-
         dotX = new double[visible.size()];
         dotY = new double[visible.size()];
 
         for (int i = 0; i < visible.size(); i++) {
             DataPoint dp   = visible.get(i);
-            double frac    = rangeMs == 0 ? 0.5
-                    : (double)(dp.getTimestamp().toEpochMilli() - minMs) / rangeMs;
-
-            double scrY    = toScreen(PADDING_TOP + (virtualHeight - PADDING_TOP - PADDING_BOTTOM) * frac);
+            double scrY    = toScreen(dotLogicalY(i));
             boolean left   = (i % 2 == 0);
             double  scrX   = axisX + (left ? -DOT_OFFSET_X : DOT_OFFSET_X);
 

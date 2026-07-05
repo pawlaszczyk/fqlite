@@ -124,7 +124,7 @@ public class WALReader{
 	/* this is a multi-threaded program -> all data are saved to the list first */
 
 	/* outputlist */
-	ConcurrentLinkedQueue<LinkedList<String>> output = new ConcurrentLinkedQueue<LinkedList<String>>();
+	ConcurrentLinkedQueue<List<String>> output = new ConcurrentLinkedQueue<List<String>>();
 	
 	public HashMap<Integer,ByteBuffer> overflow = new HashMap<Integer,ByteBuffer>();
 	
@@ -587,8 +587,10 @@ public class WALReader{
 			last = celloff;
 			String hls = Auxiliary.Int2Hex(celloff); 
 
-			LinkedList<String> rc = null;
-			LinkedList<byte[]> raw = null;
+			// List, not LinkedList: holds DataRow.line()/.hexdump(), now
+			// ArrayList-backed for the dominant readRecord() path.
+			List<String> rc = null;
+			List<byte[]> raw = null;
 
 			try {
 				String tname = "";
@@ -703,7 +705,7 @@ public class WALReader{
 		if (ccrstart - buffer.position() > 3)
 		{
 			/* try to read record as usual */
-			LinkedList<String> rc;
+			List<String> rc;
 			String tname = "";
 			if (frame.framenumber == 0) {
 				tname = "sqlite_master";
@@ -965,7 +967,7 @@ public class WALReader{
 			
 			System.out.println("Number of WAL records recovered: " + output.size());
 	
-			Iterator<LinkedList<String>> lines = output.iterator();
+			Iterator<List<String>> lines = output.iterator();
 			
 			// holds all data sets for all tables, whereas the tablename represents the key
 			Hashtable<String,ObservableList<ObservableList<String>>> dataSets = new Hashtable<>();
@@ -974,7 +976,7 @@ public class WALReader{
 			while(lines.hasNext()) {
 
 			
-				LinkedList<String> line = lines.next();
+				List<String> line = lines.next();
 
 			   	// is there already a data set for this particular table
 			   	if (dataSets.containsKey(line.getFirst()))

@@ -5,6 +5,7 @@ import java.io.File;
 import java.io.FileWriter;
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.*;
@@ -267,7 +268,6 @@ public class Job {
 		this.walpanel = p;
 	}
 
-
 	public void setRollbackPropertyPanel(RollbackPropertyPanel p)
 	{
 		this.rolpanel = p;
@@ -353,10 +353,6 @@ public class Job {
 				{"96","SQLITE_VERSION_NUMBER",String.valueOf(sqliteversion)}};
 
 
-
-
-
-
 		return prop;
 	}
 
@@ -423,7 +419,6 @@ public class Job {
 
 		return result;
 	}
-
 
 
 	public String[][] getPagesOverview(){
@@ -504,8 +499,6 @@ public class Job {
 		}
 		return pagelist;
 	}
-
-
 
 
 	public LinkedHashMap<String,String[][]> getTableColumnTypes()
@@ -636,21 +629,6 @@ public class Job {
 	{
 		walpanel.initHeaderTable(getWALHeaderProperties());
 		walpanel.initCheckpointTable(getCheckpointProperties());
-	}
-
-	private void createFREELISTTable(int numberofcolumns){
-
-
-		List<String> col = new ArrayList<String>();
-		List<String> names = new ArrayList<String>();
-
-		/* create dummy component for unassigned records */
-		for (int i = 0; i < numberofcolumns + 10; i++) {
-			col.add("TEXT");
-			names.add("col" + (i + 1));
-		}
-
-
 	}
 
 
@@ -802,7 +780,6 @@ public class Job {
 
 		userversion = Integer.toUnsignedLong(buffer.getInt());
 		info("User version (offset 60) " + userversion);
-
 
 		vacuummode = Integer.toUnsignedLong(buffer.getInt());
 		info("Incremential vacuum-mode (offset 64) " + vacuummode);
@@ -1129,7 +1106,6 @@ public class Job {
 		while(again && round < 2 && (readWAL));
 
 
-
 		/*******************************************************************/
 
 		/*
@@ -1203,6 +1179,8 @@ public class Job {
 
 		HashSet<String> doubles = new HashSet<String>();
 
+		boolean celltower_analysis = false;
+
 		/*
 		 * Now, since we have all component definitions, we can start
 		 * exploring the b-tree for each component
@@ -1210,12 +1188,17 @@ public class Job {
 		while (iter.hasNext()) {
 
 			TableDescriptor td = iter.next();
+
 			/* remove enclosing double quotes */
 			if (td.tblname.length()>2 && td.tblname.startsWith("\""))
 				td.tblname = td.tblname.substring(1,td.tblname.length()-1);
 
 			if (!doubles.add(td.tblname))
 				continue;
+
+			if (td.tblname.equals("response_records")){
+				td.celltower_analysis = true;
+			}
 
 			td.printTableDefinition();
 
@@ -1231,7 +1214,6 @@ public class Job {
 			if (null != gui) {
 
 				/* since table nodes will also be needed in journals and wal-files we have to add those nodes too */
-
 				gui.add_table(this, td.tblname, td.columnnames, td.getColumntypes(), td.primarykeycolumns, td.boolcolumns, td.sqltypes, false, false,0).thenAccept(result -> {
 					String path = result;
 					guitab.put(td.tblname, path);
@@ -1355,10 +1337,6 @@ public class Job {
 		for(TableDescriptor t : headers){
 			maxcol = Math.max(t.columnnames.size(),maxcol);
 		}
-
-		// skipped (since FQLite 4.1)
-		//createFREELISTTable(maxcol);
-
 
 
 		/*
@@ -1588,8 +1566,8 @@ public class Job {
 					/* add new task to executor queue */
 					runningTasks.incrementAndGet();
 					tasklist.add(task1);
-					//executor.execute(task1);
-					task1.run();
+					// Dispatch to the thread pool
+					executor.execute(task1);
 				}
 				freepagesum += entries;
 
@@ -1729,8 +1707,16 @@ public class Job {
 			long salt2 = fheader.getInt();
 
 			/* read the db page into buffer */
-			ByteBuffer page = wal.slice();
-			page.limit(ps);
+			// Copy instead of slice(): page is stored in cptable and read
+			// back much later, long after this window of the (LRU-evicting,
+			// demand-paged) wal BigByteBuffer may have been evicted and its
+			// native mapping unmapped — see readDBPageWithOffset() for the
+			// full explanation of why a live slice() is unsafe here.
+			byte[] pagebytes = new byte[ps];
+			wal.position(framestart + 24);
+			wal.get(pagebytes);
+			ByteBuffer page = ByteBuffer.wrap(pagebytes);
+			page.order(ByteOrder.BIG_ENDIAN);
 
 			framestart += ps +  24;
 			cptable.put(pagenumber_maindb,page);
@@ -2925,7 +2911,7 @@ public class Job {
 				try {
 					hash = Long.parseLong(offset);
 				} catch (NumberFormatException e) {
-					AppLog.debug("Number format exception: compute hash failed");
+					AppLog.debug("> Number format exception: compute hash failed");
 				}
 			} else {
 				hash = 0;
@@ -3142,9 +3128,11 @@ public class Job {
 		for (Worker w: worker)
 		{
 			//System.out.println(" Start worker thread" + c++);
-			/* add new task to executor queue */
-			//executor.execute(w);
-			w.run();
+			// Dispatch each worker to the thread pool instead of calling
+			// run() directly on the calling thread.
+			// executor.shutdown()/awaitTermination() and the runningTasks
+			// wait loop below already assume tasks complete asynchronously.
+			executor.execute(w);
 		}
 
 		try {
@@ -3288,15 +3276,25 @@ public class Job {
 
 			return null;
 		}
-		db.position(offset);
-		ByteBuffer page = db.slice();
-		if (page.capacity() == 0) {
+
+		long available = db.limit() - offset;
+		if (available <= 0) {
 			return null;
 		}
-		else
-		{
-			page.limit(pagesize);
-		}
+		int toRead = (int) Math.min(pagesize, available);
+
+		// Copy the page bytes into an independent heap buffer instead of
+		// returning db.slice() — a slice() is only a *view* backed directly
+		// by the mmap window currently resident in BigByteBuffer's LRU page
+		// cache (see BigByteBuffer.slice() javadoc). Copying the bytes out up
+		// front makes the returned page's lifetime
+		// fully independent of the cache.
+		byte[] copy = new byte[toRead];
+		db.position(offset);
+		db.get(copy);
+
+		ByteBuffer page = ByteBuffer.wrap(copy);
+		page.order(ByteOrder.BIG_ENDIAN);
 		return page;
 	}
 
@@ -3451,9 +3449,22 @@ public class Job {
 
 			return null;
 		}
+
+		long available = bb.limit() - offset;
+		if (available <= 0) {
+			return null;
+		}
+		int toRead = (int) Math.min(pagesize, available);
+
+		// See readDBPageWithOffset() above: copy instead of slice() so the
+		// returned page's lifetime doesn't depend on this window still
+		// being resident in bb's LRU cache later on.
+		byte[] copy = new byte[toRead];
 		bb.position(offset);
-		ByteBuffer page = bb.slice();
-		page.limit(pagesize);
+		bb.get(copy);
+
+		ByteBuffer page = ByteBuffer.wrap(copy);
+		page.order(ByteOrder.BIG_ENDIAN);
 		return page;
 	}
 

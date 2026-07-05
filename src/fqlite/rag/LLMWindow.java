@@ -448,8 +448,36 @@ public class LLMWindow extends Application {
      * if no known intent matched (see {@link #askLLM} for why this ordering
      * matters). Mirrors the dispatch in {@code MapViewPane#onLlmRun}.
      */
+    /**
+     * Queries the in-memory database for the actual date range of
+     * {@code response_records.start_time} and returns a "MIN bis MAX" string
+     * injected into the LLM prompt so it uses the dataset's year rather than
+     * the current calendar year for year-less date expressions. Returns
+     * {@code null} if the DB is unavailable or has no timestamped records.
+     */
+    private String queryDataDateRange() {
+        if (inMemoryDB == null) return null;
+        try {
+            java.sql.ResultSet rs = inMemoryDB.execute(
+                    "SELECT MIN(start_time), MAX(start_time) FROM response_records WHERE start_time IS NOT NULL");
+            if (rs == null) return null;
+            try {
+                if (rs.next()) {
+                    String min = rs.getString(1);
+                    String max = rs.getString(2);
+                    if (min != null && !min.isBlank() && max != null && !max.isBlank()) {
+                        return min + " bis " + max;
+                    }
+                }
+            } finally {
+                rs.close();
+            }
+        } catch (Exception ignored) { }
+        return null;
+    }
+
     private String resolveSql(String userinput) {
-        RAGPipeline.QueryIntent intent = pipline.classifyIntent(userinput);
+        RAGPipeline.QueryIntent intent = pipline.classifyIntent(userinput, queryDataDateRange());
 
         // Deterministic safety net, checked FIRST: the small local model
         // unreliably classifies country-name requests — it has been observed
@@ -494,7 +522,10 @@ public class LLMWindow extends Application {
         }
 
         // No known intent matched — fall back to the free-form generator.
-        return pipline.generateSQL(userinput);
+        // Use the date-normalized text so the SQL generator receives ISO dates
+        // rather than partial German expressions that it may resolve incorrectly.
+        String filterInput = (intent.normalizedRequest != null) ? intent.normalizedRequest : userinput;
+        return pipline.generateSQL(filterInput);
     }
 
     /**

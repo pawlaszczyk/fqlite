@@ -63,7 +63,7 @@ public final class UliDecoder {
      */
     public static CellInfo decode(String uliHex) {
         if (uliHex == null || uliHex.isBlank()) return null;
-        byte[] b = hexToBytes(uliHex.replaceAll("[^0-9A-Fa-f]", ""));
+        byte[] b = hexToBytes(stripNonHexChars(uliHex));
         if (b == null || b.length < 4) return null;
 
         int first = b[0] & 0xFF;
@@ -228,6 +228,27 @@ public final class UliDecoder {
 
     private static int u16(byte[] b, int off) {
         return ((b[off] & 0xFF) << 8) | (b[off + 1] & 0xFF);
+    }
+
+    /**
+     * Removes everything except hex digits (spaces, dashes, etc.) from
+     * {@code s} without using {@code String.replaceAll}, which compiles a
+     * fresh regex {@code Pattern} on every call. {@link #decode} is called
+     * once per row for a {@code response_records} table, so for a large
+     * forensic recovery (hundreds of thousands to millions of rows) the
+     * repeated Pattern compilation added up to real, avoidable wall-clock
+     * time during MapView's data analysis. A manual char-by-char filter
+     * does the same job with no regex engine involved.
+     */
+    private static String stripNonHexChars(String s) {
+        StringBuilder sb = new StringBuilder(s.length());
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            if ((c >= '0' && c <= '9') || (c >= 'A' && c <= 'F') || (c >= 'a' && c <= 'f')) {
+                sb.append(c);
+            }
+        }
+        return sb.toString();
     }
 
     private static byte[] hexToBytes(String hex) {

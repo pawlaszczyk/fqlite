@@ -2,6 +2,9 @@ package fqlite.timemap;
 
 import fqlite.timemap.DataAnalyzer.DataPoint;
 import fqlite.timemap.DataAnalyzer.ResponseRecordDataPoint;
+import javafx.animation.Animation;
+import javafx.animation.KeyFrame;
+import javafx.animation.Timeline;
 import javafx.application.Platform;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
@@ -11,11 +14,15 @@ import javafx.scene.canvas.Canvas;
 import javafx.scene.canvas.GraphicsContext;
 import javafx.scene.control.Button;
 import javafx.scene.control.ComboBox;
+import javafx.scene.control.ContextMenu;
 import javafx.scene.control.Label;
+import javafx.scene.control.MenuItem;
+import javafx.scene.control.Slider;
 import javafx.scene.control.TableColumn;
 import javafx.scene.control.TableView;
 import javafx.scene.control.Tooltip;
 import javafx.scene.image.Image;
+import javafx.scene.input.ContextMenuEvent;
 import javafx.scene.input.MouseEvent;
 import javafx.scene.input.ScrollEvent;
 import javafx.scene.layout.*;
@@ -24,11 +31,21 @@ import javafx.scene.text.Font;
 import javafx.scene.text.FontWeight;
 import javafx.util.Duration;
 
+import fqlite.log.AppLog;
+
+import java.awt.Desktop;
+import java.io.IOException;
+import java.net.URI;
+import java.time.Instant;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
+import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
+import java.util.function.Function;
 
 /**
  * Interactive slippy-map rendered entirely on a JavaFX {@link Canvas}.
@@ -110,10 +127,19 @@ public class MapView extends BorderPane {
     // -------------------------------------------------------------------------
 
     private List<DataPoint>     geoPoints     = new ArrayList<>();
-    private double[]            markerScreenX;
-    private double[]            markerScreenY;
     private int                 hoveredMarker = -1;
     private Consumer<DataPoint> selectionListener;
+
+    /**
+     * Optional per-point colour override for single (non-clustered) markers,
+     * e.g. used by the MOC/MTC tab ({@link MapViewPane}) to colour outgoing
+     * vs. incoming calls differently instead of the default
+     * timestamp-present/absent colouring. {@code null} (the default) keeps
+     * the original behaviour. Cluster bubbles are unaffected — they always
+     * use {@code theme.accent1} regardless, since a cluster can mix colours
+     * and showing just one would be misleading.
+     */
+    private Function<DataPoint, Color> markerColorOverride;
 
     /**
      * The point most recently selected via {@link #focusPoint(DataPoint)}.
@@ -185,6 +211,14 @@ public class MapView extends BorderPane {
 
     /** Index of the currently hovered dataset cell site, or -1. */
     private int hoveredDbCell = -1;
+
+    /**
+     * Re-used context menu shown on right-click over a {@link DbCellSite}
+     * marker, offering to open the site's coordinates on cellmapper.net.
+     * Built lazily on first use; its single item's action is rebound to the
+     * clicked site each time (see {@link #onContextMenuRequested}).
+     */
+    private final ContextMenu dbCellContextMenu = new ContextMenu();
 
     /** Colour used for dataset-reported cell-site symbols (distinct from {@link #TOWER_COLOR}). */
     private static final Color  DB_CELL_COLOR  = Color.web("#22c55e"); // green-500
@@ -262,27 +296,64 @@ public class MapView extends BorderPane {
         return sb.toString();
     }
 
-    // ── Sequence-analysis layer (IMSI movement timeline) ────────────────────────
+    // ── IMSI static path overlay ─────────────────────────────────────────────
+    //
+    // Separate from the IMEI storyboard: both can be shown simultaneously.
+    // Selecting an IMSI no longer clears the IMEI selection and vice versa.
 
-    /**
-     * Chronological stops for the IMSI currently selected in {@link #imsiCombo},
-     * built by {@link SequenceAnalyzer#buildSequence}. Empty when no IMSI is
-     * selected. Rendered as a directional path connecting consecutive sites
-     * in time order, distinct in colour and shape from both the ULI-resolved
-     * tower layer and the dataset cell-site layer so all three can be shown
-     * together without being confused for one another.
-     */
+    /** Chronological stops for the IMSI currently selected in {@link #imsiCombo}. */
+    private List<SequenceAnalyzer.Stop> imsiStops = new ArrayList<>();
+
+    /** Screen positions of {@link #imsiStops}, parallel arrays. Filled by
+     *  {@link #drawImsiPathOverlay} every render pass. */
+    private double[] imsiScreenX = new double[0];
+    private double[] imsiScreenY = new double[0];
+
+    /** Index of the currently hovered IMSI stop, or -1. */
+    private int hoveredImsiStop = -1;
+
+    private static final Color  SEQ_COLOR    = Color.web("#a855f7"); // purple-500 (IMSI path)
+    private static final Color  IMEI_PATH_COLOR = Color.web("#22d3ee"); // cyan-400  (IMEI path)
+    private static final double SEQ_HIT_R = 14.0;
+
+    // ── IMEI storyboard animation overlay ────────────────────────────────────
+    //
+    // sequenceStops/seqScreenX/seqScreenY hold the IMEI activity sequence.
+    // The IMSI overlay above (imsiStops/imsiScreenX/imsiScreenY) is drawn
+    // underneath and can coexist. During playback, syncImsiStopToStoryboard()
+    // highlights the IMSI stop whose time window matches the current animation
+    // position, providing time-based synchronisation between the two overlays.
+
+    /** IMEI activity stops built by {@link #onImeiSelected}. */
     private List<SequenceAnalyzer.Stop> sequenceStops = new ArrayList<>();
 
     /** Screen positions of {@link #sequenceStops}, parallel arrays. */
     private double[] seqScreenX = new double[0];
     private double[] seqScreenY = new double[0];
 
-    /** Index of the currently hovered sequence stop, or -1. */
+    /** Index of the currently hovered IMEI sequence stop, or -1. */
     private int hoveredSeqStop = -1;
 
-    private static final Color  SEQ_COLOR = Color.web("#a855f7"); // purple-500
-    private static final double SEQ_HIT_R = 14.0;
+    /** True while {@link #sequenceStops} holds an IMEI activity sequence —
+     *  gates the storyboard transport controls and the moving-marker overlay. */
+    private boolean storyboardActive = false;
+
+    /** Fractional index into {@link #sequenceStops}, e.g. {@code 1.4} means
+     *  40% of the way from stop 1 to stop 2. Drives both the moving marker's
+     *  screen position and the scrubber slider. */
+    private double storyPos = 0.0;
+
+    private boolean   storyPlaying = false;
+    private Timeline   storyTimeline;
+
+    /** Guards {@link #storyScrubber}'s value listener against firing
+     *  {@link #seekStoryboard} when WE move the slider (animation tick /
+     *  reset) instead of the user dragging it. */
+    private boolean updatingScrubberFromAnim = false;
+
+    private static final Color  STORY_MARKER_COLOR        = Color.web("#fb923c"); // orange-400
+    private static final double STORYBOARD_TICK_SECONDS   = 0.04;  // matches the KeyFrame period below
+    private static final double STORYBOARD_SECONDS_PER_STOP = 2.0; // real seconds to cross one segment at 1x speed
 
     /**
      * Pixel radius within which two markers are merged into one cluster dot.
@@ -296,14 +367,35 @@ public class MapView extends BorderPane {
      */
     private static final class MarkerCluster {
         final List<DataPoint> members = new ArrayList<>();
+
+        /**
+         * Centroid in zoom-space tile coordinates (i.e. {@code lonToTileX}/
+         * {@code latToTileY} units at the zoom level the cluster was built
+         * at) — independent of the current pan offset. This is what makes
+         * the cluster cacheable across renders triggered by panning or an
+         * arriving tile image (see {@link MapView#drawMarkers}).
+         */
+        double tileX, tileY;
+
+        /** Current-frame screen position, recomputed from tileX/tileY on
+         *  every render() call (cheap: O(clusters), not O(points)). Used for
+         *  drawing and for hitTest()/onMouseClicked(), which need the actual
+         *  pixel position at the moment of the click. */
         double screenX, screenY;
 
         boolean isSingle() { return members.size() == 1; }
         DataPoint first()  { return members.get(0); }
     }
 
-    /** Built fresh on every {@link #render()} call from the current screen positions. */
+    /** Rebuilt only when {@link #lastClusterGeneration} is stale — see
+     *  {@link #drawMarkers}. */
     private List<MarkerCluster> clusters = List.of();
+
+    /**
+     * {@link #renderGeneration} value the current {@link #clusters} grouping
+     * was computed for. -1 forces a rebuild on the first render.
+     */
+    private int lastClusterGeneration = -1;
 
     // -------------------------------------------------------------------------
     // UI widgets
@@ -328,6 +420,14 @@ public class MapView extends BorderPane {
     private final ComboBox<String> imsiCombo;
     private final Label            seqStatusLabel;
     private final TableView<SequenceAnalyzer.Stop> sequenceTable;
+
+    // IMEI storyboard controls (selector + Play/Pause + speed + scrubber)
+    private final HBox             storyBar;
+    private final ComboBox<String> imeiCombo;
+    private final Button           btnStoryPlay;
+    private final Slider           storySpeedSlider;
+    private final Slider           storyScrubber;
+    private final Label            storyPosLabel;
 
     // -------------------------------------------------------------------------
     // Construction
@@ -391,7 +491,54 @@ public class MapView extends BorderPane {
         seqBar.setAlignment(Pos.CENTER_LEFT);
         seqBar.setPadding(new Insets(0, 16, 8, 16));
 
-        VBox topBox = new VBox(header, seqBar);
+        // ── Storyboard-Leiste (IMEI-Auswahl + Animation-Transport) ───────────
+        Label storyLabel = new Label("🎬 Storyboard (IMEI):");
+        storyLabel.setFont(Font.font("Monospace", 10));
+
+        imeiCombo = new ComboBox<>();
+        imeiCombo.setPromptText("IMEI wählen …");
+        imeiCombo.setPrefWidth(220);
+        imeiCombo.setTooltip(new Tooltip(
+                "Animiert die einzelnen Aktivitäten (Sessions, SMS, Sprache, …)\n" +
+                "des gewählten Geräts (IMEI) in chronologischer Reihenfolge als\n" +
+                "bewegten Marker mit Spur auf der Karte. Nutzt dieselbe Pfad-\n" +
+                "Anzeige wie die IMSI-Sequenzanalyse links, aber ohne Zusammen-\n" +
+                "fassung gleicher Standorte, damit jede einzelne Aktivität\n" +
+                "sichtbar bleibt."));
+        imeiCombo.setOnAction(e -> onImeiSelected(imeiCombo.getValue()));
+
+        btnStoryPlay = new Button("▶"); // ▶
+        btnStoryPlay.setFont(Font.font("Monospace", FontWeight.BOLD, 11));
+        btnStoryPlay.setDisable(true);
+        btnStoryPlay.setTooltip(new Tooltip("Animation abspielen / pausieren"));
+        btnStoryPlay.setOnAction(e -> toggleStoryPlayback());
+
+        Label speedLabel = new Label("Tempo:");
+        speedLabel.setFont(Font.font("Monospace", 10));
+        storySpeedSlider = new Slider(0.25, 4.0, 1.0);
+        storySpeedSlider.setPrefWidth(90);
+        storySpeedSlider.setDisable(true);
+        storySpeedSlider.setTooltip(new Tooltip("Animationsgeschwindigkeit (0.25× – 4×)"));
+
+        storyScrubber = new Slider(0, 1, 0);
+        storyScrubber.setPrefWidth(220);
+        storyScrubber.setDisable(true);
+        storyScrubber.setTooltip(new Tooltip("Zeitleiste — zu einer Aktivität springen"));
+        // Only react to value changes the USER caused by dragging the
+        // scrubber; our own animation tick / reset also moves this slider
+        // (see setStoryPos()) and must not re-trigger a seek.
+        storyScrubber.valueProperty().addListener((obs, oldV, newV) -> {
+            if (!updatingScrubberFromAnim) seekStoryboard(newV.doubleValue());
+        });
+
+        storyPosLabel = new Label("");
+        storyPosLabel.setFont(Font.font("Monospace", 10));
+
+        storyBar = new HBox(10, storyLabel, imeiCombo, btnStoryPlay, speedLabel, storySpeedSlider, storyScrubber, storyPosLabel);
+        storyBar.setAlignment(Pos.CENTER_LEFT);
+        storyBar.setPadding(new Insets(0, 16, 8, 16));
+
+        VBox topBox = new VBox(header, seqBar, storyBar);
         setTop(topBox);
 
         // ── Canvas ────────────────────────────────────────────────────────────
@@ -406,6 +553,7 @@ public class MapView extends BorderPane {
         canvas.setOnMouseReleased(this::onMouseReleased);
         canvas.setOnMouseMoved(this::onMouseMoved);
         canvas.setOnMouseClicked(this::onMouseClicked);
+        canvas.setOnContextMenuRequested(this::onContextMenuRequested);
 
         // ── Zoom control overlay ──────────────────────────────────────────────
         btnZoomIn  = makeZoomButton("+");
@@ -484,21 +632,23 @@ public class MapView extends BorderPane {
         // If the dataset cell-site layer is active, rebuild it from the new data.
         if (dbCellLayerEnabled) rebuildDbCellSites();
 
-        // Repopulate the IMSI selector for the sequence-analysis layer and
-        // clear any sequence built from the previous dataset.
-        String previousSelection = imsiCombo.getValue();
+        // Repopulate the IMSI/IMEI selectors for the sequence-analysis and
+        // storyboard layers and clear any sequence built from the previous
+        // dataset.
+        String previousImsiSelection = imsiCombo.getValue();
+        String previousImeiSelection = imeiCombo.getValue();
         imsiCombo.getItems().setAll(SequenceAnalyzer.listImsis(allPoints));
-        sequenceStops = new ArrayList<>();
-        seqScreenX = new double[0];
-        seqScreenY = new double[0];
-        hoveredSeqStop = -1;
-        sequenceTable.getItems().clear();
-        setSequenceTableVisible(false);
-        if (previousSelection != null && imsiCombo.getItems().contains(previousSelection)) {
-            imsiCombo.setValue(previousSelection);
-            onImsiSelected(previousSelection);
+        imeiCombo.getItems().setAll(SequenceAnalyzer.listImeis(allPoints));
+        clearSequenceOverlay();
+        if (previousImsiSelection != null && imsiCombo.getItems().contains(previousImsiSelection)) {
+            imsiCombo.setValue(previousImsiSelection);
+            onImsiSelected(previousImsiSelection);
+        } else if (previousImeiSelection != null && imeiCombo.getItems().contains(previousImeiSelection)) {
+            imeiCombo.setValue(previousImeiSelection);
+            onImeiSelected(previousImeiSelection);
         } else {
             imsiCombo.setValue(null);
+            imeiCombo.setValue(null);
             seqStatusLabel.setText("");
         }
 
@@ -508,6 +658,16 @@ public class MapView extends BorderPane {
     /** Registers a callback invoked when the user clicks a marker. */
     public void setSelectionListener(Consumer<DataPoint> listener) {
         this.selectionListener = listener;
+    }
+
+    /**
+     * Installs (or clears, with {@code null}) a per-point colour override for
+     * single markers — see {@link #markerColorOverride}. Triggers an
+     * immediate repaint so a tab that's already visible picks up the change.
+     */
+    public void setMarkerColorOverride(Function<DataPoint, Color> override) {
+        this.markerColorOverride = override;
+        render();
     }
 
     /**
@@ -572,6 +732,7 @@ public class MapView extends BorderPane {
         setStyle(t.bgStyle());
         header.setStyle(t.bgStyle() + t.borderBottomStyle());
         seqBar.setStyle(t.bgStyle() + t.borderBottomStyle());
+        storyBar.setStyle(t.bgStyle() + t.borderBottomStyle());
         titleLabel.setTextFill(t.accent2);
         statusLabel.setStyle(t.bgStyle() + t.borderTopStyle());
         statusLabel.setTextFill(t.label);
@@ -686,11 +847,16 @@ public class MapView extends BorderPane {
         // either be fully hidden behind the marker or fully hide it.
         if (dbCellLayerEnabled && !dbCellSites.isEmpty())
             drawDbCellSites(gc, W, H, tlTX, tlTY, tPx);
-        // Sequence path drawn last of all: it's an explicit, user-requested
-        // overlay (one selected IMSI) and should never be obscured by the
-        // denser always-on layers underneath it.
+        // IMSI static path — drawn first so it sits below the IMEI storyboard.
+        if (!imsiStops.isEmpty())
+            drawImsiPathOverlay(gc, W, H, tlTX, tlTY, tPx);
+        // IMEI storyboard path (drawn on top of IMSI path when both are active).
+        // drawSequencePath() fills seqScreenX/seqScreenY which drawStoryboardMarker needs.
         if (!sequenceStops.isEmpty())
             drawSequencePath(gc, W, H, tlTX, tlTY, tPx);
+        // Animated storyboard marker on top of everything.
+        if (storyboardActive && sequenceStops.size() >= 2)
+            drawStoryboardMarker(gc, W, H, tlTX, tlTY, tPx);
     }
 
     private void drawTiles(GraphicsContext gc, double W, double H,
@@ -747,48 +913,41 @@ public class MapView extends BorderPane {
                              double tlTX, double tlTY, int tPx) {
         if (geoPoints.isEmpty()) return;
 
-        // ── 1. Compute raw screen positions ──────────────────────────────────
-        markerScreenX = new double[geoPoints.size()];
-        markerScreenY = new double[geoPoints.size()];
-        for (int i = 0; i < geoPoints.size(); i++) {
-            DataPoint dp = geoPoints.get(i);
-            markerScreenX[i] = (lonToTileX(dp.getCoordinate().getLongitude(), zoom) - tlTX) * tPx;
-            markerScreenY[i] = (latToTileY(dp.getCoordinate().getLatitude(),  zoom) - tlTY) * tPx;
+        // ── 1+2. Rebuild the cluster grouping, but ONLY when zoom or the
+        // dataset actually changed (renderGeneration) — not on every single
+        // render() call. render() also runs for plain panning (drag) and for
+        // every individual tile image that finishes loading asynchronously
+        // (see drawTiles()'s TileCache callback), which during an active
+        // zoom/pan gesture can fire many times per second. Re-clustering is
+        // an O(n) pass over the *entire* point set (grid bucketing + sqrt
+        // distance checks + List/HashMap churn) — redoing it on every one of
+        // those incidental redraws was the dominant cost behind the
+        // "zooming/reset stutters" symptom on large datasets (hundreds of
+        // thousands of geo points).
+        //
+        // This is safe to cache because the grouping decision only depends
+        // on (point positions, zoom): panning is a uniform screen-space
+        // translation that does not change relative distances between
+        // points, so a clustering computed at a given zoom level stays
+        // correct for any pan offset at that same zoom level. Each cluster's
+        // centroid is therefore stored in zoom-space tile coordinates
+        // (tileX/tileY, pan-independent) rather than screen pixels; only the
+        // cheap per-cluster screen-space projection in step 3 below — O(clusters),
+        // not O(points) — needs to run on every render() call.
+        int myGeneration = renderGeneration.get();
+        if (myGeneration != lastClusterGeneration) {
+            rebuildClusters(tPx);
+            lastClusterGeneration = myGeneration;
         }
 
-        // ── 2. Greedy clustering: merge points within CLUSTER_RADIUS_PX ──────
-        boolean[] assigned = new boolean[geoPoints.size()];
-        List<MarkerCluster> built = new ArrayList<>();
-
-        for (int i = 0; i < geoPoints.size(); i++) {
-            if (assigned[i]) continue;
-            MarkerCluster c = new MarkerCluster();
-            c.members.add(geoPoints.get(i));
-            c.screenX = markerScreenX[i];
-            c.screenY = markerScreenY[i];
-            assigned[i] = true;
-
-            for (int j = i + 1; j < geoPoints.size(); j++) {
-                if (assigned[j]) continue;
-                double dx = markerScreenX[j] - c.screenX;
-                double dy = markerScreenY[j] - c.screenY;
-                if (Math.sqrt(dx * dx + dy * dy) <= CLUSTER_RADIUS_PX) {
-                    c.members.add(geoPoints.get(j));
-                    // Update centroid of the cluster
-                    c.screenX = (c.screenX * (c.members.size() - 1) + markerScreenX[j]) / c.members.size();
-                    c.screenY = (c.screenY * (c.members.size() - 1) + markerScreenY[j]) / c.members.size();
-                    assigned[j] = true;
-                }
-            }
-            built.add(c);
-        }
-        clusters = built;
-
-        // ── 3. Draw clusters ─────────────────────────────────────────────────
+        // ── 3. Project cached cluster centroids to the current pan offset
+        // and draw ──────────────────────────────────────────────────────────
         gc.setFont(Font.font("Monospace", FontWeight.BOLD, 9));
 
         for (int ci = 0; ci < clusters.size(); ci++) {
             MarkerCluster c = clusters.get(ci);
+            c.screenX = (c.tileX - tlTX) * tPx;
+            c.screenY = (c.tileY - tlTY) * tPx;
             double sx = c.screenX;
             double sy = c.screenY;
             if (sx < -40 || sx > W + 40 || sy < -40 || sy > H + 40) continue;
@@ -799,7 +958,9 @@ public class MapView extends BorderPane {
             if (c.isSingle()) {
                 // ── Single marker (unchanged appearance) ─────────────────────
                 DataPoint dp = c.first();
-                Color base   = dp.getTimestamp() != null ? theme.accent2 : theme.accent1;
+                Color base   = markerColorOverride != null
+                        ? markerColorOverride.apply(dp)
+                        : (dp.getTimestamp() != null ? theme.accent2 : theme.accent1);
                 Color fill   = hovered ? theme.hover : base;
                 double r     = hovered ? MARKER_R * 1.35 : MARKER_R;
 
@@ -846,14 +1007,98 @@ public class MapView extends BorderPane {
                 gc.setLineWidth(hovered ? 2.0 : 1.5);
                 gc.strokeOval(sx - r, sy - r, r * 2, r * 2);
 
-                // Count label
-                String label = count > 999 ? "999+" : String.valueOf(count);
+                // Count label — show the exact member count rather than
+                // capping the displayed text at "999+"; tw below already
+                // scales with the label's character length, so longer
+                // numbers are centered correctly too.
+                String label = String.valueOf(count);
                 gc.setFill(Color.WHITE);
                 // Approximate centering (monospace: ~6px per char at size 9)
                 double tw = label.length() * 5.5;
                 gc.fillText(label, sx - tw / 2.0, sy + 3.5);
             }
         }
+    }
+
+    /**
+     * Rebuilds {@link #clusters} from scratch. Only called from
+     * {@link #drawMarkers} when {@link #renderGeneration} has moved past
+     * {@link #lastClusterGeneration} — i.e. on an actual zoom-level change or
+     * dataset reload, not on every render() call (see the comment in
+     * drawMarkers()).
+     * <p>
+     * Works entirely in zoom-space tile coordinates (the raw output of
+     * {@code lonToTileX}/{@code latToTileY}, before subtracting the
+     * top-left pan offset {@code tlTX}/{@code tlTY} or multiplying by the
+     * tile pixel size {@code tPx}) so the resulting {@link MarkerCluster#tileX}/
+     * {@link MarkerCluster#tileY} centroids remain valid across any pan
+     * offset at the current zoom level. {@code tPx} (pixels per tile unit at
+     * the current zoom) is only needed to convert the fixed-pixel
+     * {@code CLUSTER_RADIUS_PX} threshold into the equivalent tile-space
+     * distance for the grouping comparison.
+     */
+    private void rebuildClusters(int tPx) {
+        // Tile-space equivalent of the on-screen cluster radius.
+        final double cellTile = CLUSTER_RADIUS_PX / tPx;
+
+        Map<Long, List<MarkerCluster>> grid = new HashMap<>();
+        List<MarkerCluster> built = new ArrayList<>();
+
+        for (int i = 0; i < geoPoints.size(); i++) {
+            DataPoint dp = geoPoints.get(i);
+            double x = lonToTileX(dp.getCoordinate().getLongitude(), zoom);
+            double y = latToTileY(dp.getCoordinate().getLatitude(),  zoom);
+            long gx = (long) Math.floor(x / cellTile);
+            long gy = (long) Math.floor(y / cellTile);
+
+            MarkerCluster target = null;
+            search:
+            for (long ngx = gx - 1; ngx <= gx + 1 && target == null; ngx++) {
+                for (long ngy = gy - 1; ngy <= gy + 1; ngy++) {
+                    List<MarkerCluster> bucket = grid.get(gridKey(ngx, ngy));
+                    if (bucket == null) continue;
+                    for (MarkerCluster c : bucket) {
+                        double dx = (x - c.tileX) * tPx;
+                        double dy = (y - c.tileY) * tPx;
+                        if (Math.sqrt(dx * dx + dy * dy) <= CLUSTER_RADIUS_PX) {
+                            target = c;
+                            break search;
+                        }
+                    }
+                }
+            }
+
+            if (target == null) {
+                target = new MarkerCluster();
+                target.members.add(dp);
+                target.tileX = x;
+                target.tileY = y;
+                built.add(target);
+                grid.computeIfAbsent(gridKey(gx, gy), k -> new ArrayList<>()).add(target);
+            } else {
+                target.members.add(dp);
+                int n = target.members.size();
+                // Update centroid of the cluster. The centroid can drift
+                // slightly outside its original grid cell as more points are
+                // merged in, but since each merge is itself bounded to
+                // CLUSTER_RADIUS_PX the drift never exceeds one cell width,
+                // so the neighbor-cell scan above still finds it.
+                target.tileX = (target.tileX * (n - 1) + x) / n;
+                target.tileY = (target.tileY * (n - 1) + y) / n;
+            }
+        }
+        clusters = built;
+    }
+
+    /**
+     * Packs two grid-cell coordinates into a single {@code long} key for the
+     * marker-clustering grid used by {@link #rebuildClusters}. Cell
+     * coordinates are derived from tile-space positions divided by the
+     * tile-space cluster radius, so they comfortably fit in 32 bits each
+     * even for very large/zoomed-out views.
+     */
+    private static long gridKey(long gx, long gy) {
+        return (gx << 32) ^ (gy & 0xffffffffL);
     }
 
     // -------------------------------------------------------------------------
@@ -1180,49 +1425,253 @@ public class MapView extends BorderPane {
      * repaints the path overlay.
      */
     private void onImsiSelected(String imsi) {
+        // IMSI and IMEI overlays are now independent — no mutual exclusion.
         if (imsi == null || imsi.isBlank()) {
-            sequenceStops = new ArrayList<>();
-            seqScreenX = new double[0];
-            seqScreenY = new double[0];
-            hoveredSeqStop = -1;
-            sequenceTable.getItems().clear();
-            setSequenceTableVisible(false);
+            imsiStops = new ArrayList<>();
+            imsiScreenX = new double[0];
+            imsiScreenY = new double[0];
+            hoveredImsiStop = -1;
+            updateSequenceTable();
             seqStatusLabel.setText("");
             render();
             return;
         }
 
-        sequenceStops = SequenceAnalyzer.buildSequence(geoPoints, imsi);
-        sequenceTable.getItems().setAll(sequenceStops);
-        setSequenceTableVisible(!sequenceStops.isEmpty());
+        imsiStops = SequenceAnalyzer.buildSequence(geoPoints, imsi);
+        imsiScreenX = new double[imsiStops.size()];
+        imsiScreenY = new double[imsiStops.size()];
+        updateSequenceTable();
 
-        if (sequenceStops.isEmpty()) {
+        if (imsiStops.isEmpty()) {
             seqStatusLabel.setText("⚠ keine Geo-Datensätze für diese IMSI");
-        } else if (sequenceStops.size() == 1) {
+        } else if (imsiStops.size() == 1) {
             seqStatusLabel.setText("nur 1 Standort — keine Bewegung erkennbar");
         } else {
-            seqStatusLabel.setText(sequenceStops.size() + " Standorte chronologisch");
+            seqStatusLabel.setText(imsiStops.size() + " Standorte chronologisch");
         }
 
-        // Fit the view to the sequence so the whole path is visible.
-        if (!sequenceStops.isEmpty()) {
-            double minLat = sequenceStops.stream().mapToDouble(s -> s.lat).min().orElse(centerLat);
-            double maxLat = sequenceStops.stream().mapToDouble(s -> s.lat).max().orElse(centerLat);
-            double minLon = sequenceStops.stream().mapToDouble(s -> s.lon).min().orElse(centerLon);
-            double maxLon = sequenceStops.stream().mapToDouble(s -> s.lon).max().orElse(centerLon);
-            centerLat = (minLat + maxLat) / 2.0;
-            centerLon = (minLon + maxLon) / 2.0;
-            double span = Math.max(maxLat - minLat, maxLon - minLon);
-            if      (span < 0.005) zoom = 15;
-            else if (span < 0.05)  zoom = 13;
-            else if (span < 0.5)   zoom = 10;
-            else if (span < 5)     zoom = 8;
-            else if (span < 20)    zoom = 6;
-            else                   zoom = 4;
-            renderGeneration.incrementAndGet();
-            updateZoomLabel();
-        }
+        fitViewToSequence();
         render();
+    }
+
+    /**
+     * Called when the user picks an IMEI from {@link #imeiCombo} (or clears
+     * the selection). Builds one {@link SequenceAnalyzer.Stop} per raw
+     * activity via {@link SequenceAnalyzer#buildImeiActivitySequence} (no
+     * same-site collapsing, unlike {@link #onImsiSelected}) and arms the
+     * storyboard's Play/Pause button, speed slider and timeline scrubber.
+     */
+    private void onImeiSelected(String imei) {
+        // IMSI overlay is independent — keep it active alongside the IMEI storyboard.
+        if (imei == null || imei.isBlank()) {
+            clearImeiOverlay();
+            return;
+        }
+
+        sequenceStops = SequenceAnalyzer.buildImeiActivitySequence(geoPoints, imei);
+        storyboardActive = true;
+        updateSequenceTable();
+
+        if (sequenceStops.isEmpty()) {
+            seqStatusLabel.setText("⚠ keine Geo-Datensätze für diese IMEI");
+        } else if (sequenceStops.size() == 1) {
+            seqStatusLabel.setText("nur 1 Aktivität — keine Animation möglich");
+        } else {
+            seqStatusLabel.setText(sequenceStops.size() + " Aktivitäten chronologisch");
+        }
+
+        resetStoryboardPlayback();
+        armStoryboardControls(sequenceStops.size() >= 2);
+        fitViewToSequence();
+        render();
+    }
+
+    /** Clears the IMEI storyboard overlay and stops playback. */
+    private void clearImeiOverlay() {
+        sequenceStops = new ArrayList<>();
+        seqScreenX = new double[0];
+        seqScreenY = new double[0];
+        hoveredSeqStop = -1;
+        storyboardActive = false;
+        resetStoryboardPlayback();
+        armStoryboardControls(false);
+        updateSequenceTable();
+        render();
+    }
+
+    /** Clears both IMSI path and IMEI storyboard overlays. */
+    private void clearSequenceOverlay() {
+        imsiStops = new ArrayList<>();
+        imsiScreenX = new double[0];
+        imsiScreenY = new double[0];
+        hoveredImsiStop = -1;
+        clearImeiOverlay();
+        seqStatusLabel.setText("");
+    }
+
+    /**
+     * Keeps the sequence table in sync: shows IMEI stops when present
+     * (they carry richer storyboard metadata), IMSI stops otherwise.
+     */
+    private void updateSequenceTable() {
+        if (!sequenceStops.isEmpty()) {
+            sequenceTable.getItems().setAll(sequenceStops);
+            setSequenceTableVisible(true);
+        } else if (!imsiStops.isEmpty()) {
+            sequenceTable.getItems().setAll(imsiStops);
+            setSequenceTableVisible(true);
+        } else {
+            sequenceTable.getItems().clear();
+            setSequenceTableVisible(false);
+        }
+    }
+
+    /** Re-centres/zooms the map so both the IMSI path and the IMEI storyboard are fully visible. */
+    private void fitViewToSequence() {
+        List<SequenceAnalyzer.Stop> all = new ArrayList<>(imsiStops);
+        all.addAll(sequenceStops);
+        if (all.isEmpty()) return;
+        double minLat = all.stream().mapToDouble(s -> s.lat).min().orElse(centerLat);
+        double maxLat = all.stream().mapToDouble(s -> s.lat).max().orElse(centerLat);
+        double minLon = all.stream().mapToDouble(s -> s.lon).min().orElse(centerLon);
+        double maxLon = all.stream().mapToDouble(s -> s.lon).max().orElse(centerLon);
+        centerLat = (minLat + maxLat) / 2.0;
+        centerLon = (minLon + maxLon) / 2.0;
+        double span = Math.max(maxLat - minLat, maxLon - minLon);
+        if      (span < 0.005) zoom = 15;
+        else if (span < 0.05)  zoom = 13;
+        else if (span < 0.5)   zoom = 10;
+        else if (span < 5)     zoom = 8;
+        else if (span < 20)    zoom = 6;
+        else                   zoom = 4;
+        renderGeneration.incrementAndGet();
+        updateZoomLabel();
+    }
+
+    // -------------------------------------------------------------------------
+    // IMEI storyboard playback (Play/Pause, speed slider, scrubber)
+    // -------------------------------------------------------------------------
+
+    /** Enables/disables the Play button, speed slider and scrubber together. */
+    private void armStoryboardControls(boolean enabled) {
+        btnStoryPlay.setDisable(!enabled);
+        storySpeedSlider.setDisable(!enabled);
+        storyScrubber.setDisable(!enabled);
+    }
+
+    /** Stops any running animation and rewinds the scrubber to the start. */
+    private void resetStoryboardPlayback() {
+        pauseStoryboard();
+        storyPos = 0.0;
+        updatingScrubberFromAnim = true;
+        storyScrubber.setMax(Math.max(0, sequenceStops.size() - 1));
+        storyScrubber.setValue(0);
+        updatingScrubberFromAnim = false;
+        updateStoryPosLabel();
+    }
+
+    private void toggleStoryPlayback() {
+        if (sequenceStops.size() < 2) return;
+        if (storyPlaying) pauseStoryboard(); else playStoryboard();
+    }
+
+    private void playStoryboard() {
+        if (sequenceStops.size() < 2) return;
+        // Restart from the beginning once a finished animation is replayed.
+        if (storyPos >= sequenceStops.size() - 1) setStoryPos(0);
+        storyPlaying = true;
+        btnStoryPlay.setText("⏸");
+        if (storyTimeline != null) storyTimeline.stop();
+        storyTimeline = new Timeline(new KeyFrame(
+                Duration.seconds(STORYBOARD_TICK_SECONDS), e -> advanceStoryboard()));
+        storyTimeline.setCycleCount(Animation.INDEFINITE);
+        storyTimeline.play();
+    }
+
+    private void pauseStoryboard() {
+        storyPlaying = false;
+        btnStoryPlay.setText("▶");
+        if (storyTimeline != null) storyTimeline.stop();
+    }
+
+    /**
+     * Advances {@link #storyPos} by an amount derived from the elapsed tick
+     * time and the speed slider, scaled so that one full segment (one stop
+     * to the next) takes {@link #STORYBOARD_SECONDS_PER_STOP} real seconds
+     * at 1× speed. Pauses automatically once the last stop is reached.
+     */
+    private void advanceStoryboard() {
+        double stepsPerTick = (STORYBOARD_TICK_SECONDS * storySpeedSlider.getValue())
+                / STORYBOARD_SECONDS_PER_STOP;
+        double max  = sequenceStops.size() - 1;
+        double next = storyPos + stepsPerTick;
+        if (next >= max) {
+            setStoryPos(max);
+            pauseStoryboard();
+            return;
+        }
+        setStoryPos(next);
+    }
+
+    /** Called by the scrubber's value listener when the USER drags it. */
+    private void seekStoryboard(double pos) {
+        if (!storyboardActive || sequenceStops.size() < 2) return;
+        storyPos = Math.max(0, Math.min(sequenceStops.size() - 1, pos));
+        hoveredImsiStop = syncImsiStopToStoryboard();
+        updateStoryPosLabel();
+        render();
+    }
+
+    /** Sets {@link #storyPos}, mirrors it onto the scrubber, and repaints. */
+    private void setStoryPos(double pos) {
+        storyPos = Math.max(0, Math.min(Math.max(0, sequenceStops.size() - 1), pos));
+        hoveredImsiStop = syncImsiStopToStoryboard();
+        updatingScrubberFromAnim = true;
+        storyScrubber.setValue(storyPos);
+        updatingScrubberFromAnim = false;
+        updateStoryPosLabel();
+        render();
+    }
+
+    /**
+     * Returns the index of the IMSI stop whose time window best matches the
+     * current storyboard position, or -1 when no IMSI overlay is active.
+     * Used to highlight the matching IMSI stop as the IMEI animation plays,
+     * providing visual time synchronisation between the two overlays.
+     */
+    private int syncImsiStopToStoryboard() {
+        if (imsiStops.isEmpty() || !storyboardActive || sequenceStops.size() < 2) return -1;
+        int i0 = Math.max(0, Math.min(sequenceStops.size() - 2, (int) Math.floor(storyPos)));
+        int i1 = Math.min(sequenceStops.size() - 1, i0 + 1);
+        double frac = storyPos - i0;
+        Instant t0 = sequenceStops.get(i0).firstSeen;
+        Instant t1 = sequenceStops.get(i1).firstSeen;
+        if (t0 == null || t1 == null) return -1;
+        long millis = (long) (t0.toEpochMilli() + (t1.toEpochMilli() - t0.toEpochMilli()) * frac);
+
+        int bestIdx = -1;
+        long bestDist = Long.MAX_VALUE;
+        for (int i = 0; i < imsiStops.size(); i++) {
+            SequenceAnalyzer.Stop s = imsiStops.get(i);
+            if (s.firstSeen == null) continue;
+            // Exact match: animation time falls within this stop's dwell window
+            if (millis >= s.firstSeen.toEpochMilli()
+                    && (s.lastSeen == null || millis <= s.lastSeen.toEpochMilli())) {
+                return i;
+            }
+            long dist = Math.abs(s.firstSeen.toEpochMilli() - millis);
+            if (dist < bestDist) { bestDist = dist; bestIdx = i; }
+        }
+        return bestIdx;
+    }
+
+    private void updateStoryPosLabel() {
+        if (!storyboardActive || sequenceStops.size() < 2) {
+            storyPosLabel.setText("");
+            return;
+        }
+        int idx = Math.min(sequenceStops.size() - 1, (int) Math.round(storyPos)) + 1;
+        storyPosLabel.setText("Aktivität " + idx + " / " + sequenceStops.size());
     }
 
     /** Shows/hides the sequence-result table beneath the map. */
@@ -1254,6 +1703,13 @@ public class MapView extends BorderPane {
         colDwell.setCellValueFactory(cd -> new ReadOnlyObjectWrapper<>(cd.getValue().formattedDwell()));
         colDwell.setPrefWidth(100);
 
+        // Populated only for IMEI storyboard stops (one record each); shows
+        // "–" for plain IMSI movement stops, which carry no call metadata.
+        TableColumn<SequenceAnalyzer.Stop, String> colActivity = new TableColumn<>("Aktivität");
+        colActivity.setCellValueFactory(cd -> new ReadOnlyObjectWrapper<>(
+                cd.getValue().activityLabel() != null ? cd.getValue().activityLabel() : "–"));
+        colActivity.setPrefWidth(220);
+
         TableColumn<SequenceAnalyzer.Stop, String> colCell = new TableColumn<>("Zelle");
         colCell.setCellValueFactory(cd -> new ReadOnlyObjectWrapper<>(cd.getValue().cellLabel()));
         colCell.setPrefWidth(180);
@@ -1274,7 +1730,7 @@ public class MapView extends BorderPane {
         colCount.setCellValueFactory(cd -> new ReadOnlyObjectWrapper<>(cd.getValue().recordCount));
         colCount.setPrefWidth(90);
 
-        table.getColumns().addAll(List.of(colIdx, colFrom, colTo, colDwell, colCell, colPos, colDist, colCount));
+        table.getColumns().addAll(List.of(colIdx, colFrom, colTo, colDwell, colActivity, colCell, colPos, colDist, colCount));
         table.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY);
 
         table.setRowFactory(tv -> {
@@ -1306,7 +1762,7 @@ public class MapView extends BorderPane {
         }
 
         // ── Connecting line with arrowheads showing direction of travel ──────
-        gc.setStroke(SEQ_COLOR);
+        gc.setStroke(IMEI_PATH_COLOR);
         gc.setLineWidth(2.2);
         gc.setLineDashes(8, 6);
         for (int i = 1; i < seqScreenX.length; i++) {
@@ -1324,7 +1780,7 @@ public class MapView extends BorderPane {
             if (sx < -40 || sx > W + 40 || sy < -40 || sy > H + 40) continue;
             boolean hovered = (i == hoveredSeqStop);
             double r = hovered ? 13.0 : 10.0;
-            Color c = hovered ? SEQ_COLOR.brighter() : SEQ_COLOR;
+            Color c = hovered ? IMEI_PATH_COLOR.brighter() : IMEI_PATH_COLOR;
 
             gc.setFill(Color.rgb(0, 0, 0, 0.3));
             gc.fillOval(sx - r + 2, sy - r + 2, r * 2, r * 2);
@@ -1341,8 +1797,59 @@ public class MapView extends BorderPane {
         }
     }
 
-    /** Draws a small arrowhead at the midpoint of the segment, pointing from (x0,y0) to (x1,y1). */
-    private void drawArrowhead(GraphicsContext gc, double x0, double y0, double x1, double y1) {
+    /**
+     * Draws the static IMSI movement path overlay (purple, dashed).
+     * Fills {@link #imsiScreenX}/{@link #imsiScreenY} for hover hit-testing.
+     * The currently-synced stop ({@link #hoveredImsiStop}) is drawn enlarged
+     * to show which IMSI stop corresponds to the current IMEI animation time.
+     */
+    private void drawImsiPathOverlay(GraphicsContext gc, double W, double H,
+                                      double tlTX, double tlTY, int tPx) {
+        imsiScreenX = new double[imsiStops.size()];
+        imsiScreenY = new double[imsiStops.size()];
+
+        for (int i = 0; i < imsiStops.size(); i++) {
+            SequenceAnalyzer.Stop s = imsiStops.get(i);
+            imsiScreenX[i] = (lonToTileX(s.lon, zoom) - tlTX) * tPx;
+            imsiScreenY[i] = (latToTileY(s.lat,  zoom) - tlTY) * tPx;
+        }
+
+        gc.setStroke(SEQ_COLOR);
+        gc.setLineWidth(2.2);
+        gc.setLineDashes(8, 6);
+        for (int i = 1; i < imsiScreenX.length; i++) {
+            double x0 = imsiScreenX[i - 1], y0 = imsiScreenY[i - 1];
+            double x1 = imsiScreenX[i],     y1 = imsiScreenY[i];
+            gc.strokeLine(x0, y0, x1, y1);
+            drawImsiArrowhead(gc, x0, y0, x1, y1);
+        }
+        gc.setLineDashes(null);
+
+        gc.setFont(Font.font("Monospace", FontWeight.BOLD, 9));
+        for (int i = 0; i < imsiScreenX.length; i++) {
+            double sx = imsiScreenX[i], sy = imsiScreenY[i];
+            if (sx < -40 || sx > W + 40 || sy < -40 || sy > H + 40) continue;
+            // hoveredImsiStop is either user-hovered OR set by syncImsiStopToStoryboard()
+            boolean synced = (i == hoveredImsiStop);
+            double r = synced ? 14.0 : 10.0;
+            Color c = synced ? SEQ_COLOR.brighter() : SEQ_COLOR;
+
+            gc.setFill(Color.rgb(0, 0, 0, 0.3));
+            gc.fillOval(sx - r + 2, sy - r + 2, r * 2, r * 2);
+            gc.setFill(c);
+            gc.fillOval(sx - r, sy - r, r * 2, r * 2);
+            gc.setStroke(Color.WHITE);
+            gc.setLineWidth(synced ? 2.0 : 1.2);
+            gc.strokeOval(sx - r, sy - r, r * 2, r * 2);
+
+            String label = String.valueOf(i + 1);
+            gc.setFill(Color.WHITE);
+            double tw = label.length() * 5.5;
+            gc.fillText(label, sx - tw / 2.0, sy + 3.2);
+        }
+    }
+
+    private void drawImsiArrowhead(GraphicsContext gc, double x0, double y0, double x1, double y1) {
         double mx = (x0 + x1) / 2.0, my = (y0 + y1) / 2.0;
         double angle = Math.atan2(y1 - y0, x1 - x0);
         double size = 7.0;
@@ -1350,6 +1857,32 @@ public class MapView extends BorderPane {
         double a2 = angle + Math.PI + 0.4;
         gc.setLineDashes(null);
         gc.setStroke(SEQ_COLOR);
+        gc.setLineWidth(2.2);
+        gc.strokeLine(mx, my, mx + size * Math.cos(a1), my + size * Math.sin(a1));
+        gc.strokeLine(mx, my, mx + size * Math.cos(a2), my + size * Math.sin(a2));
+        gc.setLineDashes(8, 6);
+    }
+
+    /** Returns the IMSI stop index under the mouse, or -1. */
+    private int hitTestImsiStop(double mx, double my) {
+        if (imsiScreenX.length == 0) return -1;
+        for (int i = 0; i < imsiScreenX.length; i++) {
+            double dx = mx - imsiScreenX[i];
+            double dy = my - imsiScreenY[i];
+            if (Math.sqrt(dx * dx + dy * dy) <= SEQ_HIT_R) return i;
+        }
+        return -1;
+    }
+
+    /** Draws a small arrowhead (IMEI path colour) at the midpoint of the segment. */
+    private void drawArrowhead(GraphicsContext gc, double x0, double y0, double x1, double y1) {
+        double mx = (x0 + x1) / 2.0, my = (y0 + y1) / 2.0;
+        double angle = Math.atan2(y1 - y0, x1 - x0);
+        double size = 7.0;
+        double a1 = angle + Math.PI - 0.4;
+        double a2 = angle + Math.PI + 0.4;
+        gc.setLineDashes(null);
+        gc.setStroke(IMEI_PATH_COLOR);
         gc.setLineWidth(2.2);
         gc.strokeLine(mx, my, mx + size * Math.cos(a1), my + size * Math.sin(a1));
         gc.strokeLine(mx, my, mx + size * Math.cos(a2), my + size * Math.sin(a2));
@@ -1367,11 +1900,68 @@ public class MapView extends BorderPane {
         return -1;
     }
 
-    /** Builds a tooltip for a sequence stop. */
-    private String buildSeqStopTooltip(int index) {
-        SequenceAnalyzer.Stop s = sequenceStops.get(index);
+    /**
+     * Renders the storyboard's moving marker plus a solid trail behind it,
+     * interpolating between the two stops {@link #storyPos} currently lies
+     * between. Relies on {@link #seqScreenX}/{@link #seqScreenY} having
+     * already been filled by {@link #drawSequencePath} earlier in the same
+     * {@link #render()} call. The trail re-traces the dashed path drawn by
+     * {@link #drawSequencePath}, but solid and in the marker's own colour,
+     * so "already played" is visually distinct from "not reached yet".
+     */
+    private void drawStoryboardMarker(GraphicsContext gc, double W, double H,
+                                       double tlTX, double tlTY, int tPx) {
+        if (seqScreenX.length != sequenceStops.size() || seqScreenX.length < 2) return;
+
+        int    i0   = Math.max(0, Math.min(sequenceStops.size() - 2, (int) Math.floor(storyPos)));
+        int    i1   = i0 + 1;
+        double frac = storyPos - i0;
+
+        gc.setLineDashes(null);
+        gc.setStroke(STORY_MARKER_COLOR);
+        gc.setLineWidth(3.0);
+        for (int i = 1; i <= i0; i++) {
+            gc.strokeLine(seqScreenX[i - 1], seqScreenY[i - 1], seqScreenX[i], seqScreenY[i]);
+        }
+        double mx = seqScreenX[i0] + (seqScreenX[i1] - seqScreenX[i0]) * frac;
+        double my = seqScreenY[i0] + (seqScreenY[i1] - seqScreenY[i0]) * frac;
+        gc.strokeLine(seqScreenX[i0], seqScreenY[i0], mx, my);
+
+        gc.setFill(Color.rgb(0, 0, 0, 0.35));
+        gc.fillOval(mx - 11, my - 11, 22, 22);
+        gc.setFill(STORY_MARKER_COLOR);
+        gc.fillOval(mx - 9, my - 9, 18, 18);
+        gc.setStroke(Color.WHITE);
+        gc.setLineWidth(1.6);
+        gc.strokeOval(mx - 9, my - 9, 18, 18);
+    }
+
+    /** Current screen position (x, y) of the storyboard's moving marker, or
+     *  {@code null} if there's nothing to animate. Shared by the renderer
+     *  and the hover hit-test so they always agree on where it is. */
+    private double[] storyboardMarkerScreenPos() {
+        if (seqScreenX.length != sequenceStops.size() || seqScreenX.length < 2) return null;
+        int    i0   = Math.max(0, Math.min(sequenceStops.size() - 2, (int) Math.floor(storyPos)));
+        int    i1   = i0 + 1;
+        double frac = storyPos - i0;
+        double mx = seqScreenX[i0] + (seqScreenX[i1] - seqScreenX[i0]) * frac;
+        double my = seqScreenY[i0] + (seqScreenY[i1] - seqScreenY[i0]) * frac;
+        return new double[] { mx, my };
+    }
+
+    /** Returns true if (mx, my) is within hit range of the storyboard's moving marker. */
+    private boolean hitTestStoryboardMarker(double mx, double my) {
+        if (!storyboardActive || sequenceStops.size() < 2) return false;
+        double[] pos = storyboardMarkerScreenPos();
+        if (pos == null) return false;
+        return Math.hypot(mx - pos[0], my - pos[1]) <= SEQ_HIT_R;
+    }
+
+    /** Builds a tooltip for an IMSI path stop. */
+    private String buildImsiStopTooltip(int index) {
+        SequenceAnalyzer.Stop s = imsiStops.get(index);
         StringBuilder sb = new StringBuilder();
-        sb.append("🧭  STANDORT #").append(index + 1).append(" / ").append(sequenceStops.size()).append("\n");
+        sb.append("🟣  IMSI-STANDORT #").append(index + 1).append(" / ").append(imsiStops.size()).append("\n");
         sb.append("─".repeat(36)).append("\n");
         row(sb, "Von",         s.formattedFirstSeen() + " UTC");
         row(sb, "Bis",         s.formattedLastSeen()  + " UTC");
@@ -1382,6 +1972,33 @@ public class MapView extends BorderPane {
         row(sb, "Datensätze",  String.valueOf(s.recordCount));
         if (s.distanceFromPreviousKm > 0)
             row(sb, "Distanz", String.format("%.2f km zum vorherigen Standort", s.distanceFromPreviousKm));
+        return sb.toString().stripTrailing();
+    }
+
+    /** Builds a tooltip for an IMEI storyboard stop. */
+    private String buildSeqStopTooltip(int index) {
+        SequenceAnalyzer.Stop s = sequenceStops.get(index);
+        StringBuilder sb = new StringBuilder();
+        sb.append("🔵  STANDORT #").append(index + 1).append(" / ").append(sequenceStops.size()).append("\n");
+        sb.append("─".repeat(36)).append("\n");
+        row(sb, "Von",         s.formattedFirstSeen() + " UTC");
+        row(sb, "Bis",         s.formattedLastSeen()  + " UTC");
+        row(sb, "Verweildauer",s.formattedDwell());
+        row(sb, "Zelle",       s.cellLabel());
+        row(sb, "Lat",         String.format("%.6f°", s.lat));
+        row(sb, "Lon",         String.format("%.6f°", s.lon));
+        row(sb, "Datensätze",  String.valueOf(s.recordCount));
+        if (s.distanceFromPreviousKm > 0)
+            row(sb, "Distanz", String.format("%.2f km zum vorherigen Standort", s.distanceFromPreviousKm));
+        // Storyboard (IMEI) stops additionally carry the raw record's
+        // call-type fields — shown together with their forensic meaning
+        // (see SequenceAnalyzer.Stop#callIndicatorLabel() and friends).
+        if (s.callIndicator != null)
+            row(sb, "Call Indicator", s.callIndicator + " (" + s.callIndicatorLabel() + ")");
+        if (s.callSubtype != null)
+            row(sb, "Subtype",        s.callSubtype    + " (" + s.callSubtypeLabel()    + ")");
+        if (s.callActionCode != null)
+            row(sb, "Action Code",    s.callActionCode + " (" + s.callActionCodeLabel() + ")");
         return sb.toString().stripTrailing();
     }
 
@@ -1441,18 +2058,18 @@ public class MapView extends BorderPane {
                             // kein Treffer in keiner Quelle
                             return;
                         }
-                        System.out.printf("[TOWER] %s lat=%.5f lon=%.5f hasPos=%b%n",
-                                tower.networkType, tower.latitude, tower.longitude,
-                                tower.hasPosition());
+                        //System.out.printf("[TOWER] %s lat=%.5f lon=%.5f hasPos=%b%n",
+                        //        tower.networkType, tower.latitude, tower.longitude,
+                        //        tower.hasPosition());
                         if (!tower.hasPosition()) return;
                         rr.setCellTower(tower);
                         Platform.runLater(() -> {
                             int before = cellTowers.size();
                             addTowerIfNew(tower);
-                            System.out.printf("[TOWER] added=%b total=%d layerOn=%b%n",
-                                    cellTowers.size() > before,
-                                    cellTowers.size(),
-                                    cellTowerLayerEnabled);
+                            //System.out.printf("[TOWER] added=%b total=%d layerOn=%b%n",
+                              //      cellTowers.size() > before,
+                                //    cellTowers.size(),
+                                  //  cellTowerLayerEnabled);
                             render();
                         });
                     });
@@ -1540,9 +2157,9 @@ public class MapView extends BorderPane {
             double dLat = Math.abs(tower.latitude  - centerLat);
             double dLon = Math.abs(tower.longitude - centerLon);
             double distKm = Math.sqrt(dLat * dLat + dLon * dLon) * 111.0;
-            System.out.printf("[TOWER] ⚠ Tower außerhalb Sichtbereich! " +
-                              "lat=%.4f lon=%.4f  sx=%.0f sy=%.0f  dist~%.1fkm%n",
-                    tower.latitude, tower.longitude, sx, sy, distKm);
+           // System.out.printf("[TOWER] ⚠ Tower außerhalb Sichtbereich! " +
+           //                   "lat=%.4f lon=%.4f  sx=%.0f sy=%.0f  dist~%.1fkm%n",
+           //         tower.latitude, tower.longitude, sx, sy, distKm);
         }
     }
 
@@ -1749,6 +2366,83 @@ public class MapView extends BorderPane {
         return sb.toString().stripTrailing();
     }
 
+    // -------------------------------------------------------------------------
+    // Context menu — open a dataset cell site on cellmapper.net
+    // -------------------------------------------------------------------------
+
+    /**
+     * Handles a right-click (or platform-equivalent context-menu gesture) on
+     * the canvas. If the gesture lands on a {@link DbCellSite} marker, shows
+     * {@link #dbCellContextMenu} with an action that opens that site's
+     * position on cellmapper.net in the system browser. No-op everywhere
+     * else on the map.
+     */
+    private void onContextMenuRequested(ContextMenuEvent e) {
+        dbCellContextMenu.hide();
+
+        int hit = dbCellLayerEnabled ? hitTestDbCell(e.getX(), e.getY()) : -1;
+        if (hit < 0) return;
+
+        DbCellSite site = dbCellSites.get(hit);
+        dbCellContextMenu.getItems().clear();
+        MenuItem openItem = new MenuItem("Auf cellmapper.net öffnen (" + site.label + ")");
+        openItem.setOnAction(ev -> openInBrowser(buildCellMapperUrl(site)));
+        dbCellContextMenu.getItems().add(openItem);
+        dbCellContextMenu.show(canvas, e.getScreenX(), e.getScreenY());
+    }
+
+    /**
+     * Builds the cellmapper.net deep link for {@code site}. The position
+     * (latitude/longitude) always comes from the site itself; MCC, MNC and
+     * the radio-network type are taken from the site's decoded {@link
+     * UliDecoder.CellInfo} when one was decoded (see {@link DbCellSite#cellInfo}),
+     * falling back to MCC=262/MNC=2 ("o2"/Telefónica Germany) and type=LTE —
+     * the values cellmapper.net itself defaults to — when no ULI could be
+     * decoded for any record at this site. All other query parameters are
+     * fixed display options, not derived from the data.
+     */
+    private String buildCellMapperUrl(DbCellSite site) {
+        int    mcc  = 262;
+        int    mnc  = 2;
+        String type = "LTE";
+
+        UliDecoder.CellInfo ci = site.cellInfo;
+        if (ci != null) {
+            if (ci.mcc >= 100) mcc = ci.mcc;
+            if (ci.mnc >= 0)   mnc = ci.mnc;
+            if (ci.networkType != null) {
+                String nt = ci.networkType;
+                if      (nt.contains("LTE"))                type = "LTE";
+                else if (nt.contains("NR"))                 type = "NR";
+                else if (nt.contains("3G") || nt.contains("UMTS")) type = "UMTS";
+                else if (nt.contains("2G") || nt.contains("GSM"))  type = "GSM";
+            }
+        }
+
+        return String.format(Locale.ROOT,
+                "https://www.cellmapper.net/map?MCC=%d&MNC=%d&type=%s&latitude=%s&longitude=%s"
+                + "&zoom=16&showTowers=true&showIcons=true&showTowerLabels=true&clusterEnabled=true"
+                + "&tilesEnabled=true&showOrphans=false&showNoFrequencyOnly=false&showFrequencyOnly=false"
+                + "&showBandwidthOnly=false&DateFilterType=Last&showHex=true&showVerifiedOnly=false"
+                + "&showUnverifiedOnly=false&showLTECAOnly=false&showENDCOnly=false&showBand=0"
+                + "&showSectorColours=true&mapType=roadmap&darkMode=false&imperialUnits=false",
+                mcc, mnc, type, site.lat, site.lon);
+    }
+
+    /** Opens {@code url} in the system's default browser, if supported. */
+    private static void openInBrowser(String url) {
+        try {
+            if (Desktop.isDesktopSupported()) {
+                Desktop desktop = Desktop.getDesktop();
+                if (desktop.isSupported(Desktop.Action.BROWSE)) {
+                    desktop.browse(URI.create(url));
+                }
+            }
+        } catch (IOException | InternalError err) {
+            AppLog.error(err.getMessage());
+        }
+    }
+
     /**
      * Builds a structured multi-line tooltip for a cell tower.
      *
@@ -1847,24 +2541,46 @@ public class MapView extends BorderPane {
             if (!dbCellSites.isEmpty()) render();
         }
 
+        // Hit-test IMEI storyboard path stops
         int seqHit = !sequenceStops.isEmpty() ? hitTestSeqStop(e.getX(), e.getY()) : -1;
         if (seqHit != hoveredSeqStop) {
             hoveredSeqStop = seqHit;
             if (!sequenceStops.isEmpty()) render();
         }
 
+        // Hit-test IMSI static path stops (only when NOT driven by storyboard sync)
+        if (!storyboardActive || sequenceStops.isEmpty()) {
+            int imsiHit = !imsiStops.isEmpty() ? hitTestImsiStop(e.getX(), e.getY()) : -1;
+            if (imsiHit != hoveredImsiStop) {
+                hoveredImsiStop = imsiHit;
+                if (!imsiStops.isEmpty()) render();
+            }
+        }
+
+        // The storyboard's moving marker is drawn on top of every numbered
+        // sequence stop, so it gets first refusal on the cursor/tooltip.
+        boolean storyHit = hitTestStoryboardMarker(e.getX(), e.getY());
+
         int hit = hitTest(e.getX(), e.getY());
         if (hit != hoveredMarker) {
             hoveredMarker = hit;
-            canvas.setCursor((hit >= 0 || towerHit >= 0 || dbCellHit >= 0 || seqHit >= 0) ? Cursor.HAND : Cursor.OPEN_HAND);
+            boolean anyHit = hit >= 0 || towerHit >= 0 || dbCellHit >= 0
+                    || seqHit >= 0 || storyHit || hoveredImsiStop >= 0;
+            canvas.setCursor(anyHit ? Cursor.HAND : Cursor.OPEN_HAND);
             render();
         }
 
         if (towerHit >= 0) {
             tooltip.setText(buildTowerTooltip(cellTowers.get(towerHit)));
             Tooltip.install(canvas, tooltip);
+        } else if (storyHit) {
+            tooltip.setText(buildSeqStopTooltip(Math.max(0, Math.min(sequenceStops.size() - 1, (int) Math.round(storyPos)))));
+            Tooltip.install(canvas, tooltip);
         } else if (seqHit >= 0) {
             tooltip.setText(buildSeqStopTooltip(seqHit));
+            Tooltip.install(canvas, tooltip);
+        } else if (hoveredImsiStop >= 0) {
+            tooltip.setText(buildImsiStopTooltip(hoveredImsiStop));
             Tooltip.install(canvas, tooltip);
         } else if (dbCellHit >= 0) {
             tooltip.setText(buildDbCellTooltip(dbCellSites.get(dbCellHit)));

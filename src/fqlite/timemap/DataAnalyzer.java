@@ -7,6 +7,7 @@ import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Predicate;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -141,6 +142,37 @@ public class DataAnalyzer {
     public List<DataPoint> analyze(
             ConcurrentHashMap<String, ObservableList<ObservableList<String>>> resultlist,
             Map<String, List<String>> headers) {
+        return analyze(resultlist, headers, null);
+    }
+
+    /**
+     * Reports how many rows (out of the known total) {@link #analyze} has
+     * processed so far. Used by callers running {@link #analyze} on a
+     * background thread (see {@code MapViewPane#setData}) to show real
+     * progress instead of an indeterminate spinner while a large recovered
+     * database (potentially hundreds of thousands to millions of rows) is
+     * being scanned for timestamp/geo columns.
+     */
+    public interface ProgressListener {
+        void onProgress(long processedRows, long totalRows);
+    }
+
+    /**
+     * Same as {@link #analyze(ConcurrentHashMap, Map)}, but reports progress
+     * via {@code listener} (may be {@code null} to skip reporting). Progress
+     * is reported in batches (not after every single row) to keep the
+     * overhead of the callback negligible even for very large tables.
+     */
+    public List<DataPoint> analyze(
+            ConcurrentHashMap<String, ObservableList<ObservableList<String>>> resultlist,
+            Map<String, List<String>> headers,
+            ProgressListener listener) {
+
+        long totalRows = 0;
+        for (ObservableList<ObservableList<String>> rows : resultlist.values()) {
+            totalRows += rows.size();
+        }
+        AtomicLong processed = new AtomicLong();
 
         List<DataPoint> points = new ArrayList<>();
 
@@ -153,7 +185,8 @@ public class DataAnalyzer {
 
             if (isResponseRecordsSchema(tableName, cols)) {
                 // ── Fast path: fixed schema ──────────────────────────────────
-                List<DataPoint> fastPathPoints = analyzeResponseRecords(tableName, rows, cols);
+                List<DataPoint> fastPathPoints =
+                        analyzeResponseRecords(tableName, rows, cols, processed, totalRows, listener);
                 if (!fastPathPoints.isEmpty() || rows.isEmpty()) {
                     points.addAll(fastPathPoints);
                 } else {
@@ -166,11 +199,11 @@ public class DataAnalyzer {
                     // columns inserted between nw_access_type and start_time).
                     // Rather than silently showing nothing, fall back to the
                     // same value-based heuristic used for unrecognised tables.
-                    points.addAll(analyzeGeneric(tableName, rows, cols));
+                    points.addAll(analyzeGeneric(tableName, rows, cols, processed, totalRows, listener));
                 }
             } else {
                 // ── General path: heuristic profiling ───────────────────────
-                points.addAll(analyzeGeneric(tableName, rows, cols));
+                points.addAll(analyzeGeneric(tableName, rows, cols, processed, totalRows, listener));
             }
         }
 
@@ -179,6 +212,9 @@ public class DataAnalyzer {
                 Comparator.nullsLast(Comparator.naturalOrder())));
         return points;
     }
+
+    /** How many rows to process between {@link ProgressListener} callbacks. */
+    private static final long PROGRESS_BATCH = 5_000;
 
     /**
      * Value-based heuristic extraction: profiles every column for timestamp /
@@ -190,13 +226,23 @@ public class DataAnalyzer {
     private List<DataPoint> analyzeGeneric(
             String tableName,
             ObservableList<ObservableList<String>> rows,
-            List<String> cols) {
+            List<String> cols,
+            AtomicLong processed,
+            long totalRows,
+            ProgressListener listener) {
 
         List<DataPoint> points = new ArrayList<>();
         ColumnProfile profile = profileColumns(rows, cols);
 
-        for (int rowIdx = 0; rowIdx < rows.size(); rowIdx++) {
-            ObservableList<String> row = rows.get(rowIdx);
+        // Iterate via the list's own iterator instead of an indexed
+        // `rows.get(rowIdx)` loop: `rows` is an ObservableList that may be
+        // backed by a sequential-access list (e.g. LinkedList) further up
+        // the import pipeline rather than an ArrayList, in which case
+        // `.get(index)` costs O(index) and an indexed loop over every row
+        // turns the whole table scan into O(n²). A for-each loop always
+        // costs O(1) per step regardless of the backing list type.
+        int rowIdx = 0;
+        for (ObservableList<String> row : rows) {
 
             Instant       timestamp = extractTimestamp(row, profile.timestampCols);
             GeoCoordinate coord     = extractCoordinate(row, profile);
@@ -211,8 +257,26 @@ public class DataAnalyzer {
                 dp.setColumnNames(cols);
                 points.add(dp);
             }
+            reportProgress(processed, totalRows, listener);
+            rowIdx++;
         }
         return points;
+    }
+
+    /**
+     * Increments {@code processed} by one and, every {@link #PROGRESS_BATCH}
+     * rows (or on the very last row), notifies {@code listener} — a no-op
+     * when {@code listener} is {@code null}. Batching keeps the callback
+     * overhead (typically a {@code Platform.runLater} hop, see
+     * {@code MapViewPane#setData}) negligible even for tables with millions
+     * of rows.
+     */
+    private static void reportProgress(AtomicLong processed, long totalRows, ProgressListener listener) {
+        if (listener == null) return;
+        long done = processed.incrementAndGet();
+        if (done % PROGRESS_BATCH == 0 || done == totalRows) {
+            listener.onProgress(done, totalRows);
+        }
     }
 
     // -------------------------------------------------------------------------
@@ -353,7 +417,10 @@ public class DataAnalyzer {
     private List<DataPoint> analyzeResponseRecords(
             String tableName,
             ObservableList<ObservableList<String>> rows,
-            List<String> cols) {
+            List<String> cols,
+            AtomicLong processed,
+            long totalRows,
+            ProgressListener listener) {
 
         List<DataPoint> points = new ArrayList<>();
 
@@ -401,18 +468,40 @@ public class DataAnalyzer {
         int idxPartyType    = colIndex(cols, "party_type");
         int idxNwAccess     = colIndex(cols, "nw_access_type");
 
-        for (int rowIdx = 0; rowIdx < rows.size(); rowIdx++) {
-            ObservableList<String> row = rows.get(rowIdx);
+        // Iterate via the list's own iterator instead of an indexed
+        // `rows.get(rowIdx)` loop — see the identical comment in
+        // analyzeGeneric() above: `rows` may be backed by a sequential-access
+        // list further up the import pipeline, which would make an indexed
+        // scan over every row O(n²) for the whole table.
+        int rowIdx = 0;
+        for (ObservableList<String> row : rows) {
+
+            // Copy each row into a random-access list ONCE: `row` itself may
+            // also be sequential-access (a JVM thread dump taken during a
+            // large response_records import showed exactly this — the
+            // analyzer thread sampled inside
+            // ObservableSequentialListWrapper.get() / LinkedList.node(),
+            // called from cell() below). Without this copy, every one of the
+            // ~20 named-field cell() lookups per row below would re-walk the
+            // row from the start, and the transient ListIterator allocated
+            // by each such lookup also adds real, sustained GC pressure
+            // across hundreds of thousands of rows — both contributing to
+            // the kind of background CPU/GC load that starves the FX
+            // Application Thread and makes the OS report "Application Not
+            // Responding" even though no thread is actually deadlocked. The
+            // copy itself costs O(columns) once (a single iterator walk),
+            // not O(columns) per lookup.
+            List<String> r = new ArrayList<>(row);
 
             // ── Timestamp ────────────────────────────────────────────────────
-            Instant timestamp = parseTimestamp(cell(row, idxStartTime));
+            Instant timestamp = parseTimestamp(cell(r, idxStartTime));
             if (timestamp == null)
-                timestamp = parseTimestamp(cell(row, idxEndTime));
+                timestamp = parseTimestamp(cell(r, idxEndTime));
 
             // ── Coordinates ──────────────────────────────────────────────────
             GeoCoordinate coord = null;
-            String latStr = cell(row, idxLatitude);
-            String lonStr = cell(row, idxLongitude);
+            String latStr = cell(r, idxLatitude);
+            String lonStr = cell(r, idxLongitude);
             if (latStr != null && !latStr.isBlank()
                     && lonStr != null && !lonStr.isBlank()) {
                 try {
@@ -424,7 +513,11 @@ public class DataAnalyzer {
             }
 
             // Skip rows that carry neither timestamp nor coordinates.
-            if (timestamp == null && coord == null) continue;
+            if (timestamp == null && coord == null) {
+                reportProgress(processed, totalRows, listener);
+                rowIdx++;
+                continue;
+            }
 
             // ── Build DataPoint ──────────────────────────────────────────────
             ResponseRecordDataPoint rrdp = new ResponseRecordDataPoint();
@@ -432,46 +525,48 @@ public class DataAnalyzer {
             rrdp.setRowIndex(rowIdx);
             rrdp.setTimestamp(timestamp);
             rrdp.setCoordinate(coord);
-            rrdp.setRawRow(new ArrayList<>(row));
+            rrdp.setRawRow(r);
             rrdp.setColumnNames(cols);
 
-            rrdp.setEndTime(cell(row, idxEndTime));
-            rrdp.setPartyType(cell(row, idxPartyType));
-            rrdp.setNwAccessType(cell(row, idxNwAccess));
-            rrdp.setNaDeviceId(cell(row, idxNaDevice));
-            rrdp.setLtRaw(cell(row, idxLtRaw));
-            rrdp.setLoRaw(cell(row, idxLoRaw));
-            rrdp.setMapDatum(cell(row, idxMapDatum));
-            rrdp.setAzimuth(cell(row, idxAzimuth));
-            rrdp.setUserLocationInfo(cell(row, idxUserLoc));
-            rrdp.setImsi(cell(row, idxImsi));
-            rrdp.setMsisdn(cell(row, idxMsisdn));
-            rrdp.setApn(cell(row, idxApn));
-            rrdp.setOtherInformation(cell(row, idxOtherInfo));
-            rrdp.setCallIndicator(cell(row, idxCallIndicator));
-            rrdp.setCallActionCode(cell(row, idxCallAction));
-            rrdp.setCallSubtype(cell(row, idxCallSubtype));
-            rrdp.setSessionId(cell(row, idxSessionId));
-            rrdp.setTypeOfDataExtra(cell(row, idxTypeExtra));
-            rrdp.setDurationSeconds(cell(row, idxDuration));
+            rrdp.setEndTime(cell(r, idxEndTime));
+            rrdp.setPartyType(cell(r, idxPartyType));
+            rrdp.setNwAccessType(cell(r, idxNwAccess));
+            rrdp.setNaDeviceId(cell(r, idxNaDevice));
+            rrdp.setLtRaw(cell(r, idxLtRaw));
+            rrdp.setLoRaw(cell(r, idxLoRaw));
+            rrdp.setMapDatum(cell(r, idxMapDatum));
+            rrdp.setAzimuth(cell(r, idxAzimuth));
+            rrdp.setUserLocationInfo(cell(r, idxUserLoc));
+            rrdp.setImsi(cell(r, idxImsi));
+            rrdp.setMsisdn(cell(r, idxMsisdn));
+            rrdp.setApn(cell(r, idxApn));
+            rrdp.setOtherInformation(cell(r, idxOtherInfo));
+            rrdp.setCallIndicator(cell(r, idxCallIndicator));
+            rrdp.setCallActionCode(cell(r, idxCallAction));
+            rrdp.setCallSubtype(cell(r, idxCallSubtype));
+            rrdp.setSessionId(cell(r, idxSessionId));
+            rrdp.setTypeOfDataExtra(cell(r, idxTypeExtra));
+            rrdp.setDurationSeconds(cell(r, idxDuration));
 
             // ── ULI decoding ─────────────────────────────────────────────────
             // Attempt to decode the user_location_info hex field into structured
             // cell identity (MCC, MNC, LAC/TAC, CI).  This is a best-effort
             // operation; rows with missing or malformed ULI simply get null.
-            UliDecoder.CellInfo cellInfo = UliDecoder.decode(cell(row, idxUserLoc));
+            UliDecoder.CellInfo cellInfo = UliDecoder.decode(cell(r, idxUserLoc));
             rrdp.setCellInfo(cellInfo);
             // CellTower resolution (OpenCelliD lookup) is deferred: MapView
             // triggers it asynchronously when the cell-tower layer is enabled.
 
             points.add(rrdp);
+            reportProgress(processed, totalRows, listener);
+            rowIdx++;
         }
 
         return points;
     }
 
     /** Safely retrieves a cell value; returns {@code null} for out-of-range or negative indices. */
-    private static String cell(ObservableList<String> row, int idx) {
+    private static String cell(List<String> row, int idx) {
         return (idx >= 0 && idx < row.size()) ? row.get(idx) : null;
     }
 

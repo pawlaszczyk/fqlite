@@ -50,7 +50,7 @@ public class BPListParser {
 
     private static final DateTimeFormatter DATE_FMT =
             DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss z")
-                             .withZone(ZoneId.of("UTC"));
+                    .withZone(ZoneId.of("UTC"));
 
     // ── State per parse call ────────────────────────────────────────────────
     private byte[] data;
@@ -198,7 +198,7 @@ public class BPListParser {
                 double cfTime = ByteBuffer.wrap(raw2).order(ByteOrder.BIG_ENDIAN).getDouble();
                 long epochMillis = (long)((cfTime + CF_EPOCH_OFFSET_SECONDS) * 1000);
                 String dateStr = DATE_FMT.format(Instant.ofEpochMilli(epochMillis))
-                        + "  (CF=" + cfTime + ")";
+                                 + "  (CF=" + cfTime + ")";
                 BPListNode n = new BPListNode(Type.DATE, pos, concat(new byte[]{(byte) marker}, raw2));
                 n.setScalarValue(dateStr);
                 yield n;
@@ -325,7 +325,7 @@ public class BPListParser {
         int countMarker = data[countPos] & 0xFF;
         int byteCount   = 1 << (countMarker & 0x0F);
         byte[] raw      = readBytes(countPos + 1, byteCount);
-        long count      = readBigEndianSigned(raw);
+        long count      = readBigEndianUnsigned(raw);
         return new CountResult(count, countPos + 1 + byteCount);
     }
 
@@ -348,6 +348,19 @@ public class BPListParser {
     private static long readBigEndianLong(byte[] buf, int offset) {
         long v = 0;
         for (int i = 0; i < 8; i++) v = (v << 8) | (buf[offset + i] & 0xFF);
+        return v;
+    }
+
+    /**
+     * Read n-byte big-endian value as an unsigned long.
+     * Used for element/string counts and data lengths, which are defined by the
+     * bplist format as non-negative. Unlike {@link #readBigEndianSigned}, this
+     * does NOT sign-extend the leading byte, so a byte such as 0xC8 (200) is
+     * read as 200 instead of being incorrectly sign-extended to -56.
+     */
+    private static long readBigEndianUnsigned(byte[] buf) {
+        long v = 0;
+        for (byte b : buf) v = (v << 8) | (b & 0xFF);
         return v;
     }
 

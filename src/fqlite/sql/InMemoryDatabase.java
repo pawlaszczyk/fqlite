@@ -11,6 +11,7 @@ import javafx.stage.Modality;
 import javafx.stage.Stage;
 import java.math.BigDecimal;
 import java.sql.*;
+import java.util.ArrayList;
 import java.util.List;
 
 import static java.sql.DriverManager.getConnection;
@@ -41,6 +42,8 @@ public class InMemoryDatabase {
 
     // this is for an internal database in RAM
     private final static String DB_URL = "jdbc:sqlite::memory:";
+    /** Rows per JDBC batch flush in {@link #insertRows}; see comment there. */
+    private static final int BATCH_FLUSH_SIZE = 2000;
     private Connection connection;
     private Stage stage;
     /** The logical database name (= key in {@link DBManager}). */
@@ -249,11 +252,39 @@ public class InMemoryDatabase {
 
             preparedStatement = connection.prepareStatement(sql.toString());
 
+            // Wrap the whole table import in a single transaction and only
+            // flush the JDBC batch every BATCH_FLUSH_SIZE rows instead of
+            // after every single row (see below). With autocommit left on
+            // its JDBC default (true) and executeBatch()/clearBatch() called
+            // once per row, every row became its own SQLite transaction —
+            // for a response_records table with hundreds of thousands to
+            // millions of recovered rows this turned import into that many
+            // tiny commits in a row. Even for an in-memory database (no
+            // fsync to disk) the per-row transaction bookkeeping and the
+            // repeated JNI round-trips into SQLite add up to minutes of
+            // single-threaded, silent work with no progress output — which
+            // is exactly what looked like "the app is still frozen" well
+            // after the LLM had already finished loading.
+            connection.setAutoCommit(false);
+            int batched = 0;
+
             // create a batch for all data rows to insert into this table
             for(ObservableList<String> record : rows) {
+                // Copy each row into a random-access list ONCE: `record`
+                // (like the row lists in DataAnalyzer — see the comments
+                // there for the JVM thread dump that uncovered this same
+                // pattern) may be backed by a sequential-access list rather
+                // than an ArrayList further up the import pipeline. The
+                // inner loop below does an indexed record.get(pos) for every
+                // column of every row of every table during import, so on a
+                // sequential list that's O(columns) per lookup instead of
+                // O(1) — multiplied by every row in every table, this is a
+                // real, broad contributor to the import's CPU/GC load. The
+                // copy itself costs O(columns) once (an iterator walk).
+                List<String> rec = new ArrayList<>(record);
                 int j = 1;
                 // add all lines to batch
-                for (int pos = 0; pos < record.size(); pos++,j++) {
+                for (int pos = 0; pos < rec.size(); pos++,j++) {
 
                     if (pos == 1) {
                         // skip the column with the table name
@@ -261,12 +292,12 @@ public class InMemoryDatabase {
                         continue;
                     }
 
-                    String cvalue = record.get(pos);
+                    String cvalue = rec.get(pos);
                     if (cvalue == null)
                         cvalue = "";
 
                     // BLOB handling is different
-                    if (record.get(pos).startsWith("[BLOB-")) {
+                    if (cvalue.startsWith("[BLOB-")) {
                         String key = "BLOB";
                         if(j == 38)
                             System.out.println("Stopppp");
@@ -307,13 +338,27 @@ public class InMemoryDatabase {
                     }
                 }
                 preparedStatement.addBatch();
+                batched++;
 
-                // execute directly
+                // Flush every BATCH_FLUSH_SIZE rows instead of every single
+                // row — keeps memory bounded while avoiding a JDBC/JNI round
+                // trip (and, with autocommit off, no extra transaction cost)
+                // per individual row.
+                if (batched >= BATCH_FLUSH_SIZE) {
+                    preparedStatement.executeBatch();
+                    preparedStatement.clearBatch();
+                    batched = 0;
+                }
+            }
+
+            // flush any remaining rows that didn't fill a full batch
+            if (batched > 0) {
                 preparedStatement.executeBatch();
-
-                // clear parameters before inserting next row
                 preparedStatement.clearBatch();
             }
+
+            // commit the single transaction that covers this whole table import
+            connection.commit();
 
         } catch (Exception e) {
             if (connection != null) {

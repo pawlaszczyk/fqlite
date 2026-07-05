@@ -161,9 +161,237 @@ public class RAGPipeline {
      * the forensic result stays deterministic and auditable.</p>
      */
     public QueryIntent classifyIntent(String request) {
-        String raw = sqlGenerator.classifyIntent(request);
-        return QueryIntent.parse(raw);
+        return classifyIntent(request, null);
     }
+
+    /**
+     * Like {@link #classifyIntent(String)}, but passes a {@code dataDateContext}
+     * string (e.g. {@code "2024-09-01 00:00:00 bis 2024-10-31 23:59:59"}) into
+     * the prompt so the model uses the actual year of the dataset rather than
+     * the current calendar year when the user omits the year in date expressions
+     * like "02.07. zwischen 5 und 7 Uhr".
+     *
+     * @param dataDateContext  "MIN bis MAX" string from {@code response_records.start_time},
+     *                         or {@code null} to fall back to the current-year assumption
+     */
+    public QueryIntent classifyIntent(String request, String dataDateContext) {
+        String normalized = normalizeDateExpressions(request);
+        // Only inject the data-date-range context when the request actually
+        // contains a date expression (ISO date, dot-separated, European hyphen,
+        // or German month name). For pure keyword queries like "Zeige mir alle
+        // Wechsler an." the extra hint changes prompt length and can shift the
+        // model's attention away from intent keywords — causing misclassification.
+        boolean hasDate = DATE_HINT_TRIGGER.matcher(request).find();
+        // Additional step: if the data date context is available and the request
+        // contains a partial dot-separated date without a year (e.g. "02.07."),
+        // inject the most likely year directly into the normalized text so the
+        // LLM doesn't have to guess — small models reliably misread the year hint.
+        if (hasDate && dataDateContext != null && !dataDateContext.isBlank()) {
+            normalized = injectYearIntoPartialDates(normalized, dataDateContext);
+        }
+        String raw = sqlGenerator.classifyIntent(normalized, hasDate ? dataDateContext : null);
+        QueryIntent qi = QueryIntent.parse(raw);
+        qi.normalizedRequest = normalized;   // make date-normalized text available to callers
+        return qi;
+    }
+
+    /**
+     * Replaces partial dot-separated dates of the form {@code DD.MM.} or
+     * {@code DD.MM} (no 4-digit year) with {@code YYYY-MM-DD} using the year
+     * extracted from {@code dataDateContext} ("MIN bis MAX" string from
+     * {@code response_records.start_time}).  This is called after
+     * {@link #normalizeDateExpressions} so that German month-name dates
+     * ({@code "2. Juli 2023"} → {@code "2023-07-02"}) are already handled;
+     * only the remaining bare {@code DD.MM.} patterns need a year prefix.
+     *
+     * <p>Example: {@code "02.07. zwischen 5 und 7 Uhr"} with
+     * {@code dataDateContext="2023-02-07 ... bis 2023-09-30 ..."} →
+     * {@code "2023-07-02 zwischen 5 und 7 Uhr"}</p>
+     *
+     * <p>Ambiguous month/day order: if the first part &gt; 12 it must be the
+     * day; otherwise German convention (first = day, second = month) is used,
+     * matching the convention already applied by {@link #normalizeDateExpressions}
+     * for hyphen-separated dates.</p>
+     */
+    static String injectYearIntoPartialDates(String text, String dataDateContext) {
+        if (text == null || dataDateContext == null) return text;
+
+        // Extract the most prominent year from the context string
+        // (first 4-digit year found after "bis " or at the start).
+        String year = null;
+        java.util.regex.Matcher ym = Pattern.compile("\\b(\\d{4})-\\d{2}-\\d{2}").matcher(dataDateContext);
+        if (ym.find()) year = ym.group(1);        // year of the MIN timestamp
+        if (year == null) return text;
+
+        // Match "DD.MM." or "DD.MM" that is NOT already preceded by a year
+        // (i.e. not already part of "YYYY-MM-DD").  Negative look-behind
+        // prevents matching dates that normalizeDateExpressions already fixed.
+        Pattern partial = Pattern.compile(
+                "(?<![\\d-])(\\d{1,2})\\.(\\d{1,2})\\.?(?!\\d)");
+        java.util.regex.Matcher m = partial.matcher(text);
+        StringBuffer sb = new StringBuffer();
+        while (m.find()) {
+            int a = Integer.parseInt(m.group(1));
+            int b = Integer.parseInt(m.group(2));
+            int day, mon;
+            if (a > 12 && b <= 12)      { day = a; mon = b; }
+            else if (b > 12 && a <= 12) { day = b; mon = a; }
+            else                         { day = a; mon = b; }  // German: DD.MM.
+            if (mon < 1 || mon > 12 || day < 1 || day > 31) {
+                m.appendReplacement(sb, java.util.regex.Matcher.quoteReplacement(m.group()));
+                continue;
+            }
+            m.appendReplacement(sb, java.util.regex.Matcher.quoteReplacement(
+                    String.format("%s-%02d-%02d", year, mon, day)));
+        }
+        m.appendTail(sb);
+        return sb.toString();
+    }
+
+    /**
+     * Pre-processes the user's natural-language request and replaces German
+     * long-form date expressions like "2. Juli 2023" or "15. März" with the
+     * numeric ISO-style equivalent ("02.07.2023" / "15.03.") <em>before</em>
+     * the text reaches the LLM.  Small local models are unreliable at month-
+     * name conversion; doing it deterministically in Java is far more robust.
+     *
+     * <p>Recognised patterns (case-insensitive):
+     * <ul>
+     *   <li>{@code <day>. <MonthName> <year>}  → {@code DD.MM.YYYY}</li>
+     *   <li>{@code <day>. <MonthName>}          → {@code DD.MM.}  (year omitted)</li>
+     * </ul>
+     */
+    static String normalizeDateExpressions(String text) {
+        if (text == null) return null;
+        // Map German month names (and common abbreviated forms) to zero-padded month numbers.
+        String[][] months = {
+            {"januar",    "01"}, {"february",  "02"}, {"februar",   "02"},
+            {"märz",      "03"}, {"maerz",     "03"}, {"april",     "04"},
+            {"mai",       "05"}, {"juni",      "06"}, {"juli",      "07"},
+            {"august",    "08"}, {"september", "09"}, {"oktober",   "10"},
+            {"november",  "11"}, {"dezember",  "12"},
+        };
+        // Pattern: optional whitespace, day (1-2 digits), dot, whitespace,
+        // month name (captured by alternation below), optional comma/whitespace,
+        // optional 4-digit year.
+        // We build one combined pattern so we can replace in a single pass.
+        StringBuilder monthAlt = new StringBuilder();
+        for (String[] m : months) {
+            if (monthAlt.length() > 0) monthAlt.append('|');
+            monthAlt.append(Pattern.quote(m[0]));
+        }
+        // Build lookup map for fast replacement inside the replacer.
+        java.util.Map<String, String> lookup = new java.util.LinkedHashMap<>();
+        for (String[] m : months) lookup.put(m[0], m[1]);
+
+        Pattern p = Pattern.compile(
+                "(\\d{1,2})\\.\\s*(" + monthAlt + ")[.,]?\\s*(\\d{4})?",
+                Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE);
+
+        Matcher m = p.matcher(text);
+        StringBuffer sb = new StringBuffer();
+        while (m.find()) {
+            String day   = String.format("%02d", Integer.parseInt(m.group(1)));
+            String mon   = lookup.get(m.group(2).toLowerCase());
+            if (mon == null) { m.appendReplacement(sb, Matcher.quoteReplacement(m.group())); continue; }
+            String year  = m.group(3);
+            // With year: use unambiguous ISO format (YYYY-MM-DD) so the LLM
+            // cannot confuse day and month.  Without year: keep the German
+            // DD.MM. dot format so that injectYearIntoPartialDates() can
+            // complete it via the data date context rather than relying on
+            // the LLM to infer the year from the hint (less reliable with
+            // small models). "MM-DD" (hyphen without year) was previously
+            // used here but is NOT picked up by injectYearIntoPartialDates.
+            String replacement = (year != null)
+                    ? year + "-" + mon + "-" + day          // → YYYY-MM-DD  (ISO, unambiguous)
+                    : day  + "." + mon + ".";               // → DD.MM.  (injectYearIntoPartialDates handles this)
+            m.appendReplacement(sb, Matcher.quoteReplacement(replacement));
+        }
+        m.appendTail(sb);
+        String result = sb.toString();
+
+        // ── Step 2: European hyphen-separated dates (DD-MM-YYYY or MM-DD-YYYY) ──
+        // Handles inputs like "02-07-2023", "07-02-2023" that the LLM has no
+        // examples for.  The pattern only matches when the YEAR is the LAST
+        // 4-digit group (distinguishes from ISO "YYYY-MM-DD" where year is first).
+        // Disambiguation rule: if one part > 12 it must be the day; otherwise
+        // use German convention (first number = day, second = month).
+        // Negative look-around prevents matching inside an already-correct ISO date.
+        Pattern euroHyphen = Pattern.compile(
+                "(?<![\\d-])(\\d{1,2})-(\\d{1,2})-(\\d{4})(?![\\d-])");
+        Matcher m2 = euroHyphen.matcher(result);
+        StringBuffer sb2 = new StringBuffer();
+        while (m2.find()) {
+            int a    = Integer.parseInt(m2.group(1));
+            int b    = Integer.parseInt(m2.group(2));
+            String y = m2.group(3);
+            int day2, mon2;
+            if (a > 12 && b <= 12)      { day2 = a; mon2 = b; }   // a can only be day
+            else if (b > 12 && a <= 12) { day2 = b; mon2 = a; }   // b can only be day
+            else                         { day2 = a; mon2 = b; }   // both ≤ 12 → German convention: DD-MM
+            if (mon2 < 1 || mon2 > 12 || day2 < 1 || day2 > 31) {
+                m2.appendReplacement(sb2, Matcher.quoteReplacement(m2.group()));
+                continue;
+            }
+            m2.appendReplacement(sb2, Matcher.quoteReplacement(
+                    String.format("%s-%02d-%02d", y, mon2, day2)));
+        }
+        m2.appendTail(sb2);
+        String result2 = sb2.toString();
+
+        // ── Step 3: German dot-separated full dates (DD.MM.YYYY) ──
+        // The most common German date format — e.g. "02.07.2023", "2.7.2023".
+        // Steps 1 and 2 leave these untouched (step 1 needs a month name, step 2
+        // needs hyphens), so we handle them here. Applied after steps 1/2 so
+        // there is no interference with already-converted ISO results.
+        // German convention: first number = day, second = month; if one part > 12
+        // it must be the day regardless of position.
+        Pattern dotFull = Pattern.compile(
+                "(?<![\\d-])(\\d{1,2})\\.(\\d{1,2})\\.(\\d{4})(?![\\d.])");
+        Matcher m3 = dotFull.matcher(result2);
+        StringBuffer sb3 = new StringBuffer();
+        while (m3.find()) {
+            int a    = Integer.parseInt(m3.group(1));
+            int b    = Integer.parseInt(m3.group(2));
+            String y = m3.group(3);
+            int day3, mon3;
+            if (a > 12 && b <= 12)      { day3 = a; mon3 = b; }
+            else if (b > 12 && a <= 12) { day3 = b; mon3 = a; }
+            else                         { day3 = a; mon3 = b; }  // German: DD.MM.YYYY
+            if (mon3 < 1 || mon3 > 12 || day3 < 1 || day3 > 31) {
+                m3.appendReplacement(sb3, Matcher.quoteReplacement(m3.group()));
+                continue;
+            }
+            m3.appendReplacement(sb3, Matcher.quoteReplacement(
+                    String.format("%s-%02d-%02d", y, mon3, day3)));
+        }
+        m3.appendTail(sb3);
+        return sb3.toString();
+    }
+
+    /**
+     * Detects whether a user request string contains any date expression that
+     * would benefit from a data-date-range hint in the LLM prompt.  Only
+     * inject the hint when there really is a date, so non-date queries like
+     * "Zeige mir alle Wechsler an." keep exactly the same prompt length as
+     * before — a longer prompt can shift the model's attention and cause it
+     * to misclassify keyword-based intents.
+     *
+     * <p>Recognised patterns:</p>
+     * <ul>
+     *   <li>German month names: Januar, Februar, …, Dezember</li>
+     *   <li>Dot-separated dates: {@code 02.07.} / {@code 02.07.2023}</li>
+     *   <li>ISO dates: {@code 2023-07-02}</li>
+     *   <li>European hyphen dates: {@code 02-07-2023}</li>
+     * </ul>
+     */
+    private static final Pattern DATE_HINT_TRIGGER = Pattern.compile(
+            "\\b\\d{1,2}[./]\\d{1,2}([./]\\d{2,4})?\\b"          // 02.07. / 02.07.2023
+            + "|\\b\\d{1,2}-\\d{1,2}-\\d{4}\\b"                   // 02-07-2023 (European)
+            + "|\\b\\d{4}-\\d{2}-\\d{2}\\b"                       // 2023-07-02 (ISO)
+            + "|\\b(januar|j[aä]nner|februar|m[aä]rz|april|mai"
+            + "|juni|juli|august|september|oktober|november|dezember)\\b",
+            Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE);
 
     private static final Pattern TIMESTAMP_PATTERN =
             Pattern.compile("\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2}");
@@ -588,6 +816,16 @@ public class RAGPipeline {
         public final String identifierLabel;   // "IMSI" | "MSISDN" | "IMEI" — for UI display
         public final String callSmsType;       // "eingehender_anruf" | "ausgehender_anruf" | "gesendete_sms" | "empfangene_sms" | null
         public final String country;           // country name as extracted by the model, or null
+        /**
+         * The date-normalized form of the original user request: German month
+         * names and dot/hyphen date formats are converted to ISO 8601, and
+         * years missing from partial dates are injected from the DB date range.
+         * Callers that pass text on to a secondary LLM step (e.g. the SQL
+         * generator for {@code intent="filter"}) should use this field instead
+         * of the raw request so the downstream model sees unambiguous ISO dates
+         * and doesn't have to guess partial-date years.
+         */
+        public String normalizedRequest;       // set by RAGPipeline.classifyIntent after normalization
 
         private QueryIntent(String intent, String startTime, String endTime,
                              String identifierColumn, String identifierLabel, String callSmsType,
@@ -708,8 +946,17 @@ public class RAGPipeline {
         }
 
         private static String extractField(String json, String key) {
-            Matcher m = Pattern.compile("\"" + key + "\"\\s*:\\s*\"([^\"]*)\"").matcher(json);
-            if (m.find()) return m.group(1);
+            // Accept BOTH quoted string values AND the literal null so that the
+            // first occurrence of the key (always the top-level schema field)
+            // is returned even when its value is null.  Without this, the regex
+            // skips "key": null (not quoted) and accidentally picks up the same
+            // key name buried inside LLM-hallucinated extra arrays/objects that
+            // happen to contain a quoted value — causing e.g. a null start_time
+            // to be replaced with a fabricated timestamp.
+            Matcher m = Pattern.compile(
+                    "\"" + key + "\"\\s*:\\s*(?:\"([^\"]*)\"|null)")
+                    .matcher(json);
+            if (m.find()) return m.group(1); // null when literal null, String otherwise
             return null;
         }
     }
@@ -746,8 +993,29 @@ public class RAGPipeline {
 
         SQLGenerator(String modelPath) {
             if (null == model) {
+                // llama.cpp defaults --threads to -1 ("use all logical cores") and
+                // by default also runs a warm-up inference pass while the model
+                // is being constructed (see java-llama.cpp's ModelParameters#skipWarmup).
+                // Both together can peg every CPU core for the whole duration of
+                // model loading. Even though this load already runs on a background
+                // Thread (never the FX Application Thread directly), saturating all
+                // cores still starves the FX thread of CPU time, so it can't pump
+                // its event loop quickly enough — which is exactly what the OS
+                // reports as "Application Not Responding" (hourglass), even though
+                // no thread is actually deadlocked.
+                //
+                // Reserve a couple of cores for the FX thread / GC / everything else
+                // and skip the warm-up pass, which isn't needed before the first
+                // real generateSQL() call anyway.
+                int reservedThreads = Math.max(1, Runtime.getRuntime().availableProcessors() - 2);
+                // 4096-token context: the classifyIntent prompt is ~3350 tokens
+                // (instructions + 20 examples + request) — at 2048 the model
+                // only sees the last ~1300 tokens, cutting off all intent
+                // definitions and early examples.  4096 fits the full prompt
+                // and eliminates intent misclassifications caused by truncation.
                 ModelParameters params = new ModelParameters().
-                        setGpuLayers(0).setCtxSize(2048).setModel(modelPath);
+                        setGpuLayers(0).setCtxSize(4096).setModel(modelPath).
+                        setThreads(reservedThreads).skipWarmup();
                 model = new LlamaModel(params);
                 System.out.println("✅ Modell has been loaded");
             }
@@ -760,12 +1028,17 @@ public class RAGPipeline {
             String prompt = String.format(
                     """
                             Generate a valid SQLite query for this forensic database request.
-                            
+
+                            IMPORTANT RULES:
+                            - The time column is called "start_time" (never "timestamp", "time", "date", or "end_time").
+                            - Use only column names that appear in the schema below. Do NOT invent column names.
+                            - For date/time filtering always use: start_time BETWEEN 'YYYY-MM-DD HH:MM:SS' AND 'YYYY-MM-DD HH:MM:SS'
+
                             Database Schema:
                             %s
-                            
+
                             Request: %s
-                            
+
                             SQLite Query:
                             """,
                     schema, request
@@ -801,6 +1074,32 @@ public class RAGPipeline {
          * output (parsed by {@link QueryIntent#parse}).
          */
         String classifyIntent(String request) {
+            return classifyIntent(request, null);
+        }
+
+        /**
+         * Like {@link #classifyIntent(String)}, but injects {@code dataDateContext}
+         * (e.g. "2024-09-01 00:00:00 bis 2024-09-30 23:59:59") into the prompt
+         * so the model uses the dataset's actual year rather than the current
+         * calendar year when dates without a year are mentioned.
+         */
+        String classifyIntent(String request, String dataDateContext) {
+            // Build the date-hint line that is embedded in the prompt.
+            // When the caller supplies the actual data date range (i.e. the
+            // request contains a date expression), we tell the model to derive
+            // missing years from that range rather than from the current
+            // calendar year. For requests without any date expression the hint
+            // is intentionally empty so the prompt length and content stay
+            // identical to the pre-Task-55 baseline — any extra text here
+            // shifts the model's attention and can cause it to invent a year
+            // filter even for queries like "Zeige mir alle Wechsler an."
+            // where no time window was intended.
+            String dateHint = (dataDateContext != null && !dataDateContext.isBlank())
+                    ? "Die Datensätze in der Datenbank liegen im Zeitraum " + dataDateContext + ". "
+                      + "Fehlt bei einer Datumsangabe in der Anfrage das Jahr, leite das Jahr "
+                      + "aus diesem Datenbestand ab (nicht das aktuelle Kalenderjahr)."
+                    : "";
+
             String prompt = String.format(
                     """
                     Du bist ein Assistent für die forensische Auswertung von Funkzellendaten.
@@ -829,8 +1128,7 @@ public class RAGPipeline {
                     Extrahiere außerdem den genannten Zeitraum als
                     start_time/end_time im Format "YYYY-MM-DD HH:MM:SS".
                     Fehlt die Uhrzeit, nimm 00:00:00 bzw. 23:59:59. Ist kein Zeitraum
-                    erkennbar, setze beide Felder auf null. Nimm an, dass nicht
-                    näher spezifizierte Datumsangaben das aktuelle Jahr betreffen.
+                    erkennbar, setze beide Felder auf null. %s
 
                     Bei intent="calls_sms" setze zusätzlich das Feld call_sms_type auf
                     genau einen der folgenden Werte: "eingehender_anruf" (eingehende /
@@ -870,14 +1168,22 @@ public class RAGPipeline {
                     wegen einer ungewöhnlichen Zahlenreihenfolge — löse die Mehrdeutigkeit
                     immer so auf, dass ein gültiges Datum entsteht.
 
+                    Datumsangaben können auch ausgeschriebene deutsche Monatsnamen
+                    enthalten (z.B. "2. Juli 2023", "15. März 2024", "1. Januar 2025").
+                    Monatsnamen: Januar=01, Februar=02, März=03, April=04, Mai=05,
+                    Juni=06, Juli=07, August=08, September=09, Oktober=10,
+                    November=11, Dezember=12. Wandle diese immer ins Format
+                    YYYY-MM-DD um.
+
                     Erkenne außerdem, welche Teilnehmerkennung gemeint ist:
                     "imsi" (IMSI / SIM-Karte, das ist der Standardfall, wenn nichts
                     anderes genannt wird), "msisdn" (MSISDN / Rufnummer / Telefonnummer)
                     oder "imei" (IMEI / Geräte-/Gerätenummer). Gib genau einen dieser
                     drei Werte im Feld identifier zurück.
 
-                    Antwortschema (immer exakt, keine weiteren Felder):
+                    Antwortschema (immer exakt, genau eine Zeile, keine weiteren Felder, kein Markdown):
                     {"intent": "colocation" | "calls_sms" | "country_filter" | "roamers" | "wechsler" | "filter", "start_time": "YYYY-MM-DD HH:MM:SS" | null, "end_time": "YYYY-MM-DD HH:MM:SS" | null, "identifier": "imsi" | "msisdn" | "imei", "call_sms_type": "eingehender_anruf" | "ausgehender_anruf" | "gesendete_sms" | "empfangene_sms" | "alle_anrufe" | "alle_sms" | null, "country": "<Ländername>" | null}
+                    Gib NUR dieses JSON zurück — keine Erläuterungen, keine Beispiele, keine zusätzlichen Felder, kein weiterer Text.
 
                     Beispiel 1
                     Anfrage: Zeige mir die IMSI Nummern an, die sich im Zeitfenster von 27.09.2024 02:00 bis 27.09.2024 04:00 gemeinsam in Funkzellen aufgehalten haben
@@ -951,10 +1257,26 @@ public class RAGPipeline {
                     Anfrage: Welche IMSIs haben am 27.09.2024 das Gerät gewechselt?
                     Antwort: {"intent": "wechsler", "start_time": "2024-09-27 00:00:00", "end_time": "2024-09-27 23:59:59", "identifier": "imsi", "call_sms_type": null, "country": null}
 
+                    Beispiel 19
+                    Anfrage: Zeige mir alle französischen Telefonnummern an vom 2. Juli 2023
+                    Antwort: {"intent": "country_filter", "start_time": "2023-07-02 00:00:00", "end_time": "2023-07-02 23:59:59", "identifier": "msisdn", "call_sms_type": null, "country": "französischen"}
+
+                    Beispiel 20
+                    Anfrage: Welche Rufnummern waren am 15. März 2024 zwischen 8 und 10 Uhr in derselben Funkzelle?
+                    Antwort: {"intent": "colocation", "start_time": "2024-03-15 08:00:00", "end_time": "2024-03-15 10:00:00", "identifier": "msisdn", "call_sms_type": null, "country": null}
+
+                    Beispiel 21
+                    Anfrage: Zeige mir alle Teilnehmer vom 2023-07-02 zwischen 5 und 7 Uhr an
+                    Antwort: {"intent": "filter", "start_time": "2023-07-02 05:00:00", "end_time": "2023-07-02 07:00:00", "identifier": "imsi", "call_sms_type": null, "country": null}
+
+                    Beispiel 22
+                    Anfrage: Welche Datensätze liegen am 2024-09-27 vor?
+                    Antwort: {"intent": "filter", "start_time": "2024-09-27 00:00:00", "end_time": "2024-09-27 23:59:59", "identifier": "imsi", "call_sms_type": null, "country": null}
+
                     Anfrage: %s
                     Antwort:
                     """,
-                    request
+                    dateHint, request
             );
 
             InferenceParameters inferParams = new InferenceParameters(prompt)

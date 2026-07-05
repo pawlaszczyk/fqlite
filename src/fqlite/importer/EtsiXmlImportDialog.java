@@ -9,6 +9,7 @@ import javafx.stage.Modality;
 import javafx.stage.Window;
 
 import java.io.File;
+import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
 
 /// JavaFX progress dialog for {@link EtsiXmlImporter}.
@@ -18,8 +19,13 @@ import java.util.concurrent.atomic.AtomicReference;
 /// once the import is complete, so the caller can simply continue opening
 /// it like any other database file.
 ///
+/// One or more XML files can be imported in a single call; if more than one
+/// is given, all of them are merged into the same target database (each
+/// imported row records the file it came from in its {@code source_file}
+/// column — see {@link EtsiXmlImporter}).
+///
 /// <pre>{@code
-/// File db = EtsiXmlImportDialog.show(stage, xmlFile, targetDb);
+/// File db = EtsiXmlImportDialog.show(stage, xmlFiles, targetDb);
 /// if (db != null) {
 ///     open_db(db);
 /// }
@@ -34,12 +40,13 @@ public class EtsiXmlImportDialog {
      * Runs the import and blocks the calling (FX application) thread until
      * the background task is fully complete.
      *
-     * @param owner   owner window for the modal dialog
-     * @param xmlFile the ETSI Retained Data XML file to import
-     * @param dbFile  target SQLite database to create
+     * @param owner    owner window for the modal dialog
+     * @param xmlFiles the ETSI Retained Data XML file(s) to import; if more
+     *                 than one, all are merged into the same {@code dbFile}
+     * @param dbFile   target SQLite database to create
      * @return the created SQLite database file, or {@code null} on failure
      */
-    public static File show(Window owner, File xmlFile, File dbFile) {
+    public static File show(Window owner, List<File> xmlFiles, File dbFile) {
 
         AtomicReference<File> result = new AtomicReference<>(null);
 
@@ -50,13 +57,22 @@ public class EtsiXmlImportDialog {
         Task<File> task = new Task<>() {
             @Override
             protected File call() throws Exception {
-                updateMessage("Reading " + xmlFile.getName() + " ...");
-                EtsiXmlImporter.importXmlToSqlite(xmlFile, dbFile, (current, total) -> {
-                    if (total > 0) {
-                        updateProgress(current, total);
-                        updateMessage(String.format("Importing record %,d / %,d ...", current, total));
-                    }
-                });
+                final String[] currentFileLabel = { "" };
+                updateMessage("Reading " + xmlFiles.get(0).getName() + " ...");
+                EtsiXmlImporter.importXmlFilesToSqlite(xmlFiles, dbFile,
+                        (fileIndex, totalFiles, fileName) -> {
+                            currentFileLabel[0] = (totalFiles > 1)
+                                    ? String.format("Datei %d/%d (%s)", fileIndex, totalFiles, fileName)
+                                    : fileName;
+                            updateMessage("Reading " + currentFileLabel[0] + " ...");
+                        },
+                        (current, total) -> {
+                            if (total > 0) {
+                                updateProgress(current, total);
+                                updateMessage(String.format("%s: Importing record %,d / %,d ...",
+                                        currentFileLabel[0], current, total));
+                            }
+                        });
                 return dbFile;
             }
         };
@@ -77,7 +93,7 @@ public class EtsiXmlImportDialog {
             progressDialog.close();
             Throwable ex = task.getException();
             showError(owner, "Import failed",
-                    "Could not import the ETSI XML file.",
+                    xmlFiles.size() > 1 ? "Could not import the ETSI XML files." : "Could not import the ETSI XML file.",
                     ex != null ? ex.getMessage() : "Unknown error.");
         });
 

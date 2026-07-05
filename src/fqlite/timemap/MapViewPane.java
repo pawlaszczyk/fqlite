@@ -1,5 +1,6 @@
 package fqlite.timemap;
 
+import fqlite.base.Global;
 import fqlite.base.ThemeManager;
 import fqlite.rag.RAGPipeline;
 import fqlite.sql.DBManager;
@@ -13,6 +14,8 @@ import javafx.collections.ObservableList;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
 import javafx.scene.control.*;
+import javafx.scene.input.Clipboard;
+import javafx.scene.input.ClipboardContent;
 import javafx.scene.layout.*;
 import javafx.scene.paint.Color;
 import javafx.scene.text.Font;
@@ -67,11 +70,32 @@ public class MapViewPane extends BorderPane {
     private final DetailPane   detailPane   = new DetailPane();
     private final PoliceAnalysisPane policeAnalysisPane = new PoliceAnalysisPane();
 
+    // ── MOC/MTC tab ──────────────────────────────────────────────────────────
+    // A second, independent MapView showing only call records (call_indicator
+    // MOC = outgoing / MTC = incoming), colour-coded. Unlike the main map tab
+    // it always reflects the *full* analyzed dataset (allPoints), not the
+    // timeline's current brush filter, because the point of this tab is to
+    // answer "where were all the calls", not "where were the currently
+    // filtered rows that happen to also be calls".
+    private final MapView mocMtcMapView = new MapView();
+    private final Label   mocMtcCountLabel = new Label();
+    /** Details list below {@link #mocMtcMapView}: one row per MOC/MTC call, with duration + direction. */
+    private final TableView<DataPoint> mocMtcTable;
+    private static final Color MOC_COLOR = Color.web("#22c55e"); // green-500 — outgoing
+    private static final Color MTC_COLOR = Color.web("#3b82f6"); // blue-500  — incoming
+
     // State
     private final DataAnalyzer    analyzer         = new DataAnalyzer();
     private       Theme           theme            = Theme.DARK;
     private       List<DataPoint> allPoints        = List.of();
     private       List<DataPoint> currentMapPoints = List.of();
+
+    // Shown while setData() analyzes a (potentially very large) dataset on a
+    // background thread — see setData() for why this is no longer done
+    // synchronously on the FX thread.
+    private final ProgressIndicator loadingIndicator = new ProgressIndicator();
+    private final Label             loadingLabel     = new Label("Lade Geodaten…");
+    private final VBox              loadingOverlay   = new VBox(10, loadingIndicator, loadingLabel);
 
     // The database name is needed for SQLParser (key into DBManager)
     private String dbName = null;
@@ -112,10 +136,10 @@ public class MapViewPane extends BorderPane {
     public MapViewPane() {
 
         // ── App title ─────────────────────────────────────────────────────────
-        appTitle = new Label("\u2B21 GEO\u00B7TIME ANALYZER");
+        appTitle = new Label("\u00B7Lighthouse");
         appTitle.setFont(Font.font("Monospace", FontWeight.BOLD, 15));
 
-        subtitle = new Label("Timestamps & geo-coordinates from SQLite tables");
+        subtitle = new Label("Forensic & Call Data Record (CDR) Analysis");
         subtitle.setFont(Font.font("Monospace", 11));
 
         // ── MBTiles: Pfad aus fqlite.conf laden falls noch nicht gesetzt ──────
@@ -152,15 +176,62 @@ public class MapViewPane extends BorderPane {
         splitPane.setOrientation(javafx.geometry.Orientation.HORIZONTAL);
         splitPane.setDividerPositions(0.21, 0.83);
 
+        // ── MOC/MTC tab: dedicated map showing only call records, coloured by
+        // direction (outgoing/incoming) ────────────────────────────────────
+        mocMtcMapView.setMarkerColorOverride(dp ->
+                dp instanceof ResponseRecordDataPoint rr && "MTC".equals(rr.getCallIndicator())
+                        ? MTC_COLOR : MOC_COLOR);
+        mocMtcMapView.setSelectionListener(mocMtcMapView::focusPoint);
+
+        Label mocLegendDot   = legendDot(MOC_COLOR);
+        Label mtcLegendDot   = legendDot(MTC_COLOR);
+        Region legendGap     = new Region();
+        legendGap.setMinWidth(20);
+        Region legendSpacer  = new Region();
+        HBox.setHgrow(legendSpacer, Priority.ALWAYS);
+        HBox mocMtcLegend = new HBox(6,
+                mocLegendDot, new Label("MOC (ausgehend)"),
+                legendGap, mtcLegendDot, new Label("MTC (eingehend)"),
+                legendSpacer, mocMtcCountLabel);
+        mocMtcLegend.setAlignment(Pos.CENTER_LEFT);
+        mocMtcLegend.setPadding(new Insets(6, 14, 6, 14));
+        mocMtcLegend.setStyle("-fx-font-family: monospace; -fx-font-size: 11px;");
+
+        mocMtcTable = buildMocMtcTable();
+
+        SplitPane mocMtcSplit = new SplitPane(mocMtcMapView, mocMtcTable);
+        mocMtcSplit.setOrientation(javafx.geometry.Orientation.VERTICAL);
+        mocMtcSplit.setDividerPositions(0.62);
+
+        BorderPane mocMtcTabContent = new BorderPane();
+        mocMtcTabContent.setTop(mocMtcLegend);
+        mocMtcTabContent.setCenter(mocMtcSplit);
+
         // ── Tabs: map/timeline view vs. dedicated police-analysis panel ───────
         Tab mapTab = new Tab("🗺️ Karte & Zeitleiste", splitPane);
         mapTab.setClosable(false);
-        Tab policeTab = new Tab("🔎 Polizeiliche Auswertung", policeAnalysisPane);
+        Tab mocMtcTab = new Tab("📞 MOC/MTC", mocMtcTabContent);
+        mocMtcTab.setClosable(false);
+        Tab policeTab = new Tab("🔎 Statistiken", policeAnalysisPane);
         policeTab.setClosable(false);
 
-        TabPane centerTabs = new TabPane(mapTab, policeTab);
+        TabPane centerTabs = new TabPane(mapTab, mocMtcTab, policeTab);
         centerTabs.setTabClosingPolicy(TabPane.TabClosingPolicy.UNAVAILABLE);
-        setCenter(centerTabs);
+
+        // Loading overlay: visible while setData() is analyzing a dataset on
+        // a background thread, so opening the map with a large recovered
+        // database shows immediate feedback instead of an apparently frozen
+        // window.
+        loadingIndicator.setMaxSize(64, 64);
+        loadingLabel.setFont(Font.font("Monospace", 12));
+        loadingOverlay.setAlignment(Pos.CENTER);
+        loadingOverlay.setMouseTransparent(false);
+        loadingOverlay.setStyle("-fx-background-color: rgba(0,0,0,0.55);");
+        loadingOverlay.setVisible(false);
+        loadingOverlay.setManaged(false);
+
+        StackPane centerStack = new StackPane(centerTabs, loadingOverlay);
+        setCenter(centerStack);
 
         // "Auf Karte anzeigen" aus dem Kontextmenü der Polizeiliche-Auswertung-
         // Ergebnistabelle: zurück zum Karten-Tab wechseln und den Punkt zentrieren.
@@ -287,11 +358,6 @@ public class MapViewPane extends BorderPane {
             ConcurrentHashMap<String, ObservableList<ObservableList<String>>> resultlist,
             Map<String, List<String>> headers) {
 
-        if (!Platform.isFxApplicationThread()) {
-            Platform.runLater(() -> setData(resultlist, headers));
-            return;
-        }
-
         Map<String, List<String>> safeHeaders = new HashMap<>(headers);
         for (Map.Entry<String, ObservableList<ObservableList<String>>> e : resultlist.entrySet()) {
             String key = e.getKey();
@@ -303,11 +369,45 @@ public class MapViewPane extends BorderPane {
             }
         }
 
-        allPoints        = analyzer.analyze(resultlist, safeHeaders);
-        currentMapPoints = allPoints;
-        timelineView.setData(allPoints);
-        mapView.setData(allPoints);
-        detailPane.clear(theme);
+        // analyzer.analyze() walks every row of every supplied table looking
+        // for timestamp/geo columns, and mapView.setData() below performs a
+        // first synchronous render(). For a large forensic recovery (tens or
+        // hundreds of thousands of rows, e.g. a full ETSI response_records
+        // import) this used to run directly on the FX thread, which froze
+        // the whole application — the map window didn't even become visible
+        // until it finished, since LocationWindow.start() calls
+        // setBaseData()/setData() before showing the stage. Do the analysis
+        // off the FX thread and apply the result back via Platform.runLater,
+        // mirroring the background-worker pattern already used by the LLM
+        // query methods elsewhere in this class (see e.g. onLlmRun()).
+        Platform.runLater(() -> {
+            loadingLabel.setText("Lade Geodaten…");
+            loadingOverlay.setManaged(true);
+            loadingOverlay.setVisible(true);
+        });
+        Thread worker = new Thread(() -> {
+            List<DataPoint> points = analyzer.analyze(resultlist, safeHeaders, (doneRows, totalRows) ->
+                    Platform.runLater(() -> loadingLabel.setText(String.format(
+                            "Lade Geodaten… %,d / %,d Zeilen", doneRows, totalRows))));
+            Platform.runLater(() -> {
+                allPoints        = points;
+                currentMapPoints = points;
+                timelineView.setData(points);
+                mapView.setData(points);
+                List<DataPoint> mocMtc = filterMocMtc(points);
+                mocMtcMapView.setData(mocMtc);
+                mocMtcCountLabel.setText(String.format("%,d Anrufe", mocMtc.size()));
+                List<DataPoint> mocMtcSorted = new ArrayList<>(mocMtc);
+                mocMtcSorted.sort(Comparator.comparing(
+                        DataPoint::getTimestamp, Comparator.nullsLast(Comparator.naturalOrder())));
+                mocMtcTable.getItems().setAll(mocMtcSorted);
+                detailPane.clear(theme);
+                loadingOverlay.setVisible(false);
+                loadingOverlay.setManaged(false);
+            });
+        }, "mapview-analyze-worker");
+        worker.setDaemon(true);
+        worker.start();
     }
 
     public void setData(
@@ -370,8 +470,130 @@ public class MapViewPane extends BorderPane {
         applyThemeToSelf();
         timelineView.applyTheme(t);
         mapView.applyTheme(t);
+        mocMtcMapView.applyTheme(t);
+        mocMtcTable.setStyle(theme.bgStyle() + theme.borderTopStyle());
         detailPane.applyTheme(t);
         policeAnalysisPane.applyTheme(t);
+    }
+
+    /**
+     * Builds a small filled-circle {@link Label} used as a colour swatch in
+     * the MOC/MTC tab's legend bar.
+     */
+    private static Label legendDot(Color c) {
+        Label dot = new Label("●"); // ●
+        dot.setTextFill(c);
+        dot.setStyle("-fx-font-size: 13px;");
+        return dot;
+    }
+
+    /**
+     * Builds the details list shown below {@link #mocMtcMapView}: one row per
+     * MOC/MTC call with its time, direction, duration, MSISDN, IMSI and
+     * coordinate. Clicking a row centers {@link #mocMtcMapView} on that
+     * record, mirroring the row-click convention used by
+     * {@link #buildRoamersTable()} etc.
+     */
+    private TableView<DataPoint> buildMocMtcTable() {
+        TableView<DataPoint> table = new TableView<>();
+        table.setPlaceholder(new Label("Keine MOC/MTC-Einträge gefunden."));
+
+        TableColumn<DataPoint, String> colTime = new TableColumn<>("Zeit");
+        colTime.setCellValueFactory(cd -> new ReadOnlyObjectWrapper<>(cd.getValue().getFormattedTimestamp()));
+        colTime.setPrefWidth(150);
+
+        TableColumn<DataPoint, String> colDirection = new TableColumn<>("Richtung");
+        colDirection.setCellValueFactory(cd -> new ReadOnlyObjectWrapper<>(callDirectionLabel(cd.getValue())));
+        colDirection.setPrefWidth(150);
+
+        TableColumn<DataPoint, String> colDuration = new TableColumn<>("Dauer");
+        colDuration.setCellValueFactory(cd -> new ReadOnlyObjectWrapper<>(
+                formatCallDuration(cd.getValue() instanceof ResponseRecordDataPoint rr ? rr.getDurationSeconds() : null)));
+        colDuration.setPrefWidth(90);
+
+        TableColumn<DataPoint, String> colMsisdn = new TableColumn<>("Rufnummer");
+        colMsisdn.setCellValueFactory(cd -> new ReadOnlyObjectWrapper<>(cd.getValue().getMsisdn()));
+        colMsisdn.setPrefWidth(130);
+
+        TableColumn<DataPoint, String> colImsi = new TableColumn<>("IMSI");
+        colImsi.setCellValueFactory(cd -> new ReadOnlyObjectWrapper<>(cd.getValue().getImsi()));
+        colImsi.setPrefWidth(160);
+
+        TableColumn<DataPoint, String> colCoord = new TableColumn<>("Koordinate");
+        colCoord.setCellValueFactory(cd -> {
+            DataAnalyzer.GeoCoordinate c = cd.getValue().getCoordinate();
+            return new ReadOnlyObjectWrapper<>(c != null ? c.toString() : "–");
+        });
+        colCoord.setPrefWidth(150);
+
+        table.getColumns().addAll(List.of(colTime, colDirection, colDuration, colMsisdn, colImsi, colCoord));
+        table.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY);
+
+        table.setRowFactory(tv -> {
+            TableRow<DataPoint> row = new TableRow<>();
+            row.setOnMouseClicked(e -> {
+                DataPoint dp = row.getItem();
+                if (dp == null) return;
+                mocMtcMapView.focusPoint(dp);
+            });
+            return row;
+        });
+
+        return table;
+    }
+
+    /**
+     * "Ausgehend (MOC)" / "Eingehend (MTC)" / "–" for anything else — mirrors
+     * the colour mapping installed via {@link MapView#setMarkerColorOverride}
+     * on {@link #mocMtcMapView} so the list and the map markers agree.
+     */
+    private static String callDirectionLabel(DataPoint dp) {
+        if (!(dp instanceof ResponseRecordDataPoint rr)) return "–";
+        String ci = rr.getCallIndicator();
+        if ("MOC".equals(ci)) return "Ausgehend (MOC)";
+        if ("MTC".equals(ci)) return "Eingehend (MTC)";
+        return "–";
+    }
+
+    /**
+     * Formats a raw {@code duration_seconds} string as {@code HH:MM:SS},
+     * mirroring {@link SequenceAnalyzer.Stop#formattedDwell()}'s convention.
+     * Returns {@code "–"} if {@code raw} is null/blank, not parseable, or zero.
+     */
+    private static String formatCallDuration(String raw) {
+        if (raw == null || raw.isBlank()) return "–";
+        long seconds;
+        try {
+            seconds = (long) Double.parseDouble(raw.trim());
+        } catch (NumberFormatException e) {
+            return "–";
+        }
+        if (seconds <= 0) return "–";
+        long h = seconds / 3600;
+        long m = (seconds % 3600) / 60;
+        long s = seconds % 60;
+        return String.format("%02d:%02d:%02d", h, m, s);
+    }
+
+    /**
+     * Filters {@code points} down to {@link ResponseRecordDataPoint}s whose
+     * {@code call_indicator} marks them as an actual call (MOC = outgoing,
+     * MTC = incoming) — i.e. excludes SMS (MOM/MTM), GPRS (SGP) and any
+     * non-call-record table. Points without a resolvable coordinate are
+     * dropped too, though {@link MapView#setData} would filter those out on
+     * its own; doing it here as well keeps {@link #mocMtcCountLabel}'s count
+     * accurate.
+     */
+    private static List<DataPoint> filterMocMtc(List<DataPoint> points) {
+        List<DataPoint> out = new ArrayList<>();
+        for (DataPoint p : points) {
+            if (p.getCoordinate() == null) continue;
+            if (p instanceof ResponseRecordDataPoint rr) {
+                String ci = rr.getCallIndicator();
+                if ("MOC".equals(ci) || "MTC".equals(ci)) out.add(rr);
+            }
+        }
+        return out;
     }
 
     public Theme getTheme() { return theme; }
@@ -391,6 +613,35 @@ public class MapViewPane extends BorderPane {
      * <p>The whole process runs on a daemon thread to keep the UI responsive.
      * Progress feedback is given through {@link #llmStatusLabel}.</p>
      */
+    /**
+     * Queries the in-memory database for the actual date range of
+     * {@code response_records.start_time} and returns a human-readable
+     * "MIN bis MAX" string (e.g. {@code "2024-09-01 00:00:00 bis 2024-09-30 23:59:59"})
+     * that is injected into the LLM intent-classification prompt so the model
+     * derives missing years from the dataset rather than from the current
+     * calendar year. Returns {@code null} if the DB is unavailable or empty.
+     */
+    private String queryDataDateRange() {
+        if (inMemoryDB == null) return null;
+        try {
+            java.sql.ResultSet rs = inMemoryDB.execute(
+                    "SELECT MIN(start_time), MAX(start_time) FROM response_records WHERE start_time IS NOT NULL");
+            if (rs == null) return null;
+            try {
+                if (rs.next()) {
+                    String min = rs.getString(1);
+                    String max = rs.getString(2);
+                    if (min != null && !min.isBlank() && max != null && !max.isBlank()) {
+                        return min + " bis " + max;
+                    }
+                }
+            } finally {
+                rs.close();
+            }
+        } catch (Exception ignored) { }
+        return null;
+    }
+
     private void onLlmRun() {
         String prompt = llmPromptField.getText().trim();
         if (prompt.isEmpty() || ragPipeline == null) return;
@@ -403,7 +654,7 @@ public class MapViewPane extends BorderPane {
 
         Thread worker = new Thread(() -> {
             try {
-                RAGPipeline.QueryIntent intent = ragPipeline.classifyIntent(prompt);
+                RAGPipeline.QueryIntent intent = ragPipeline.classifyIntent(prompt, queryDataDateRange());
 
                 // Deterministic safety net, checked FIRST: the small local
                 // model unreliably classifies country-name requests — it has
@@ -443,7 +694,13 @@ public class MapViewPane extends BorderPane {
                 } else if (intent.isWechsler()) {
                     runWechslerQuery(intent);
                 } else {
-                    runFilterQuery(prompt);
+                    // For intent="filter" pass the date-normalized text (ISO dates,
+                    // years injected) to the SQL generator — the raw prompt may
+                    // contain partial dates like "02. Juli" that the small model
+                    // resolves to the wrong year when given the original text.
+                    String filterPrompt = (intent.normalizedRequest != null)
+                            ? intent.normalizedRequest : prompt;
+                    runFilterQuery(filterPrompt);
                 }
             } catch (Exception ex) {
                 Platform.runLater(() -> {
@@ -1340,12 +1597,77 @@ public class MapViewPane extends BorderPane {
 
         private final VBox content = new VBox(8);
 
+        // The DataPoint currently shown (null if nothing is selected yet) -
+        // kept around so the "Copy as CSV" context-menu action can export
+        // exactly the record that's on screen.
+        private DataPoint currentDp;
+
         DetailPane() {
             setFitToWidth(true);
             content.setPadding(new Insets(14));
             setContent(content);
             setMinSize(0, 0);
+
+            MenuItem copyCsv = new MenuItem("Copy as CSV");
+            copyCsv.setOnAction(e -> copyAsCsv());
+            ContextMenu menu = new ContextMenu(copyCsv);
+            // Grey the item out instead of showing it when there's nothing
+            // selected yet (currentDp == null right after clear()/startup).
+            menu.setOnShowing(e -> copyCsv.setDisable(currentDp == null));
+            setContextMenu(menu);
+
             clear(Theme.DARK);
+        }
+
+        /**
+         * Copies the currently displayed record to the system clipboard as a
+         * two-line CSV (header row + value row), using the column names and
+         * raw column values exactly as shown under "RAW COLUMNS". Respects
+         * the user's configured CSV separator (Settings -> CSV_SEPARATOR),
+         * the same one used by the table view's "copy line" action.
+         */
+        private void copyAsCsv() {
+            if (currentDp == null)
+                return;
+
+            List<String> cols = currentDp.getColumnNames();
+            List<String> row  = currentDp.getRawRow();
+            if (cols == null || row == null)
+                return;
+
+            String sep = Global.CSV_SEPARATOR;
+            if ("[TAB]".equals(sep))
+                sep = "\t";
+
+            int n = Math.min(cols.size(), row.size());
+
+            StringBuilder sb = new StringBuilder();
+            for (int i = 0; i < n; i++) {
+                if (i > 0) sb.append(sep);
+                sb.append(csvEscape(cols.get(i), sep));
+            }
+            sb.append(System.lineSeparator());
+            for (int i = 0; i < n; i++) {
+                if (i > 0) sb.append(sep);
+                sb.append(csvEscape(row.get(i), sep));
+            }
+
+            ClipboardContent clipboardContent = new ClipboardContent();
+            clipboardContent.putString(sb.toString());
+            Clipboard.getSystemClipboard().setContent(clipboardContent);
+        }
+
+        /**
+         * Quotes a CSV field if it contains the separator, a quote, or a
+         * line break, doubling any embedded quotes - standard CSV escaping.
+         */
+        private static String csvEscape(String value, String sep) {
+            if (value == null)
+                return "";
+            String escaped = value.replace("\"", "\"\"");
+            boolean mustQuote = value.contains(sep) || value.contains("\"")
+                    || value.contains("\n") || value.contains("\r");
+            return mustQuote ? "\"" + escaped + "\"" : escaped;
         }
 
         void applyTheme(Theme t) {
@@ -1355,6 +1677,7 @@ public class MapViewPane extends BorderPane {
         }
 
         void clear(Theme t) {
+            currentDp = null;
             content.getChildren().clear();
             applyTheme(t);
             Label placeholder = new Label("\u2190 Select a dot\non the timeline\nor a map marker");
@@ -1365,6 +1688,7 @@ public class MapViewPane extends BorderPane {
         }
 
         void show(DataPoint dp, Theme t) {
+            currentDp = dp;
             content.getChildren().clear();
             applyTheme(t);
 

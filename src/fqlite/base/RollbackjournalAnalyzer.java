@@ -524,7 +524,19 @@ public class RollbackjournalAnalyzer {
             else if (s==7)               { dp+=8; }
             else if (s==8)               { if(col==3)rootPage=0; }
             else if (s==9)               { if(col==3)rootPage=1; }
-            else if (s>=13&&s%2==1)      { int len=(int)((s-13)/2); txt[col]=new String(payload,dp,len,StandardCharsets.UTF_8); dp+=len; }
+            // Use the database's actual text encoding (detected from the file
+            // header by Job.parseHeader() and published in
+            // SqliteElement.db_encoding), not a hardcoded UTF-8. For a
+            // UTF-16BE/LE database, decoding 2-byte-per-char schema text
+            // (table/index names) as UTF-8 produces a garbled name (every
+            // real character followed by a stray byte, e.g. "Weekly_Ratings"
+            // -> " W e e k l y _ R a t i n g s"). That garbled name then
+            // becomes the table key used downstream (PageRecord.ownerName(),
+            // RollbackJournalReader.analyzePage()'s tname, updateResultSet()),
+            // so journal-side rows never merge with the correctly-decoded
+            // table the live DB import created - they end up filed under an
+            // orphan table name and never show up in that table's GUI view.
+            else if (s>=13&&s%2==1)      { int len=(int)((s-13)/2); txt[col]=new String(payload,dp,len,SqliteElement.db_encoding); dp+=len; }
             else if (s>=12&&s%2==0)      { dp+=(int)((s-12)/2); }
         }
         return new SchemaEntry(txt[0]!=null?txt[0]:"?", txt[1]!=null?txt[1]:"?", rootPage);
