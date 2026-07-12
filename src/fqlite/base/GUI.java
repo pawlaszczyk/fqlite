@@ -575,7 +575,7 @@ public class GUI extends Application {
 		btnLLM.setOnAction(e -> showLLMWindow());
 
 
-		s = Objects.requireNonNull(GUI.class.getResource("/icon24_lighthouse.png")).toExternalForm();
+		s = Objects.requireNonNull(GUI.class.getResource("/icon24_location.png")).toExternalForm();
 		btnLocation = new Button();
 		iv = new ImageView(s);
 		iv.smoothProperty().setValue(true);
@@ -2010,7 +2010,7 @@ public class GUI extends Application {
 			case 1 -> Objects.requireNonNull(GUI.class.getResource("/table-key-icon-reddot.png")).toExternalForm();
 			case 99 -> Objects.requireNonNull(GUI.class.getResource("/gray_database24.png")).toExternalForm();
 			case 100 -> Objects.requireNonNull(GUI.class.getResource("/journal-icon.png")).toExternalForm();
-			case 101 -> Objects.requireNonNull(GUI.class.getResource("/gray_archive24.png")).toExternalForm();
+			case 101 -> Objects.requireNonNull(GUI.class.getResource("/wal-icon.png")).toExternalForm();
 			default -> null;
 		};
 
