@@ -261,6 +261,18 @@ jobs:
           find build/jpackage -name "*.deb" -exec sh -c 'x="{}"; mv "$x" "${{ env.OUTPUT_FILE_NAME }}"' \;
           echo "OUTPUT_FILE=$(realpath ${{ env.OUTPUT_FILE_NAME }})" >> $GITHUB_ENV
 
+      - name: Create Linux RPM installer (Fedora/RHEL)
+        if: startsWith(matrix.os, 'ubuntu')
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y rpm
+          rm -rf build/jpackage
+          ./gradlew --info --stacktrace jpackage -PinstallerType=rpm --rerun-tasks
+          RPM_FILE_NAME="fqlite-${{ needs.get-version.outputs.version }}-$(uname -m).rpm"
+          mv "$(find build/jpackage -name '*.rpm' | head -n1)" "$RPM_FILE_NAME"
+          echo "RPM_OUTPUT_FILE_NAME=$RPM_FILE_NAME" >> $GITHUB_ENV
+          echo "RPM_OUTPUT_FILE=$(realpath $RPM_FILE_NAME)" >> $GITHUB_ENV
+
       - name: Create Windows installer
         if: startsWith(matrix.os, 'windows')
         run: |
@@ -294,6 +306,21 @@ jobs:
         with:
           name: "${{ env.OUTPUT_FILE_NAME }}"
           path: "${{ env.OUTPUT_FILE }}"
+          overwrite: true
+          retention-days: 14
+
+      - name: Generate RPM artifact attestation
+        if: startsWith(matrix.os, 'ubuntu')
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: "${{ env.RPM_OUTPUT_FILE }}"
+
+      - name: Upload RPM artifact
+        if: startsWith(matrix.os, 'ubuntu')
+        uses: actions/upload-artifact@v4
+        with:
+          name: "${{ env.RPM_OUTPUT_FILE_NAME }}"
+          path: "${{ env.RPM_OUTPUT_FILE }}"
           overwrite: true
           retention-days: 14
 
