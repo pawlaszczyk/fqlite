@@ -5,11 +5,17 @@ public enum BlockType {
 
     SQL_SELECT,
     SQL_COLUMN,
+    SQL_TEXT,
+    SQL_ALIAS,
+    SQL_FUNCTION,
     SQL_FROM,
     SQL_WHERE,
+    SQL_AND,
+    SQL_OR,
     SQL_GROUP_BY,
     SQL_HAVING,
     SQL_ORDER_BY,
+    SQL_LIMIT,
 
     SQL_JOIN,
     SQL_INNER_JOIN,
