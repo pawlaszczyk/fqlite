@@ -95,10 +95,55 @@ In the latest version, the FQLite is bundled with a Java Runtime Environment (JR
 ### NodeQL Implementation
 
 <p align="center">
-  <img width="80%" height="80%" src="img/nodeql_implemantation.png?raw=true" alt="NodeQL Node Windows Showcase"/>
+  <img width="95%" src="img/nodeql-current-editor.png?raw=true" alt="NodeQL editor with connected blocks, SQL preview and inline query results"/>
 </p>
 
-With NodeQL you can easily create full SQL Commands graphicly. Just use the Nodes and Snap them onto each other. It work's this simple.
+Version **5.1** updates the visual SQLite editor to follow the current
+[NodeQL](https://github.com/Kartoffelspalt/NodeQL) block shapes, colors and workflow.
+This is a JavaFX integration, not the standalone Flutter application.
+
+1. Open a SQLite database in FQLite and click the **NodeQL graph icon in the toolbar**.
+   There is no separate NodeQL entry in the top menu bar.
+2. Search the palette, snap statements below `EXECUTE QUERY` and insert oval
+   reporters into input slots. Use structured conditions, sorting, aliases,
+   SQLite functions, `DISTINCT` and `LIMIT`/`OFFSET` to compose your query.
+3. Click **Run Query** or the yellow start block. SQL and results stay in the
+   NodeQL editor; **Expand results** opens a larger result view. Opening the SQL
+   Analyzer is optional.
+
+NodeQL workspaces are session-only: nodes are **not saved or restored with
+FQLite projects**. Undo is available inside the editor.
+
+See the [integration and usage guide](NODEQL_INTEGRATION_GUIDE.md),
+[verification notes](design-qa.md) and [5.1 changelog](CHANGELOG.md).
+The upstream FQLite PDF user manual is unchanged; this guide documents the
+NodeQL-specific workflow.
+
+### Run from source
+
+Use JDK 21 and the included Gradle wrapper. On macOS, `./run-fqlite.sh` locates
+a compatible JDK and starts the application. On other platforms, set
+`JAVA_HOME` to your JDK 21 installation and run:
+
+```sh
+./gradlew run
+```
+
+Compile and process resources without opening the GUI:
+
+```sh
+./gradlew compileJava processResources
+```
+
+Run the NodeQL integration smoke test on a graphical desktop:
+
+```sh
+./gradlew nodeQlSmokeTest
+```
+
+The test opens and closes a temporary editor, uses an in-memory sample database,
+and writes a screenshot to `build/reports/nodeql/editor.png`. It does not open
+or modify user databases or projects.
 
 # Installation
 ## macOS

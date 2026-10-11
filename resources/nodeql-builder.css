@@ -1,52 +1,44 @@
-.nodeql-builder {
-    -fx-font-family: "System";
-}
-
-.nodeql-builder .button {
-    -fx-text-fill: #1f2937;
-}
-
-.nodeql-builder .tool-bar .button {
-    -fx-background-color: #eef3f8;
-    -fx-border-color: #cbd5e1;
-    -fx-border-radius: 6;
-    -fx-background-radius: 6;
-    -fx-padding: 6 10 6 10;
-}
-
-.nodeql-builder .tool-bar .button:hover {
-    -fx-background-color: #e2e8f0;
-}
-
-.nodeql-builder .accordion {
-    -fx-background-color: #ffffff;
-}
-
-.nodeql-builder .titled-pane {
-    -fx-text-fill: #1f2937;
-}
-
-.nodeql-builder .titled-pane > .title {
-    -fx-background-color: #eef3f8;
-    -fx-border-color: #d7dee9;
-    -fx-border-width: 1 0 1 0;
-}
-
-.nodeql-builder .titled-pane:expanded > .title {
-    -fx-background-color: #dbeafe;
-}
-
-.nodeql-builder .titled-pane > .title > .text {
-    -fx-fill: #1f2937;
-    -fx-font-weight: bold;
-}
-
-.nodeql-builder .titled-pane > *.content {
-    -fx-background-color: #f8fafc;
-    -fx-border-color: #d7dee9;
-}
-
-.nodeql-builder .scroll-pane,
-.nodeql-builder .scroll-pane > .viewport {
-    -fx-background-color: #f5f8fc;
-}
+.nodeql-builder { -fx-font-family: "System"; -fx-font-size: 13px; -fx-background-color: #0b1220; -fx-text-fill: #e2e8f0; }
+.nodeql-builder .label { -fx-text-fill: #e2e8f0; }
+.nodeql-builder .brand { -fx-font-size: 22px; -fx-font-weight: bold; -fx-padding: 0 12 0 0; }
+.nodeql-builder .panel-title { -fx-font-size: 14px; -fx-font-weight: bold; }
+.nodeql-builder .muted, .nodeql-builder .database-label { -fx-text-fill: #94a3b8; }
+.nodeql-builder .tool-bar { -fx-background-color: #0b1220; -fx-padding: 12 14; -fx-spacing: 8; }
+.nodeql-builder .button { -fx-background-color: #111c30; -fx-text-fill: #e2e8f0; -fx-background-radius: 8; -fx-border-color: #263449; -fx-border-radius: 8; -fx-padding: 7 11; -fx-cursor: hand; }
+.nodeql-builder .button:hover { -fx-background-color: #1e293b; }
+.nodeql-builder .workbench { -fx-background-color: #0b1220; -fx-padding: 0; }
+.nodeql-builder .split-pane-divider { -fx-background-color: #1e293b; -fx-padding: 0 2; }
+.nodeql-builder .palette-panel { -fx-background-color: #0b1220; }
+.nodeql-builder .category-rail { -fx-border-color: #1e293b; -fx-border-width: 0 1 0 0; }
+.nodeql-builder .category-button { -fx-pref-width: 48; -fx-pref-height: 44; -fx-font-size: 11px; -fx-font-weight: bold; -fx-background-color: #13223c; -fx-text-fill: #60a5fa; -fx-border-color: transparent; -fx-padding: 0; }
+.nodeql-builder .category-button.active { -fx-background-color: #3b82f6; -fx-text-fill: white; }
+.nodeql-builder .palette-search { -fx-background-color: #111c30; -fx-text-fill: #e2e8f0; -fx-prompt-text-fill: #94a3b8; -fx-background-radius: 8; -fx-border-color: #1e293b; -fx-border-radius: 8; -fx-padding: 10 12; }
+.nodeql-builder .palette-card { -fx-background-color: #0f172a; -fx-background-radius: 9; -fx-border-color: #1e293b; -fx-border-radius: 9; }
+.nodeql-builder .palette-card:hover { -fx-border-color: #475569; -fx-background-color: #111c30; }
+.nodeql-builder .block-description { -fx-font-size: 11px; -fx-text-fill: #cbd5e1; }
+.nodeql-builder .scroll-pane, .nodeql-builder .scroll-pane > .viewport { -fx-background-color: #0b1220; }
+.nodeql-builder .workspace-scroll, .nodeql-builder .workspace-scroll > .viewport { -fx-background-color: #111827; }
+.nodeql-builder .scroll-bar { -fx-background-color: #0b1220; -fx-pref-width: 9; -fx-pref-height: 9; }
+.nodeql-builder .scroll-bar .thumb { -fx-background-color: #334155; -fx-background-radius: 5; }
+.nodeql-builder .scroll-bar .increment-button, .nodeql-builder .scroll-bar .decrement-button { -fx-padding: 0; }
+.nodeql-builder .output-panel { -fx-background-color: #0b1220; }
+.nodeql-builder .sql-output { -fx-control-inner-background: #0f172a; -fx-background-color: #0f172a; -fx-text-fill: #bde0fe; -fx-font-family: "Menlo", "Monospaced"; -fx-font-size: 13px; -fx-background-radius: 9; -fx-border-color: #1e293b; -fx-border-radius: 9; -fx-highlight-fill: #2563eb; -fx-highlight-text-fill: white; }
+.nodeql-builder .sql-output .content { -fx-background-color: #0f172a; }
+.nodeql-builder .node-input { -fx-background-color: rgba(255,255,255,0.20); -fx-background-radius: 20; -fx-border-color: rgba(255,255,255,0.62); -fx-border-radius: 20; -fx-padding: 3 8; -fx-text-fill: white; -fx-prompt-text-fill: rgba(255,255,255,0.70); -fx-font-size: 13px; -fx-font-weight: bold; -fx-pref-height: 26; -fx-highlight-fill: #1e3a8a; }
+.nodeql-builder .node-input:focused { -fx-border-color: white; }
+.nodeql-builder .expression-input { -fx-background-color: #6d28d9; -fx-border-color: transparent; }
+.nodeql-builder .node-choice { -fx-background-color: rgba(255,255,255,0.20); -fx-background-radius: 20; -fx-border-color: rgba(255,255,255,0.62); -fx-border-radius: 20; -fx-padding: 0; -fx-pref-height: 26; }
+.nodeql-builder .node-choice .list-cell { -fx-text-fill: white; -fx-font-size: 12px; -fx-font-weight: bold; -fx-padding: 3 7; }
+.nodeql-builder .node-choice .arrow { -fx-background-color: white; }
+.nodeql-builder .node-choice .arrow-button { -fx-padding: 4 6; }
+.nodeql-builder .combo-box-popup .list-view { -fx-background-color: #111c30; }
+.nodeql-builder .combo-box-popup .list-cell { -fx-background-color: #111c30; -fx-text-fill: white; }
+.nodeql-builder .combo-box-popup .list-cell:hover { -fx-background-color: #2563eb; }
+.nodeql-builder .reporter-target { -fx-effect: dropshadow(gaussian, #fff176, 10, 0.7, 0, 0); }
+.nodeql-builder .table-view { -fx-background-color: #0f172a; -fx-border-color: #1e293b; -fx-background-radius: 9; }
+.nodeql-builder .table-view .column-header-background, .nodeql-builder .table-view .column-header, .nodeql-builder .table-view .filler { -fx-background-color: #111c30; }
+.nodeql-builder .table-row-cell { -fx-background-color: #0f172a; -fx-text-background-color: #e2e8f0; }
+.nodeql-builder .table-row-cell:odd { -fx-background-color: #111c30; }
+.nodeql-builder .table-row-cell:selected { -fx-background-color: #1e3a8a; }
+.nodeql-builder .table-cell { -fx-border-color: transparent #1e293b #1e293b transparent; -fx-padding: 6 8; }
+.nodeql-builder .table-view .placeholder .label { -fx-text-fill: #94a3b8; -fx-wrap-text: true; }
