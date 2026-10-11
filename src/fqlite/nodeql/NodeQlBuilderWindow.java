@@ -159,7 +159,7 @@ public final class NodeQlBuilderWindow {
     }
 
     private ToolBar createToolbar() {
-        Label brand = new Label("NodeQL");
+        Label brand = new Label("NodeQL for FQLite");
         brand.getStyleClass().add("brand");
         runQueryButton = new Button("Run Query");
         runQueryButton.setOnAction(e -> executeQuery());
