@@ -5,6 +5,7 @@ import fqlite.sql.DBManager;
 import fqlite.sql.InMemoryDatabase;
 import javafx.animation.PauseTransition;
 import javafx.application.Application;
+import javafx.application.Platform;
 import javafx.collections.FXCollections;
 import javafx.collections.ObservableList;
 import javafx.geometry.Pos;
@@ -19,6 +20,7 @@ import javafx.stage.Screen;
 import javafx.util.Duration;
 
 
+import java.io.InputStream;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -195,11 +197,18 @@ public class LocationWindow extends Application {
      * @param onDone called once the splash has been shown and dismissed
      */
     private void showSplash(Runnable onDone) {
+        // The splash artwork is optional — if it is not on the classpath,
+        // skip the splash entirely instead of crashing the map window.
+        InputStream logoStream = LocationWindow.class.getResourceAsStream("/lighthouse_logo.png");
+        if (logoStream == null) {
+            Platform.runLater(onDone);
+            return;
+        }
+
         Stage splash = new Stage(StageStyle.UNDECORATED);
         splash.setAlwaysOnTop(true);
 
-        ImageView logo = new ImageView(new Image(Objects.requireNonNull(
-                LocationWindow.class.getResourceAsStream("/lighthouse_logo.png"))));
+        ImageView logo = new ImageView(new Image(logoStream));
         logo.setPreserveRatio(true);
         logo.setFitWidth(380);
 
