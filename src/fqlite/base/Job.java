@@ -1356,7 +1356,13 @@ public class Job {
 		 * are assigned to the fqlite_freelist component.
 		 */
 
-		if (null != gui) {
+		/*
+		 * Register the sqlite_master descriptor for all schema pages - independent of the GUI.
+		 * Previously this happened only when a GUI was attached; in headless runs page 1 stayed
+		 * unassigned, so the live schema records ended up in the unassigned bucket "D" and were
+		 * mistaken for deleted records by headless tools (e.g. benchmark harnesses).
+		 */
+		{
 			/* create header for the SQLiteMaster table */
 			List<String> mcol = new ArrayList<String>();
 			mcol.add("TEXT"); mcol.add("TEXT"); mcol.add("TEXT"); mcol.add("INT"); mcol.add("TEXT");
@@ -1391,6 +1397,7 @@ public class Job {
 
 			}
 
+			if (null != gui)
 			gui.add_table(this, tdmaster.tblname, tdmaster.columnnames,
 					tdmaster.getColumntypes(), tdmaster.boolcolumns, null, null, false, false,0).thenAccept(result -> {
 
@@ -1416,6 +1423,7 @@ public class Job {
 				tdmaster.getColumntypes().add(0, "BOOLEAN");
 
 
+				if (null != gui)
 				gui.add_table(this, tdmaster.tblname, tdmaster.columnnames,
 						tdmaster.getColumntypes(), tdmaster.boolcolumns ,null, tdmaster.sqltypes, true, false,0).thenAccept(result -> {
 					String walpathmaster = result;
@@ -1427,6 +1435,7 @@ public class Job {
 			else if (readRollbackJournal) {
 
 
+				if (null != gui)
 				gui.add_table(this, tdmaster.tblname, tdmaster.columnnames,
 						tdmaster.getColumntypes(), tdmaster.boolcolumns ,null, tdmaster.sqltypes, false, true,0).thenAccept(result -> {
 					String rjpathmaster = result;

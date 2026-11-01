@@ -421,7 +421,7 @@ public class Auxiliary {
 
             /* CASE 2: Partial header — first column overwritten */
             if (header.startsWith("XX")) {
-                header = resolvePartialHeader(header, buffer, m, next, round);
+                header = resolvePartialHeader(header, buffer, m, next, round, fallback);
                 if (m.end < 0 || m.end > buffer.limit()) {
                     AppLog.debug("readDeletedRecord: m.end=" + m.end + " out of buffer limit after resolvePartialHeader, skipping.");
                     return null;
@@ -637,36 +637,204 @@ public class Auxiliary {
     /**
      * Resolves a partially-overwritten header that starts with the placeholder "XX".
      */
-    private String resolvePartialHeader(String header, ByteBuffer buffer, Match m, Match next, int round) {
+    /**
+     * Resolves the serial type of the first column of a freed cell whose first four bytes
+     * (payload length, rowid, header length, serial type of column 1) were overwritten by the
+     * 4-byte freeblock header [next freeblock (2)][freeblock size (2)].
+     * <p>
+     * Earlier versions always guessed serial type 02 (16-bit int) in round 1. For INT values
+     * &gt; 32767 (serial type 03) this shifted every following column by one byte
+     * (e.g. "Melanie|Bauer" was carved as "SMelani|eBaue"). Now, in this order:
+     * <ol>
+     * <li>freeblock holds exactly this cell: size - 4 - header - data(2..n) = length of column 1</li>
+     * <li>freeblock was coalesced: take the length after which an intact cell of the same shape
+     *     follows, otherwise the length after which a freed cell (freeblock remnant) of the same
+     *     shape follows</li>
+     * <li>fallback: serial type of column 1 seen in intact records of this page (if wider than
+     *     02), then the legacy round-based guess (02, 03, ...)</li>
+     * </ol>
+     */
+    private String resolvePartialHeader(String header, ByteBuffer buffer, Match m, Match next,
+                                        int round, String fallback) {
 
-        //System.out.println(" header " + header + " round " + round);
-        int number = 1 + round;
+        String rest  = header.substring(2);                // serial types of columns 2..n
+        String guess = "0" + (1 + round) + rest;           // legacy heuristic: 02, 03, 04, ...
 
-        if (true)
-            return "0" + number + header.substring(2);
+        if (round > 1)                                      // first round failed -> legacy guessing
+            return guess;
+        // page-level hint from intact records - only if it is wider than the legacy guess (02);
+        // a narrower hint (01) decodes "successfully" but shifted and suppresses the retry rounds
+        if (fallback != null && fallback.matches("0[3-6]"))
+            guess = fallback + rest;
 
-        // skip the old stuff:
+        long[] restTypes  = hexToSerialTypes(rest);
+        int headerlength  = rest.length() / 2;
+        int sizePos       = m.end - headerlength - 2;       // size field precedes column-2 type
+        if (restTypes == null || sizePos < 2 || sizePos + 2 > buffer.limit())
+            return guess;
 
-        String match      = header.substring(2);
-        int headerlength  = match.length() / 2;
+        int fbstart = sizePos - 2;
+        int fbend   = fbstart + Short.toUnsignedInt(buffer.getShort(sizePos));
+        int data2n  = getPayloadLength(rest);
+        if (fbend > buffer.limit())
+            return guess;
 
-        buffer.position(m.end - headerlength - 2);
-        short lg = buffer.getShort();
+        final int[][] all = {{1, 1}, {2, 2}, {3, 3}, {4, 4}, {5, 6}, {6, 8}};          // type, length
 
-        if (next != null && next.begin < m.begin + lg) {
-            lg = (short) (lg - (m.begin + lg - next.begin));
+        // only lengths for which every TEXT column decodes as valid text (no control bytes,
+        // well-formed UTF-8) - a wrong length shifts the text columns into binary garbage
+        int datastart = m.end;
+        List<int[]> candidates = new ArrayList<>();
+        for (int[] c : all)
+            if (textColumnsPlausible(buffer, datastart + c[1], restTypes))
+                candidates.add(c);
+
+        for (int[] c : candidates)                                                     // (1)
+            if (datastart + data2n + c[1] == fbend)
+                return String.format("%02x", c[0]) + rest;
+
+        for (int pass = 0; pass < 2; pass++)                                           // (2)
+            for (int[] c : candidates) {
+                int cellend = datastart + data2n + c[1];
+                if (cellend >= fbend) continue;
+                boolean ok = pass == 0 ? isIntactCellOfShape(buffer, cellend, fbend, restTypes)
+                                       : isFreedCellOfShape(buffer, cellend, restTypes);
+                if (ok)
+                    return String.format("%02x", c[0]) + rest;
+            }
+
+        // (3) no structural evidence: page hint / legacy guess if its text decodes, otherwise
+        //     the first plausible length in order of frequency (02, 03, 01, 04, 05, 06)
+        int hinted = Integer.parseInt(guess.substring(0, 2), 16);
+        for (int t : new int[]{hinted, 2, 3, 1, 4, 5, 6})
+            for (int[] c : candidates)
+                if (c[0] == t)
+                    return String.format("%02x", t) + rest;
+        return guess;
+    }
+
+    /** true if all TEXT columns (serial types of columns 2..n) starting at pos decode as text */
+    private boolean textColumnsPlausible(ByteBuffer b, int pos, long[] types) {
+        if (job == null || job.db_encoding != StandardCharsets.UTF_8)
+            return true;                                   // check only implemented for UTF-8
+        for (long t : types) {
+            int len = (int) contentLength(t);
+            if (typeClass(t) == 'T') {
+                if (pos < 0 || pos + len > b.limit())
+                    return true;                           // spills to overflow - cannot judge
+                byte[] raw = new byte[len];
+                for (int i = 0; i < len; i++) raw[i] = b.get(pos + i);
+                try {
+                    String s = StandardCharsets.UTF_8.newDecoder()
+                            .onMalformedInput(java.nio.charset.CodingErrorAction.REPORT)
+                            .onUnmappableCharacter(java.nio.charset.CodingErrorAction.REPORT)
+                            .decode(ByteBuffer.wrap(raw)).toString();
+                    for (int i = 0; i < s.length(); i++) {
+                        char c = s.charAt(i);
+                        if (c < 0x20 && c != '\t' && c != '\n' && c != '\r') return false;
+                    }
+                } catch (java.nio.charset.CharacterCodingException e) {
+                    return false;
+                }
+            }
+            pos += len;
         }
+        return true;
+    }
 
-        int first = lg - 4 - headerlength - getPayloadLength(match);
-        if (first < 0) {
-            return "02" + header.substring(4);
-        } else if (first <= 6) {
-            String repl = Integer.toHexString(first);
-            if (repl.length() % 2 != 0) repl = "0" + repl;
-            return header.replace("XX", repl);
-        } else {
-            return header.replace("XX", "02");
+    /** serial type class: N(ull) matches anything, I(nt), R(eal), T(ext), B(lob) */
+    private static char typeClass(long t) {
+        if (t == 0) return 'N';
+        if (t == 7) return 'R';
+        if (t <= 9) return 'I';
+        if (t >= 13 && (t & 1) == 1) return 'T';
+        if (t >= 12) return 'B';
+        return 'X';
+    }
+
+    private static boolean sameShape(long[] a, long[] b) {
+        if (a == null || a.length != b.length) return false;
+        for (int i = 0; i < a.length; i++) {
+            char x = typeClass(a[i]), y = typeClass(b[i]);
+            if (x == 'X' || y == 'X') return false;
+            if (x != 'N' && y != 'N' && x != y) return false;
         }
+        return true;
+    }
+
+    private static long contentLength(long t) {
+        if (t >= 12) return (t - 12) / 2;
+        return new int[]{0, 1, 2, 3, 4, 6, 8, 8, 0, 0, 0, 0}[(int) t];
+    }
+
+    private static long[] readTypesAt(ByteBuffer b, int[] p, int n, int limit) {
+        long[] t = new long[n];
+        for (int i = 0; i < n; i++) t[i] = readVarintAt(b, p, limit);
+        return t;
+    }
+
+    /** intact cell [pll][rowid][hlen][st1][st2..n] whose columns 2..n have the expected shape */
+    private static boolean isIntactCellOfShape(ByteBuffer b, int pos, int limit, long[] rest) {
+        try {
+            int[] p = {pos};
+            long pll = readVarintAt(b, p, limit);
+            readVarintAt(b, p, limit);                                  // rowid
+            int hstart = p[0];
+            long hlen = readVarintAt(b, p, limit);
+            if (hlen < 2 || hlen > 100) return false;
+            long st1 = readVarintAt(b, p, limit);
+            long[] t = readTypesAt(b, p, rest.length, limit);
+            if (p[0] != hstart + hlen || !sameShape(t, rest) || typeClass(st1) == 'X') return false;
+            long content = contentLength(st1);
+            for (long x : t) content += contentLength(x);
+            return hlen + content == pll;
+        } catch (RuntimeException e) {
+            return false;
+        }
+    }
+
+    /** freed cell [next(2)][size(2)][st2..n] whose columns 2..n have the expected shape */
+    private static boolean isFreedCellOfShape(ByteBuffer b, int pos, long[] rest) {
+        try {
+            int size = Short.toUnsignedInt(b.getShort(pos + 2));
+            int[] p = {pos + 4};
+            long[] t = readTypesAt(b, p, rest.length, b.limit());
+            if (!sameShape(t, rest)) return false;
+            long min = (p[0] - pos) + 1;
+            for (long x : t) min += contentLength(x);
+            return size >= min && pos + size <= b.limit();
+        } catch (RuntimeException e) {
+            return false;
+        }
+    }
+
+    private static long[] hexToSerialTypes(String hex) {
+        try {
+            byte[] raw = new byte[hex.length() / 2];
+            for (int i = 0; i < raw.length; i++)
+                raw[i] = (byte) Integer.parseInt(hex.substring(2 * i, 2 * i + 2), 16);
+            ByteBuffer bb = ByteBuffer.wrap(raw);
+            List<Long> l = new ArrayList<>();
+            int[] p = {0};
+            while (p[0] < raw.length) l.add(readVarintAt(bb, p, raw.length));
+            long[] r = new long[l.size()];
+            for (int i = 0; i < r.length; i++) r[i] = l.get(i);
+            return r;
+        } catch (RuntimeException e) {
+            return null;
+        }
+    }
+
+    private static long readVarintAt(ByteBuffer b, int[] pos, int limit) {
+        long v = 0;
+        for (int k = 0; k < 9; k++) {
+            if (pos[0] >= limit) throw new IndexOutOfBoundsException();
+            int c = b.get(pos[0]++) & 0xFF;
+            if (k == 8) return (v << 8) | c;
+            v = (v << 7) | (c & 0x7F);
+            if (c < 0x80) return v;
+        }
+        return v;
     }
 
     // -------------------------------------------------------------------------

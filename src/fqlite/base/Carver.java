@@ -104,6 +104,21 @@ public class Carver{
 
 			if (headertype == CarverTypes.COLUMNSONLY) {
 
+				/*
+				 * A COLUMNSONLY match assumes the freeblock header [next(2)][size(2)] directly
+				 * precedes the first serial type. If the size field read that way cannot hold
+				 * the record, the "first serial type" is most likely the low byte of the real
+				 * size field (e.g. size 0x0201 -> st1 = 01), which shifts all columns by one
+				 * byte. Skip it - the FIRSTCOLUMNMISSING pass recovers the record correctly.
+				 */
+				int st1pos = mat.start;
+				if (st1pos >= 2 && st1pos < block.limit()) {
+					int fbsize = ((block.get(st1pos - 2) & 0xFF) << 8) | (block.get(st1pos - 1) & 0xFF);
+					int minsize = 4 + m.length() / 2 + Auxiliary.getPayloadLength(m);
+					if (fbsize < minsize)
+						continue;
+				}
+
 				mat.start +=2;
 				cmatch = m.toCharArray();
 

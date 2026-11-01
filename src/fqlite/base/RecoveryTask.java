@@ -414,6 +414,14 @@ public class RecoveryTask implements Runnable {
 
 					record = row.line();
 
+					/*
+					 * An intact cell on a freelist leaf page belongs to a dropped table (or to freed
+					 * pages of a live table). It must not be reported as a regular record: the page
+					 * was released, so mark it as freelist entry.
+					 */
+					if (freeList && record.size() > 3 && Global.REGULAR_RECORD.equals(record.get(3)))
+						record.set(3, Global.FREELIST_ENTRY);
+
 
 					int p;
 
