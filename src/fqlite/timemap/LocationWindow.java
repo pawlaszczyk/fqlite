@@ -215,7 +215,7 @@ public class LocationWindow extends Application {
         Label version = new Label("Lighthouse Plugin 0.5 Beta");
         version.setStyle(
                 "-fx-text-fill: white;"
-              + "-fx-font-size: 12px;"
+              + "-fx-font-size: 15px;"
               + "-fx-font-weight: bold;"
               + "-fx-padding: 0 0 14 0;"
               + "-fx-effect: dropshadow(gaussian, black, 6, 0.7, 0, 0);");

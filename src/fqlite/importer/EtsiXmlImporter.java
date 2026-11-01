@@ -11,7 +11,15 @@ import fqlite.timemap.UliDecoder;
 
 import javax.xml.parsers.DocumentBuilder;
 import javax.xml.parsers.DocumentBuilderFactory;
+import javax.xml.XMLConstants;
 import java.io.File;
+import java.io.InputStream;
+import java.nio.file.Files;
+import java.security.MessageDigest;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.ArrayList;
+import java.util.Set;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.PreparedStatement;
@@ -23,7 +31,6 @@ import java.time.Duration;
 import java.time.LocalDateTime;
 import java.time.OffsetDateTime;
 import java.time.format.DateTimeFormatter;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -57,6 +64,9 @@ public class EtsiXmlImporter {
 
     private static final Logger LOG = Logger.getLogger(EtsiXmlImporter.class.getName());
 
+    /** Version identifier of this importer, recorded in {@code import_log} for every imported file. */
+    public static final String IMPORTER_VERSION = "EtsiXmlImporter/2026-09-28";
+
     private EtsiXmlImporter() { /* utility class */ }
 
     /** Reports import progress in terms of processed / total response records (per file). */
@@ -80,6 +90,26 @@ public class EtsiXmlImporter {
     // ------------------------------------------------------------------
 
     private static final String[] SCHEMA = {
+            // Chain-of-custody record: one row per source file and import run.
+            "CREATE TABLE IF NOT EXISTS import_log (" +
+                    "id INTEGER PRIMARY KEY AUTOINCREMENT," +
+                    "source_file TEXT," +
+                    "file_name TEXT," +
+                    "file_path TEXT," +
+                    "file_size INTEGER," +
+                    "sha256 TEXT," +
+                    "sha256_after TEXT," +
+                    "request_number TEXT," +
+                    "request_id INTEGER," +
+                    "records_in_file INTEGER," +
+                    "rows_inserted INTEGER," +
+                    "rows_unrecognised INTEGER," +
+                    "importer_version TEXT," +
+                    "started_at TEXT," +
+                    "finished_at TEXT," +
+                    "status TEXT," +
+                    "message TEXT)",
+
             "CREATE TABLE IF NOT EXISTS request_metadata (" +
                     "id INTEGER PRIMARY KEY AUTOINCREMENT," +
                     "country_code TEXT," +
@@ -237,6 +267,7 @@ public class EtsiXmlImporter {
 
             conn.setAutoCommit(false);
 
+            Set<String> seenHashes = new HashSet<>();
             int fileCount = xmlFiles.size();
             for (int fi = 0; fi < fileCount; fi++) {
                 File xmlFile = xmlFiles.get(fi);
@@ -244,14 +275,34 @@ public class EtsiXmlImporter {
                     onFileStart.onFileStart(fi + 1, fileCount, xmlFile.getName());
                 }
 
-                DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
-                factory.setNamespaceAware(true);
-                DocumentBuilder builder = factory.newDocumentBuilder();
-                Document doc = builder.parse(xmlFile);
+                String sourceFile = stripExtension(xmlFile.getName());
+                String startedAt = OffsetDateTime.now().toString();
+                // Hash the original export BEFORE it is parsed, so the log refers to the exact
+                // bytes that were read; it is hashed again after the import (see below).
+                String sha256 = sha256(xmlFile);
+                long fileSize = xmlFile.length();
+                List<String> warnings = new ArrayList<>();
+                if (!seenHashes.add(sha256)) {
+                    warnings.add("identical content already imported in this run");
+                }
+
+                Document doc;
+                try {
+                    doc = newSecureBuilder().parse(xmlFile);
+                } catch (Exception parseError) {
+                    conn.rollback();
+                    writeImportLog(conn, sourceFile, xmlFile, fileSize, sha256, sha256(xmlFile), null, -1,
+                            0, 0, 0, startedAt, "FAILED", "XML not readable: " + parseError.getMessage());
+                    conn.commit();
+                    throw parseError;
+                }
                 Element root = doc.getDocumentElement();
 
                 long requestId = importRequestMetadata(conn, root);
-                String sourceFile = stripExtension(xmlFile.getName());
+                String requestNumber = findText(findElement(root, "retainedDataHeader"), "requestID/requestNumber");
+                if (requestId < 0) {
+                    warnings.add("header incomplete (requestNumber, cSPID or timeStamp missing): records not linked to request_metadata");
+                }
 
                 // "*" rather than NS_URI: real-world exports use different
                 // schema versions (e.g. v1.26.1 vs. v1.28.1) under different
@@ -259,6 +310,8 @@ public class EtsiXmlImporter {
                 // below for why matching is namespace-agnostic throughout.
                 NodeList records = root.getElementsByTagNameNS("*", "ResponseRecord");
                 int total = records.getLength();
+                int inserted = 0;
+                warnings.addAll(dataQualityWarnings(root, records));
 
                 try (PreparedStatement ps = conn.prepareStatement(INSERT_RECORD_SQL)) {
                     int pending = 0;
@@ -267,7 +320,9 @@ public class EtsiXmlImporter {
                         // SMS records carry one row per party leg (A-/B-Teilnehmer), see
                         // bindRecord(). addBatch() is called inside bindRecord() itself for
                         // each row produced, not here.
-                        pending += bindRecord(ps, requestId, (Element) records.item(i), sourceFile);
+                        int n = bindRecord(ps, requestId, (Element) records.item(i), sourceFile);
+                        pending += n;
+                        inserted += n;
 
                         if (pending >= BATCH_SIZE) {
                             ps.executeBatch();
@@ -282,12 +337,158 @@ public class EtsiXmlImporter {
                     }
                 }
 
+                int unrecognised = countUnrecognised(conn, sourceFile);
+                if (unrecognised > 0) {
+                    warnings.add(unrecognised + " record(s) matched no known record shape and were imported without identifiers/location");
+                }
+                String shaAfter = sha256(xmlFile);
+                if (!sha256.equals(shaAfter)) {
+                    warnings.add("source file changed during import");
+                }
+                writeImportLog(conn, sourceFile, xmlFile, fileSize, sha256, shaAfter, requestNumber, requestId,
+                        total, inserted, unrecognised, startedAt, warnings.isEmpty() ? "OK" : "WARN",
+                        warnings.isEmpty() ? null : String.join("; ", warnings));
                 conn.commit();
                 if (onProgress != null) {
                     onProgress.onProgress(total, total);
                 }
             }
         }
+    }
+
+    // ------------------------------------------------------------------
+    // Chain of custody: hashing, import log, verification
+    // ------------------------------------------------------------------
+
+    /** SHA-256 of a file's bytes as lower-case hex (streamed, no size limit). */
+    public static String sha256(File f) throws Exception {
+        MessageDigest md = MessageDigest.getInstance("SHA-256");
+        try (InputStream in = Files.newInputStream(f.toPath())) {
+            byte[] buf = new byte[1 << 16];
+            int r;
+            while ((r = in.read(buf)) > 0) md.update(buf, 0, r);
+        }
+        StringBuilder sb = new StringBuilder(64);
+        for (byte b : md.digest()) sb.append(String.format("%02x", b));
+        return sb.toString();
+    }
+
+    /**
+     * XML parser hardened for untrusted input: no DOCTYPE, no external entities or
+     * schemas (ETSI TS 102 657 exports contain neither), secure processing limits on.
+     */
+    private static DocumentBuilder newSecureBuilder() throws Exception {
+        DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
+        factory.setNamespaceAware(true);
+        factory.setFeature(XMLConstants.FEATURE_SECURE_PROCESSING, true);
+        factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
+        factory.setFeature("http://xml.org/sax/features/external-general-entities", false);
+        factory.setFeature("http://xml.org/sax/features/external-parameter-entities", false);
+        factory.setXIncludeAware(false);
+        factory.setExpandEntityReferences(false);
+        return factory.newDocumentBuilder();
+    }
+
+    /**
+     * Pre-import data-quality checks on the parsed document: values that the importer
+     * cannot interpret are stored as NULL, and this makes that loss visible in import_log.
+     */
+    static List<String> dataQualityWarnings(Element root, NodeList records) {
+        List<String> w = new ArrayList<>();
+        int badTs = 0, badCoord = 0;
+        NodeList all = root.getElementsByTagNameNS("*", "*");
+        for (int i = 0; i < all.getLength(); i++) {
+            Element e = (Element) all.item(i);
+            String ln = e.getLocalName();
+            boolean hasElementChild = false;
+            for (Node c = e.getFirstChild(); c != null; c = c.getNextSibling()) {
+                if (c.getNodeType() == Node.ELEMENT_NODE) { hasElementChild = true; break; }
+            }
+            if (hasElementChild) continue;
+            String t = e.getTextContent() == null ? "" : e.getTextContent().trim();
+            if (t.isEmpty()) continue;
+            if (("startTime".equals(ln) || "endTime".equals(ln)) && parseEtsiTimestamp(t) == null) badTs++;
+            if (("latitude".equals(ln) || "longitude".equals(ln) || "latitudeDec".equals(ln) || "longitudeDec".equals(ln))
+                    && parseAnyCoordinate(t) == null) badCoord++;
+        }
+        if (badTs > 0) w.add(badTs + " timestamp(s) not in ETSI format, stored as NULL");
+        if (badCoord > 0) w.add(badCoord + " coordinate value(s) invalid or unparseable, stored as NULL");
+        Map<String, Integer> seen = new HashMap<>();
+        int dup = 0;
+        for (int i = 0; i < records.getLength(); i++) {
+            String rn = findText((Element) records.item(i), "recordNumber");
+            if (rn != null && seen.merge(rn, 1, Integer::sum) == 2) dup++;
+        }
+        if (dup > 0) w.add(dup + " recordNumber value(s) occur more than once");
+        return w;
+    }
+
+    private static int countUnrecognised(Connection conn, String sourceFile) throws SQLException {
+        try (PreparedStatement ps = conn.prepareStatement(
+                "SELECT COUNT(*) FROM response_records WHERE source_file = ? AND party_type IS NULL "
+                        + "AND start_time IS NULL AND msisdn IS NULL AND imsi IS NULL")) {
+            ps.setString(1, sourceFile);
+            try (ResultSet rs = ps.executeQuery()) {
+                return rs.next() ? rs.getInt(1) : 0;
+            }
+        }
+    }
+
+    private static void writeImportLog(Connection conn, String sourceFile, File xmlFile, long size, String sha,
+            String shaAfter, String requestNumber, long requestId, int records, int rows, int unrecognised,
+            String startedAt, String status, String message) throws SQLException {
+        try (PreparedStatement ps = conn.prepareStatement(
+                "INSERT INTO import_log (source_file, file_name, file_path, file_size, sha256, sha256_after, "
+                        + "request_number, request_id, records_in_file, rows_inserted, rows_unrecognised, "
+                        + "importer_version, started_at, finished_at, status, message) "
+                        + "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)")) {
+            int i = 1;
+            ps.setString(i++, sourceFile);
+            ps.setString(i++, xmlFile.getName());
+            ps.setString(i++, xmlFile.getAbsolutePath());
+            ps.setLong(i++, size);
+            ps.setString(i++, sha);
+            setNullableString(ps, i++, shaAfter);
+            setNullableString(ps, i++, requestNumber);
+            ps.setLong(i++, requestId);
+            ps.setInt(i++, records);
+            ps.setInt(i++, rows);
+            ps.setInt(i++, unrecognised);
+            ps.setString(i++, IMPORTER_VERSION);
+            ps.setString(i++, startedAt);
+            ps.setString(i++, OffsetDateTime.now().toString());
+            ps.setString(i++, status);
+            setNullableString(ps, i++, message);
+            ps.executeUpdate();
+        }
+        if (!"OK".equals(status)) {
+            LOG.warning("EtsiXmlImporter: " + xmlFile.getName() + " -> " + status + (message != null ? ": " + message : ""));
+        }
+    }
+
+    /**
+     * Re-hashes the given source files and compares them with the hashes recorded in
+     * {@code import_log} of an existing case database.
+     *
+     * @return one line per file: {@code MATCH}, {@code MISMATCH} or {@code NOT_LOGGED}
+     */
+    public static List<String> verifySourceFiles(File dbFile, List<File> xmlFiles) throws Exception {
+        List<String> out = new ArrayList<>();
+        try (Connection conn = DriverManager.getConnection("jdbc:sqlite:" + dbFile.getAbsolutePath());
+             PreparedStatement ps = conn.prepareStatement(
+                     "SELECT sha256 FROM import_log WHERE file_name = ? ORDER BY id DESC LIMIT 1")) {
+            for (File f : xmlFiles) {
+                ps.setString(1, f.getName());
+                try (ResultSet rs = ps.executeQuery()) {
+                    if (!rs.next()) {
+                        out.add("NOT_LOGGED " + f.getName());
+                    } else {
+                        out.add((rs.getString(1).equals(sha256(f)) ? "MATCH " : "MISMATCH ") + f.getName());
+                    }
+                }
+            }
+        }
+        return out;
     }
 
     /** Strips the last {@code "."}-delimited extension off a file name, if any. */

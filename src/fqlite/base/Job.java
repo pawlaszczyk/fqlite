@@ -766,6 +766,8 @@ public class Job {
 		sizeinpages = Integer.toUnsignedLong(buffer.getInt());
 		info("Size of the database file in pages " + sizeinpages);
 
+
+
 		buffer.position(40);
 		schemacookie = Integer.toUnsignedLong(buffer.getInt());
 		info("The schema cookie. (offset 40) " + schemacookie);
@@ -863,6 +865,16 @@ public class Job {
 			ps = 65536;
 
 		info("page size " + ps + " Bytes ");
+
+		// feature request
+		if (size > 0 && ps > 0 && size/ps != numberofpages)
+		{
+			info(" number of pages in header is not matching with real database size");
+
+		}
+		else
+			info(" number of pages in header matches with real page number");
+
 
 		/*******************************************************************/
 
@@ -2221,6 +2233,7 @@ public class Job {
 			metaData.put("toolVersion", "FQlite v" + Global.FQLITE_VERSION);
 
 			Enumeration<String> tbls = exportlist.keys();
+			List<String> rendered = new ArrayList<>();
 
 			writer.write(createHtmlHeader());
 
@@ -2238,12 +2251,20 @@ public class Job {
 
 				ObservableList<ObservableList<String>> table = exportlist.get(tblname);
 
+				if (tblname.startsWith("sqlite_")) {continue;}
+				if (table == null || table.isEmpty()) {
+					AppLog.debug("HTML export: skip '" + tblname + "' (no rows)");
+					continue;
+				}
+
 				// skip index tables
 				String[] h = getExentedColumnNamesForTable(tblname,exp);
-				if ((!tblname.equals("fqlite_freelist") && (h == null)))continue;
-				if (tblname.startsWith("sqlite_")) {continue;}
-
-				if (table.isEmpty()) continue;
+				if (h == null && !tblname.equals("fqlite_freelist")) {
+					AppLog.info("HTML export: skip '" + tblname + "' (no TableDescriptor in headers, known: "
+							+ headers.stream().map(t -> "'" + t.tblname + "'").toList() + ")");
+					continue;
+				}
+				rendered.add(tblname);
 
 				writer.write("<div class='table-section'>\n");
 				writer.write("<h2>" + escapeHtml(tblname) + "</h2>\n");
@@ -2251,7 +2272,7 @@ public class Job {
 				writer.write("<div class='filter-row'>\n");
 				writer.write("<input type='text' class='global-filter-input' ");
 				writer.write("placeholder='Search in complete table...' ");
-				writer.write("onkeyup=\"applyFilters('" + tblname + "')\">\n");
+				writer.write("onkeyup=\"applyFilters('" + escapeHtml(jsEscape(tblname)) + "')\">\n");
 				writer.write("</div>\n");
 				writer.write("<div class='table-wrapper'>\n");
 				writer.write("<table id='table-" + escapeHtml(tblname) + "' class='data-table'>\n");
@@ -2264,7 +2285,7 @@ public class Job {
 					writer.write("<tr class='header-row'>\n");
 					for (int colIndex = 0; colIndex < h.length; colIndex++) {
 						String header = h[colIndex];
-						writer.write("<th onclick=\"sortTable('" + tblname + "', " + colIndex + ")\">");
+						writer.write("<th onclick=\"sortTable('" + escapeHtml(jsEscape(tblname)) + "', " + colIndex + ")\">");
 						writer.write(escapeHtml(header));
 						writer.write(" <span class='sort-indicator'></span>");
 						writer.write("</th>\n");
@@ -2277,7 +2298,7 @@ public class Job {
 						writer.write("<input type='text' class='column-filter' ");
 						writer.write("data-column='" + colIndex + "' ");
 						writer.write("placeholder='Filter...' ");
-						writer.write("onkeyup=\"applyFilters('" + tblname + "')\">");
+						writer.write("onkeyup=\"applyFilters('" + escapeHtml(jsEscape(tblname)) + "')\">");
 						writer.write("</th>\n");
 					}
 					writer.write("</tr>\n");
@@ -2295,6 +2316,7 @@ public class Job {
 					writer.write("<tr>\n");
 					int cl = 0;
 					for (String cell : row) {
+						if (cell == null) cell = "";
 						if(cl==1) {
 							cl++;
 							continue;
@@ -2331,11 +2353,11 @@ public class Job {
 				writer.write("</div>\n");
 				writer.write("<div class='pagination-container'>\n");
 				writer.write("<div class='pagination-info'>\n");
-				writer.write("<span class='showing-info' id='showing-" + tblname + "'></span>\n");
+				writer.write("<span class='showing-info' id='showing-" + escapeHtml(tblname) + "'></span>\n");
 				writer.write("</div>\n");
 				writer.write("<div class='pagination-controls'>\n");
 				writer.write("<label>lines per page: ");
-				writer.write("<select class='rows-per-page' onchange=\"changeRowsPerPage('" + tblname + "', this.value)\">\n");
+				writer.write("<select class='rows-per-page' onchange=\"changeRowsPerPage('" + escapeHtml(jsEscape(tblname)) + "', this.value)\">\n");
 				writer.write("<option value='10'>10</option>\n");
 				writer.write("<option value='25' selected>25</option>\n");
 				writer.write("<option value='50'>50</option>\n");
@@ -2343,7 +2365,7 @@ public class Job {
 				writer.write("<option value='all'>all</option>\n");
 				writer.write("</select>\n");
 				writer.write("</label>\n");
-				writer.write("<div class='pagination-buttons' id='pagination-" + tblname + "'></div>\n");
+				writer.write("<div class='pagination-buttons' id='pagination-" + escapeHtml(tblname) + "'></div>\n");
 				writer.write("</div>\n");
 				writer.write("</div>\n");
 
@@ -2354,16 +2376,10 @@ public class Job {
 			writer.write("<script>\n");
 			writer.write("document.addEventListener('DOMContentLoaded', function() {\n");
 
-			Enumeration<String> keysetInit = exportlist.keys();
-			while (keysetInit.hasMoreElements()) {
-
-				String tblname = keysetInit.nextElement();
-
-				// skip index tables
-				String[] h = getExentedColumnNamesForTable(tblname,exp);
-				if (tblname.startsWith("sqlite_")) {continue;}
-
-				writer.write("    initTable('" + tblname + "');\n");
+			// only initialise tables that were actually written – otherwise
+			// getElementById() returns null and the TypeError aborts the init of all following tables
+			for (String tblname : rendered) {
+				writer.write("    initTable('" + jsEscape(tblname) + "');\n");
 			}
 
 			writer.write("});\n");
@@ -2805,6 +2821,12 @@ public class Job {
 			   "}\n" +
 			   "</script>\n" +
 			   "</head>\n";
+	}
+
+	/** Escapes a value for use inside a single-quoted JS string (wrap with escapeHtml() inside attributes). */
+	private String jsEscape(String text) {
+		if (text == null) return "";
+		return text.replace("\\", "\\\\").replace("'", "\\'").replace("</", "<\\/");
 	}
 
 	private String escapeHtml(String text) {

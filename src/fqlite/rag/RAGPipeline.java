@@ -22,6 +22,11 @@ public class RAGPipeline {
     private SchemaRetriever schemaRetriever = null;
     private final SQLGenerator sqlGenerator;
 
+    /** In-Memory-Arbeitskopie der Fall-DB (nie die Original-Beweisdatei). */
+    private Connection dbConnection = null;
+    /** Nicht-null, wenn die DB das ETSI-CDR-Schema hat: exakter Trainingskontext fuer V3. */
+    private String etsiContext = null;
+
     /**
      * Constructor for the pipeline.
      *
@@ -33,6 +38,22 @@ public class RAGPipeline {
         // make sure, that modell is loaded and ready
         this.sqlGenerator = new SQLGenerator(modelPath);
 
+    }
+
+    /**
+     * Whether the local LLM is currently running with GPU offload active
+     * (Metal on Apple Silicon, or a detected NVIDIA GPU elsewhere) rather
+     * than CPU-only. Reflects the mode {@link SQLGenerator} actually ended
+     * up loading with, including any silent CPU fallback if GPU init failed
+     * — see {@code SQLGenerator.detectGpuLayers()}/{@code loadModelWithFallback()}.
+     */
+    public boolean isUsingGpu() {
+        return SQLGenerator.isUsingGpu();
+    }
+
+    /** Short German label for the currently active compute mode, e.g. for a status bar. */
+    public String getComputeModeLabel() {
+        return isUsingGpu() ? "GPU" : "CPU";
     }
 
         /**
@@ -94,7 +115,34 @@ public class RAGPipeline {
     }
 
     public void initializeRetriever(Connection dbConnection) {
+         this.dbConnection = dbConnection;
          this.schemaRetriever = new SchemaRetriever(dbConnection);
+         initEtsiContext();
+    }
+
+    /**
+     * Fuer ETSI-CDR-Datenbanken: Hilfs-Views in der In-Memory-Kopie anlegen und
+     * den Schema-Kontext exakt so aufbauen wie in Training und Evaluation von
+     * forensic_sql_ETSI_CDR_V3 (etsi_context.py, enrich_context). Die
+     * Embedding-basierte Tabellenauswahl wird fuer diese DBs umgangen, weil sie
+     * Tabellen verlieren kann und die Views nicht kennt.
+     */
+    private void initEtsiContext() {
+        etsiContext = null;
+        if (!EtsiContext.isEtsiCdrDatabase(dbConnection)) return;
+        try {
+            EtsiContext.createViews(dbConnection);
+            etsiContext = EtsiContext.buildContext(dbConnection);
+            System.out.println("✅ ETSI-CDR-Kontext aufgebaut (" + etsiContext.length() + " Zeichen, Views angelegt)");
+        } catch (Exception e) {
+            System.err.println("⚠️ ETSI-CDR-Kontext konnte nicht aufgebaut werden: " + e.getMessage());
+            etsiContext = null;
+        }
+    }
+
+    /** True, wenn Anfragen mit dem ETSI-CDR-Trainingskontext beantwortet werden. */
+    public boolean isEtsiMode() {
+        return etsiContext != null;
     }
 
 
@@ -114,6 +162,34 @@ public class RAGPipeline {
     public String generateSQL(String request, int maxTables) {
         System.out.println("\n📝 Request: " + request);
 
+        // ETSI-CDR: fester Trainingskontext + exaktes Trainings-Promptformat
+        if (etsiContext != null) {
+            // Feste Vorlage fuer "In welchen N Zellen war X am haeufigsten …" (ohne Modell)
+            String tpl = SqlRepair.topCellsSql(dbConnection, request);
+            if (tpl != null) {
+                System.out.println("📋 Vorlage TOP_CELLS: " + tpl);
+                return tpl;
+            }
+            String sql = sqlGenerator.generateSQLTrainedFormat(etsiContext, request);
+            System.out.println("✅ Generated SQL (ETSI-CDR): " + sql);
+            sql = postProcessEtsi(sql);
+            // Laesst sich das SQL nicht vorbereiten (z.B. unbekannte Spalte), einmal mit der
+            // Fehlermeldung nachfragen (Retry-Prompt wie in der Evaluation).
+            String err = SqlRepair.prepareError(dbConnection, sql);
+            if (err != null) {
+                System.out.println("⚠️ SQL-Fehler, zweiter Versuch: " + err);
+                String retry = sqlGenerator.generateSQLRetry(etsiContext, request, sql, err);
+                if (retry != null && !retry.isBlank()) {
+                    retry = postProcessEtsi(retry);
+                    if (SqlRepair.prepareError(dbConnection, retry) == null) {
+                        System.out.println("✅ Zweiter Versuch: " + retry);
+                        sql = retry;
+                    }
+                }
+            }
+            return sql;
+        }
+
         // Step 1: RAG - Retrieve relevant schema
         String relevantSchema = schemaRetriever.retrieveRelevantSchema(request, maxTables);
 
@@ -122,6 +198,21 @@ public class RAGPipeline {
 
         System.out.println("✅ Generated SQL: " + sql);
 
+        return sql;
+    }
+
+    /** SqlAutoFix (Uhrzeit-Typfehler) + SqlRepair (Kennungsspalte, COUNT-Alias). */
+    private String postProcessEtsi(String sql) {
+        SqlAutoFix.Result fix = SqlAutoFix.autofix(sql);
+        if (fix.changed()) {
+            System.out.println("🔧 AutoFix " + fix.fixes + ": " + fix.sql);
+            sql = fix.sql;
+        }
+        SqlRepair.Result rep = SqlRepair.repair(dbConnection, sql);
+        if (rep.changed()) {
+            System.out.println("🔧 Repair " + rep.fixes + ": " + rep.sql);
+            sql = rep.sql;
+        }
         return sql;
     }
 
@@ -192,7 +283,89 @@ public class RAGPipeline {
         String raw = sqlGenerator.classifyIntent(normalized, hasDate ? dataDateContext : null);
         QueryIntent qi = QueryIntent.parse(raw);
         qi.normalizedRequest = normalized;   // make date-normalized text available to callers
+
+        // Small on-device models occasionally hallucinate a start_time/end_time
+        // window out of digits that appear in the request for an unrelated reason
+        // (most commonly a long IMSI/MSISDN/IMEI identifier, e.g. "Rufnummer
+        // 350795040002290" — the model can mistake a digit run inside the
+        // identifier for a clock time) even though the request contains no
+        // textual evidence of a time-of-day at all. Only treat an extracted
+        // window as a genuine (if date-less) time-of-day mention — and route it
+        // through the "ambiguous, ask for a date" flow below — when the raw
+        // request actually contains time-of-day wording ("Uhr", "HH:MM", an
+        // hour count like "18 Uhr"/"zwischen 8 und 9"). Otherwise the window is
+        // discarded outright: there is nothing for the analyst to disambiguate,
+        // since they never asked about a time in the first place.
+        boolean hasTimeOfDayHint = TIME_OF_DAY_HINT_TRIGGER.matcher(request).find();
+        if (!hasTimeOfDayHint && qi.startTime != null && qi.endTime != null) {
+            qi = qi.withTimeWindow(null, null);
+        }
+
+        // The request named no date at all (only a time-of-day, e.g.
+        // "zwischen 10:00 und 10:30 Uhr") but the model still returned a
+        // start_time/end_time — the DATE half of that window is then
+        // necessarily the model's own invention (it was never shown
+        // dataDateContext either, per the "hasDate" gating above), and in
+        // practice essentially never matches the loaded dataset's actual
+        // date: the query silently returns zero rows instead of surfacing
+        // that the date was never stated. resolveDateForTimeOnlyWindow()
+        // either splices in the dataset's actual day (single-day dataset)
+        // or clears the window and flags it as ambiguous so the caller can
+        // ask for an explicit date instead of guessing.
+        if (!hasDate && qi.startTime != null && qi.endTime != null) {
+            qi = resolveDateForTimeOnlyWindow(qi, dataDateContext);
+        }
+
+        // Deterministische Absicherung der Modellentscheidung (IntentGuard /
+        // intent_guard.py): Filter faelschlich als Kolokation, Auswertungsfragen
+        // an Vorlagen, Wechsler-Anfragen ohne gueltiges JSON usw.
+        IntentGuard.Result g = IntentGuard.apply(request, normalized, qi.intent,
+                qi.startTime, qi.endTime, qi.callSmsType);
+        if (g.changed()) {
+            System.out.println("🛡️ IntentGuard " + g.rules + ": " + qi.intent + " -> " + g.intent);
+            boolean ambiguous = qi.ambiguousTimeOfDayWithoutDate;
+            qi = qi.withGuard(g.intent, g.startTime, g.endTime, g.callSmsType);
+            // Hat die Regel das Zeitfenster bewusst geleert (freier SQL-Pfad), gibt es
+            // nichts mehr zu disambiguieren.
+            qi.ambiguousTimeOfDayWithoutDate = ambiguous
+                    && !g.rules.contains("R1_ANALYTIC") && !g.rules.contains("R5_IDENT")
+                    && !g.rules.contains("R8_ANYDAY");
+        }
         return qi;
+    }
+
+    /**
+     * See the call site in {@link #classifyIntent(String, String)}: splices
+     * the loaded dataset's own calendar day onto a time-of-day-only window
+     * when the dataset spans exactly one day, or clears the window (and
+     * flags it as ambiguous) when it spans more than one — the day can't be
+     * guessed safely in that case.
+     */
+    private static QueryIntent resolveDateForTimeOnlyWindow(QueryIntent qi, String dataDateContext) {
+        String singleDay = singleCalendarDayOf(dataDateContext);
+        if (singleDay == null) {
+            QueryIntent cleared = qi.withTimeWindow(null, null);
+            cleared.ambiguousTimeOfDayWithoutDate = true;
+            return cleared;
+        }
+        String newStart = singleDay + qi.startTime.substring(10);
+        String newEnd   = singleDay + qi.endTime.substring(10);
+        return qi.withTimeWindow(newStart, newEnd);
+    }
+
+    /**
+     * @param dataDateContext "yyyy-MM-dd HH:mm:ss bis yyyy-MM-dd HH:mm:ss"
+     *                        (see {@link #queryDataDateRange} in
+     *                        MapViewPane), or {@code null}
+     * @return "yyyy-MM-dd" if both halves fall on the same calendar day,
+     *         else {@code null} (spans multiple days, or the range is
+     *         unavailable/unparseable)
+     */
+    private static String singleCalendarDayOf(String dataDateContext) {
+        if (dataDateContext == null) return null;
+        Matcher m = Pattern.compile("(\\d{4}-\\d{2}-\\d{2}).*?(\\d{4}-\\d{2}-\\d{2})").matcher(dataDateContext);
+        if (!m.find()) return null;
+        return m.group(1).equals(m.group(2)) ? m.group(1) : null;
     }
 
     /**
@@ -391,6 +564,29 @@ public class RAGPipeline {
             + "|\\b\\d{4}-\\d{2}-\\d{2}\\b"                       // 2023-07-02 (ISO)
             + "|\\b(januar|j[aä]nner|februar|m[aä]rz|april|mai"
             + "|juni|juli|august|september|oktober|november|dezember)\\b",
+            Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE);
+
+    /**
+     * Matches genuine time-of-day wording in the raw request — as opposed to
+     * a digit run that merely happens to appear somewhere in the text (most
+     * commonly inside a long IMSI/MSISDN/IMEI identifier the analyst pasted
+     * in, e.g. "Rufnummer 350795040002290"). Used to distinguish a real,
+     * if date-less, time-of-day mention (which {@link #resolveDateForTimeOnlyWindow}
+     * should ask the analyst to disambiguate with an explicit date) from the
+     * classifier simply hallucinating a start_time/end_time window out of
+     * unrelated digits — see the call site in {@link #classifyIntent(String, String)}.
+     *
+     * <p>Recognised patterns:</p>
+     * <ul>
+     *   <li>Clock times: {@code 10:00} / {@code 10.00 Uhr}</li>
+     *   <li>"Uhr" preceded by an hour count: {@code 18 Uhr}, {@code 8 Uhr}</li>
+     *   <li>The bare word "Uhr" on its own (e.g. "zwischen 8 und 9 Uhr")</li>
+     * </ul>
+     */
+    private static final Pattern TIME_OF_DAY_HINT_TRIGGER = Pattern.compile(
+            "\\b\\d{1,2}\\s*[:.]\\s*\\d{2}\\b"        // 10:00 / 10.00
+            + "|\\b\\d{1,2}\\s*uhr\\b"                    // 18 Uhr / 8 Uhr
+            + "|\\buhr\\b",                                   // bare "Uhr"
             Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE);
 
     private static final Pattern TIMESTAMP_PATTERN =
@@ -612,12 +808,8 @@ public class RAGPipeline {
      *         isn't one of the four recognised values
      */
     public static String buildCallsSmsSql(String callSmsType, String startTime, String endTime) {
-        List<String> indicators = callSmsType == null ? null : CALL_SMS_INDICATOR.get(callSmsType.trim().toLowerCase());
-        if (indicators == null || indicators.isEmpty()) return null;
-
-        String indicatorClause = indicators.size() == 1
-                ? String.format("call_indicator = '%s'", indicators.get(0))
-                : "call_indicator IN (" + String.join(", ", indicators.stream().map(i -> "'" + i + "'").toList()) + ")";
+        String indicatorClause = buildIndicatorClause(callSmsType);
+        if (indicatorClause == null) return null;
 
         String timeClause = "";
         if (isValidTimestamp(startTime) && isValidTimestamp(endTime)) {
@@ -633,6 +825,24 @@ public class RAGPipeline {
                 ORDER BY start_time
                 """,
                 indicatorClause, timeClause);
+    }
+
+    /**
+     * Shared by {@link #buildCallsSmsSql} and {@link #buildCellFilterSql}:
+     * maps {@code callSmsType} to a {@code call_indicator = '...'} /
+     * {@code call_indicator IN (...)} SQL fragment via
+     * {@link #CALL_SMS_INDICATOR}.
+     *
+     * @return the fragment, or {@code null} if {@code callSmsType} is
+     *         {@code null}/blank or isn't one of the recognised values
+     */
+    private static String buildIndicatorClause(String callSmsType) {
+        List<String> indicators = callSmsType == null ? null : CALL_SMS_INDICATOR.get(callSmsType.trim().toLowerCase());
+        if (indicators == null || indicators.isEmpty()) return null;
+
+        return indicators.size() == 1
+                ? String.format("call_indicator = '%s'", indicators.get(0))
+                : "call_indicator IN (" + String.join(", ", indicators.stream().map(i -> "'" + i + "'").toList()) + ")";
     }
 
     // ========================================================================
@@ -747,6 +957,150 @@ public class RAGPipeline {
     }
 
     // ========================================================================
+    // Cell/LAC/CI filter queries: deterministic identifier extraction +
+    // fixed SQL (checked BEFORE the plain time-window fast path below, so a
+    // named cell never gets silently dropped by it — see the warning on
+    // buildPlainFilterSql's caller in MapViewPane.onLlmRun)
+    // ========================================================================
+
+    /**
+     * Regex-based, deterministic extraction of a LAC/TAC and/or CI value
+     * named in the raw request text (e.g. "Funkzelle mit der Kennung LAC
+     * 1234", "an der Zelle LAC/TAC 1234, CI 56", "Cell-ID 56"). Mirrors
+     * {@link CountryCallingCodeLookup#findPrefixMentionedInText}: a specific
+     * numeric cell identifier is exactly the kind of small, unambiguous
+     * token the local model has no reliable way to place into structured
+     * JSON, and — critically — misclassifying such a request as a plain
+     * time-window filter (see {@link QueryIntent#isPlainTimeFilter()}) would
+     * silently drop the cell condition and return every record in the time
+     * window instead of just the ones at that site. So this is checked
+     * directly against the text, independent of (and before) whatever the
+     * LLM classified the request as.
+     *
+     * @return a two-element array {@code {lac, ci}} (either element may be
+     *         {@code null} if not mentioned), or {@code null} if neither
+     *         a LAC/TAC nor a CI/Cell-ID value was found
+     */
+    public static String[] findCellIdentifierMentionedInText(String text) {
+        if (text == null) return null;
+        String lac = firstGroup(text, "\\b(?:LAC|TAC)\\b\\s*(?:/\\s*(?:LAC|TAC)\\s*)?[:=]?\\s*(\\d{1,6})\\b");
+        String ci  = firstGroup(text, "\\b(?:CI|Cell[- ]?ID)\\b\\s*[:=]?\\s*(\\d{1,10})\\b");
+        if (lac == null && ci == null) return null;
+        return new String[] { lac, ci };
+    }
+
+    private static String firstGroup(String text, String pattern) {
+        Matcher m = Pattern.compile(pattern, Pattern.CASE_INSENSITIVE).matcher(text);
+        return m.find() ? m.group(1) : null;
+    }
+
+    /**
+     * Builds the fixed SQL for a "Funkzelle mit der Kennung LAC/CI ..."
+     * filter query: every {@code response_records} row reported at the
+     * given cell (matched on {@code cell_lac_tac} and, if given,
+     * {@code cell_ci} — both {@code INTEGER} columns, indexed together via
+     * {@code idx_cell}), optionally further restricted to a call/SMS
+     * direction and/or a time window.
+     *
+     * <p>Matching on LAC/CI alone (without MCC/MNC) can theoretically
+     * collide across different networks that happen to reuse the same
+     * LAC/CI pair; this is the same simplification already made elsewhere
+     * in this class (e.g. {@link #sameCellExpr}'s coordinate fallback) and
+     * matches how the identifier is normally read off the map/tooltip UI.</p>
+     *
+     * <p>{@code callSmsType} exists so a request combining a named cell
+     * with a call/SMS direction (e.g. "alle ausgehenden Anrufe an der
+     * Funkzelle mit CellID 19") doesn't lose the direction: the cell/LAC/CI
+     * mention is deterministically extracted from the raw text (see
+     * {@link #findCellIdentifierMentionedInText}) and takes over the whole
+     * query from {@code classifyIntent}'s intent branches in
+     * {@code MapViewPane.onLlmRun}, so without this parameter the caller
+     * would have no way to also apply the direction classifyIntent still
+     * extracted into {@code call_sms_type}.</p>
+     *
+     * @param lac         LAC/TAC value as digits, or {@code null}/blank to not filter on it
+     * @param ci          CI value as digits, or {@code null}/blank to not filter on it
+     * @param callSmsType one of the values {@link #CALL_SMS_INDICATOR} recognises
+     *                    (e.g. {@code "ausgehender_anruf"}), or {@code null}/blank
+     *                    to not restrict by call/SMS direction
+     * @param startTime   "yyyy-MM-dd HH:mm:ss", or {@code null}/invalid to leave
+     *                    the time window unrestricted
+     * @param endTime     same format, or {@code null}/invalid to leave the time
+     *                    window unrestricted
+     * @return the SELECT statement, or {@code null} if neither lac nor ci was given
+     */
+    public static String buildCellFilterSql(String lac, String ci, String callSmsType, String startTime, String endTime) {
+        boolean hasLac = lac != null && !lac.isBlank();
+        boolean hasCi = ci != null && !ci.isBlank();
+        if (!hasLac && !hasCi) return null;
+
+        StringBuilder where = new StringBuilder();
+        if (hasLac) where.append(" AND cell_lac_tac = ").append(Long.parseLong(lac.replaceAll("[^0-9]", "")));
+        if (hasCi)  where.append(" AND cell_ci = ").append(Long.parseLong(ci.replaceAll("[^0-9]", "")));
+        String indicatorClause = buildIndicatorClause(callSmsType);
+        if (indicatorClause != null) where.append(" AND ").append(indicatorClause);
+        if (isValidTimestamp(startTime) && isValidTimestamp(endTime)) {
+            where.append(String.format(" AND start_time BETWEEN '%s' AND '%s'", startTime, endTime));
+        }
+
+        return String.format(
+                """
+                SELECT *
+                FROM response_records
+                WHERE latitude_dec IS NOT NULL AND longitude_dec IS NOT NULL%s
+                ORDER BY start_time
+                """,
+                where);
+    }
+
+    /** {@link #buildCellFilterSql(String, String, String, String, String)} without a call/SMS direction filter. */
+    public static String buildCellFilterSql(String lac, String ci, String startTime, String endTime) {
+        return buildCellFilterSql(lac, ci, null, startTime, endTime);
+    }
+
+    // ========================================================================
+    // Plain time-window filter queries: skip the free-form SQL generator
+    // entirely when classifyIntent already extracted a clean time window
+    // ========================================================================
+
+    /**
+     * Builds the fixed SQL for a plain "zeige mir alle Teilnehmer vom X
+     * zwischen Y und Z Uhr an" filter query.
+     *
+     * <p>{@link #classifyIntent} already extracts {@code start_time}/
+     * {@code end_time} for {@code intent="filter"} requests that only name
+     * a time window (see Beispiel 21/22 in the classification prompt) — so
+     * there is no need to hand the request to the free-form SQL generator
+     * ({@link #generateSQL}) a second time just to re-derive the very same
+     * {@code BETWEEN} clause. That second call runs the local CPU model
+     * again with a much larger prompt (full schema, up to 1024 generated
+     * tokens) and is the dominant cost for this query shape — not scanning
+     * {@code response_records} itself, which is indexed on
+     * {@code start_time}. Keeping this on the same fixed-template path as
+     * co-location/calls_sms/country_filter/roamers/wechsler makes the most
+     * common query shape return in the time the classification call alone
+     * takes.</p>
+     *
+     * @param startTime "yyyy-MM-dd HH:mm:ss"
+     * @param endTime   "yyyy-MM-dd HH:mm:ss"
+     * @return the SELECT statement, or {@code null} if either timestamp
+     *         doesn't match the expected format
+     */
+    public static String buildPlainFilterSql(String startTime, String endTime) {
+        if (!isValidTimestamp(startTime) || !isValidTimestamp(endTime)) return null;
+
+        return String.format(
+                """
+                SELECT *
+                FROM response_records
+                WHERE start_time BETWEEN '%1$s' AND '%2$s'
+                  AND latitude_dec IS NOT NULL AND longitude_dec IS NOT NULL
+                ORDER BY start_time
+                """,
+                startTime, endTime);
+    }
+
+    // ========================================================================
     // Wechsler (device/SIM swap) queries: intent classification + fixed SQL
     // ========================================================================
 
@@ -826,6 +1180,8 @@ public class RAGPipeline {
          * and doesn't have to guess partial-date years.
          */
         public String normalizedRequest;       // set by RAGPipeline.classifyIntent after normalization
+        /** See {@link #isAmbiguousTimeOfDayWithoutDate()}. Set by RAGPipeline.classifyIntent. */
+        public boolean ambiguousTimeOfDayWithoutDate;
 
         private QueryIntent(String intent, String startTime, String endTime,
                              String identifierColumn, String identifierLabel, String callSmsType,
@@ -841,6 +1197,43 @@ public class RAGPipeline {
 
         public boolean isColocation() {
             return "colocation".equalsIgnoreCase(intent) && startTime != null && endTime != null;
+        }
+
+        /**
+         * True when the request named a time-of-day (e.g. "zwischen 10:00
+         * und 10:30 Uhr") but no date at all, and the loaded dataset spans
+         * more than one calendar day — so {@code classifyIntent} could not
+         * safely guess which day is meant and cleared {@code startTime}/
+         * {@code endTime} to {@code null} rather than silently running the
+         * model's invented (and in practice essentially always wrong) date.
+         * The caller should ask the analyst to add an explicit date, the
+         * same way {@link #isAmbiguousColocation()} does for an
+         * unresolvable co-location time window.
+         */
+        public boolean isAmbiguousTimeOfDayWithoutDate() {
+            return ambiguousTimeOfDayWithoutDate;
+        }
+
+        /**
+         * Returns a copy of this {@code QueryIntent} with {@code startTime}/
+         * {@code endTime} replaced — {@code startTime}/{@code endTime} are
+         * {@code final}, so correcting a time-only window's guessed date
+         * (see {@link RAGPipeline#resolveDateForTimeOnlyWindow}) has to
+         * build a new instance rather than mutate this one.
+         */
+        /** Kopie mit den von {@link IntentGuard} korrigierten Feldern. */
+        private QueryIntent withGuard(String newIntent, String newStart, String newEnd, String newCallSmsType) {
+            QueryIntent copy = new QueryIntent(newIntent, newStart, newEnd,
+                    identifierColumn, identifierLabel, newCallSmsType, country);
+            copy.normalizedRequest = this.normalizedRequest;
+            return copy;
+        }
+
+        private QueryIntent withTimeWindow(String newStartTime, String newEndTime) {
+            QueryIntent copy = new QueryIntent(intent, newStartTime, newEndTime,
+                    identifierColumn, identifierLabel, callSmsType, country);
+            copy.normalizedRequest = this.normalizedRequest;
+            return copy;
         }
 
         /**
@@ -902,6 +1295,20 @@ public class RAGPipeline {
          */
         public boolean isWechsler() {
             return "wechsler".equalsIgnoreCase(intent);
+        }
+
+        /**
+         * True when the model classified the request as a plain filter AND
+         * extracted a clean start/end time window — i.e. the request names
+         * only a time range, with no additional criteria (specific IMSI,
+         * call direction, country, ...) that only the free-form SQL
+         * generator could express. Lets the caller skip
+         * {@link RAGPipeline#generateSQL} (a second, much larger LLM call)
+         * for what is the most common query shape in practice
+         * ("zeige mir alle Teilnehmer vom X zwischen Y und Z Uhr an").
+         */
+        public boolean isPlainTimeFilter() {
+            return "filter".equalsIgnoreCase(intent) && startTime != null && endTime != null;
         }
 
         /**
@@ -978,7 +1385,7 @@ public class RAGPipeline {
     public boolean isValidSQL(String sql) {
         if (sql == null || sql.isEmpty()) return false;
         String upper = sql.toUpperCase().trim();
-        return upper.startsWith("SELECT") && upper.contains("FROM");
+        return (upper.startsWith("SELECT") || upper.startsWith("WITH")) && upper.contains("FROM");
     }
 
 
@@ -990,6 +1397,10 @@ public class RAGPipeline {
 
     static class SQLGenerator {
         private static LlamaModel model;
+        /** Set by {@link #loadModelWithFallback} to whichever mode actually
+         *  ended up running (may differ from what {@link #detectGpuLayers}
+         *  requested, if GPU init failed and it fell back to CPU). */
+        private static volatile boolean activeGpu = false;
 
         SQLGenerator(String modelPath) {
             if (null == model) {
@@ -1013,15 +1424,120 @@ public class RAGPipeline {
                 // only sees the last ~1300 tokens, cutting off all intent
                 // definitions and early examples.  4096 fits the full prompt
                 // and eliminates intent misclassifications caused by truncation.
-                ModelParameters params = new ModelParameters().
-                        setGpuLayers(0).setCtxSize(4096).setModel(modelPath).
-                        setThreads(reservedThreads).skipWarmup();
-                model = new LlamaModel(params);
+                int gpuLayers = detectGpuLayers();
+                model = loadModelWithFallback(modelPath, reservedThreads, gpuLayers);
                 System.out.println("✅ Modell has been loaded");
             }
             else
                 System.out.println("✅ Modell is already loaded. ");
 
+        }
+
+        /**
+         * Decides how many transformer layers should be offloaded to the GPU.
+         * <p>
+         * This is intentionally hardware-dependent rather than a hard-coded
+         * constant, since the same build runs on very different machines
+         * (an examiner's Apple-Silicon MacBook vs. a Windows/Linux workstation
+         * with or without an NVIDIA GPU):
+         * <ul>
+         *   <li>System property {@code fqlite.llm.gpuLayers} always wins, so a
+         *       user can force CPU-only ({@code -Dfqlite.llm.gpuLayers=0}) or a
+         *       specific layer count for troubleshooting.</li>
+         *   <li>Apple Silicon (macOS on {@code aarch64}) ships llama.cpp with a
+         *       Metal backend that is essentially always usable, so we offload
+         *       all layers ({@code -1} = "as many as fit").</li>
+         *   <li>On Linux/Windows we only opt into GPU offload when an NVIDIA
+         *       GPU is actually detectable via {@code nvidia-smi}; otherwise we
+         *       stay CPU-only, matching the previous safe default.</li>
+         * </ul>
+         * Whatever this returns, {@link #loadModelWithFallback} still verifies
+         * the model actually loads with it and falls back to CPU if not.
+         */
+        private static int detectGpuLayers() {
+            String override = System.getProperty("fqlite.llm.gpuLayers");
+            if (override != null && !override.isBlank()) {
+                try {
+                    int layers = Integer.parseInt(override.trim());
+                    System.out.println("ℹ️ GPU-Layer über Systemproperty erzwungen: " + layers);
+                    return layers;
+                } catch (NumberFormatException e) {
+                    System.out.println("⚠️ Ungültiger Wert für fqlite.llm.gpuLayers, ignoriere: " + override);
+                }
+            }
+
+            String osName = System.getProperty("os.name", "").toLowerCase();
+            String osArch = System.getProperty("os.arch", "").toLowerCase();
+
+            if (osName.contains("mac") && (osArch.contains("aarch64") || osArch.contains("arm"))) {
+                // Apple Silicon: llama.cpp's Metal backend is compiled in by
+                // default and works without any extra driver setup.
+                return -1;
+            }
+
+            if (hasNvidiaGpu()) {
+                return -1;
+            }
+
+            // No GPU we can rely on -> stay on CPU, as before.
+            return 0;
+        }
+
+        /**
+         * Best-effort check for a usable NVIDIA GPU on Linux/Windows by asking
+         * {@code nvidia-smi} whether it can enumerate a device. Any failure
+         * (missing binary, no permissions, no timely response) is treated as
+         * "no GPU available" rather than propagated, since this is only ever
+         * used to pick a sensible default.
+         */
+        private static boolean hasNvidiaGpu() {
+            try {
+                Process p = new ProcessBuilder("nvidia-smi", "-L")
+                        .redirectErrorStream(true)
+                        .start();
+                boolean finished = p.waitFor(2, java.util.concurrent.TimeUnit.SECONDS);
+                if (!finished) {
+                    p.destroyForcibly();
+                    return false;
+                }
+                return p.exitValue() == 0;
+            } catch (Exception e) {
+                return false;
+            }
+        }
+
+        /**
+         * Loads the model with the requested GPU-layer count, transparently
+         * falling back to CPU-only if that fails (e.g. the detected "GPU" turns
+         * out not to be usable at runtime after all).
+         */
+        private static LlamaModel loadModelWithFallback(String modelPath, int reservedThreads, int gpuLayers) {
+            try {
+                ModelParameters params = new ModelParameters().
+                        setGpuLayers(gpuLayers).setCtxSize(4096).setModel(modelPath).
+                        setThreads(reservedThreads).skipWarmup();
+                System.out.println("ℹ️ Lade Modell mit GPU-Layern: " + gpuLayers);
+                LlamaModel m = new LlamaModel(params);
+                activeGpu = gpuLayers != 0;
+                return m;
+            } catch (Throwable t) {
+                if (gpuLayers == 0) {
+                    throw t; // already CPU-only, nothing left to fall back to
+                }
+                System.out.println("⚠️ GPU-Initialisierung fehlgeschlagen (" + t.getMessage()
+                        + "), falle auf CPU zurück.");
+                ModelParameters cpuParams = new ModelParameters().
+                        setGpuLayers(0).setCtxSize(4096).setModel(modelPath).
+                        setThreads(reservedThreads).skipWarmup();
+                LlamaModel m = new LlamaModel(cpuParams);
+                activeGpu = false;
+                return m;
+            }
+        }
+
+        /** True if the local LLM is currently running with GPU offload active. */
+        static boolean isUsingGpu() {
+            return activeGpu;
         }
 
         String generateSQL(String schema, String request) {
@@ -1059,6 +1575,91 @@ public class RAGPipeline {
             }
 
             return cleanSQL(sql.toString());
+        }
+
+        /**
+         * Promptformat zeichengenau wie im Training (train_ETSI_CDR_CONTINUATION_FIXED.py,
+         * format_prompt mit den CANONICAL_*-Headern) und in der Evaluation
+         * (evaluate_ETSI_CDR_HOLDOUT_EXTRA_FIXED.py, build_prompt). Keine
+         * zusaetzlichen Regeln einfuegen — das Modell hat dieses Format gelernt.
+         * Dekodierung wie in der Evaluation: greedy, ohne Presence-Penalty,
+         * max. 384 neue Tokens, Abbruch am ersten ';'.
+         */
+        String generateSQLTrainedFormat(String context, String request) {
+            String prompt = "Generate a valid SQLite query for this forensic database request.\n\n"
+                    + "Database Schema:\n" + context + "\n\n"
+                    + "Request: " + request + "\n\n"
+                    + "SQLite Query:\n";
+
+            InferenceParameters inferParams = new InferenceParameters(prompt)
+                    .setTemperature(0.0f)
+                    .setTopK(1)
+                    .setNPredict(384)
+                    .setStopStrings(";");
+
+            StringBuilder raw = new StringBuilder();
+            for (LlamaOutput output : model.generate(inferParams)) {
+                raw.append(output.text);
+            }
+            return extractSQL(raw.toString());
+        }
+
+        /** Zweiter Versuch mit Fehlermeldung (identisch zu build_retry_prompt der Evaluation). */
+        String generateSQLRetry(String context, String request, String failedSql, String error) {
+            String err = error == null ? "" : (error.length() > 200 ? error.substring(0, 200) : error);
+            String prompt = "Generate a valid SQLite query for this forensic database request.\n\n"
+                    + "Database Schema:\n" + context + "\n\n"
+                    + "Request: " + request + "\n\n"
+                    + "Previous attempt:\n" + failedSql + "\n"
+                    + "SQLite error: " + err + "\n\n"
+                    + "Corrected SQLite Query:\n";
+            InferenceParameters inferParams = new InferenceParameters(prompt)
+                    .setTemperature(0.0f)
+                    .setTopK(1)
+                    .setNPredict(384)
+                    .setStopStrings(";");
+            StringBuilder raw = new StringBuilder();
+            for (LlamaOutput output : model.generate(inferParams)) raw.append(output.text);
+            return extractSQL(raw.toString());
+        }
+
+        /**
+         * Port von extract_sql() aus der Evaluation: Text bis zum ersten ';'
+         * ausserhalb von String-Literalen, Kommentare entfernt, Whitespace
+         * normalisiert. Ersetzt die alte Erste-Zeile-Extraktion, die mehrzeilige
+         * Antworten abgeschnitten hat.
+         */
+        static String extractSQL(String text) {
+            text = text.strip().replace("```sql", "").replace("```", "");
+            int start = 0;
+            while (start < text.length() && ": \t\n".indexOf(text.charAt(start)) >= 0) start++;
+            text = text.substring(start);
+            StringBuilder out = new StringBuilder();
+            boolean inStr = false;
+            int i = 0;
+            while (i < text.length()) {
+                char ch = text.charAt(i);
+                if (inStr) {
+                    out.append(ch);
+                    if (ch == '\'') {
+                        if (i + 1 < text.length() && text.charAt(i + 1) == '\'') { out.append('\''); i++; }
+                        else inStr = false;
+                    }
+                } else if (ch == '\'') {
+                    inStr = true; out.append(ch);
+                } else if (text.startsWith("--", i)) {
+                    int j = text.indexOf('\n', i); i = (j < 0) ? text.length() : j; continue;
+                } else if (text.startsWith("/*", i)) {
+                    int j = text.indexOf("*/", i + 2); i = (j < 0) ? text.length() : j + 2; continue;
+                } else if (ch == ';') {
+                    break;
+                } else {
+                    out.append(ch);
+                }
+                i++;
+            }
+            String sql = out.toString().replaceAll("\\s+", " ").strip();
+            return sql.isEmpty() ? "" : sql + ";";
         }
 
         private String cleanSQL(String sql) {

@@ -47,9 +47,6 @@ import java.util.Objects;
  */
 public class BinViewer{
 
-
-    static Stage primaryStage;
-
     // ══════════════════════════════════════════════════════════════════════
     // Theme definitions
     // ══════════════════════════════════════════════════════════════════════
@@ -1921,12 +1918,12 @@ public class BinViewer{
      * @param displayName  Name der im Fenstertitel angezeigt wird (z. B. Spaltenname)
      */
     public static void openBytes(byte[] data, String displayName) {
-        primaryStage = new Stage();
-        BinViewer viewer = new BinViewer(primaryStage);
+        Stage s = new Stage();
+        BinViewer viewer = new BinViewer(s);
         viewer.loadBytes(data, displayName);
     }
 
     private void closeWindow(){
-        primaryStage.close();
+        stage.close();
     }
 }

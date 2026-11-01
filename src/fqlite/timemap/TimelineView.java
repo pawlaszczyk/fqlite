@@ -24,7 +24,10 @@ import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
 /**
- * Interactive <b>vertical</b> timeline with IMSI labels and a live filter bar.
+ * Interactive <b>vertical</b> timeline with subscriber labels and a live filter bar.
+ * A toggle above the filter bar switches the label (and the identifier used by
+ * the filter, the pick list, the tooltip and the copy action) between
+ * IMSI, IMEI and phone number (MSISDN).
  *
  * <h3>Layout (top → bottom)</h3>
  * <pre>
@@ -133,15 +136,53 @@ public class TimelineView extends BorderPane {
 
     // ── Filter field options ─────────────────────────────────────────────────
 
-    private static final String FF_IMSI      = "IMSI";
     private static final String FF_TABLE     = "Table";
     private static final String FF_TIMESTAMP = "Timestamp";
     private static final String FF_ALL       = "All fields";
 
+    // ── Identifier mode (IMSI / IMEI / phone number) ──────────────────────────
+
+    /** Which subscriber identifier is shown under each dot and used for filtering. */
+    public enum IdMode {
+        IMSI("IMSI", "IMSI", "IMSI"),
+        IMEI("IMEI", "IMEI", "IMEI"),
+        MSISDN("MSISDN", "Rufnummer", "Number");
+
+        /** Language-neutral name, used as filter-field entry. */
+        final String filterLabel;
+        final String labelDe, labelEn;
+        IdMode(String filterLabel, String labelDe, String labelEn) {
+            this.filterLabel = filterLabel; this.labelDe = labelDe; this.labelEn = labelEn;
+        }
+        String uiLabel() { return Lang.t(labelDe, labelEn); }
+    }
+
+    private IdMode idMode = IdMode.IMSI;
+    private final ToggleGroup  idGroup = new ToggleGroup();
+    private final ToggleButton idImsiBtn   = new ToggleButton();
+    private final ToggleButton idImeiBtn   = new ToggleButton();
+    private final ToggleButton idMsisdnBtn = new ToggleButton();
+    private final HBox         idBar;
+    private final Label        idBarLabel = new Label();
+    /** Last full data set passed to {@link #setData}, needed to rebuild the pick list. */
+    private List<DataPoint> allPointsCache = new ArrayList<>();
+
+    /** Identifier of {@code dp} according to the active {@link IdMode}, or {@code null}. */
+    private String idOf(DataPoint dp) {
+        return switch (idMode) {
+            case IMSI   -> dp.getImsi();
+            case IMEI   -> dp.getImei();
+            case MSISDN -> dp.getMsisdn();
+        };
+    }
+
+    /** Filter-field entry for the active identifier ("IMSI", "IMEI" or "MSISDN"). */
+    private String ffId() { return idMode.filterLabel; }
+
     // ── Context menu ─────────────────────────────────────────────────────────
 
     private final ContextMenu contextMenu  = new ContextMenu();
-    private final MenuItem    copyImsiItem = new MenuItem("IMSI kopieren");
+    private final MenuItem    copyImsiItem = new MenuItem("IMSI kopieren");   // text follows idMode
     /** Index (into {@link #visible}) the context menu was last opened for. */
     private int contextMenuIdx = -1;
 
@@ -150,8 +191,9 @@ public class TimelineView extends BorderPane {
     public TimelineView() {
 
         // Header row
-        titleLabel = new Label("TIMELINE");
-        titleLabel.setFont(Font.font("Monospace", FontWeight.BOLD, 13));
+        titleLabel = new Label(Lang.t("ZEITLEISTE", "TIMELINE"));
+        Lang.addListener(() -> titleLabel.setText(Lang.t("ZEITLEISTE", "TIMELINE")));
+        titleLabel.setFont(Font.font("Monospace", FontWeight.BOLD, 17));
         titleLabel.setPadding(new Insets(10, 12, 6, 12));
 
         legend1 = new Label();
@@ -163,27 +205,49 @@ public class TimelineView extends BorderPane {
 
         // Filter bar
         filterField = new ComboBox<>();
-        filterField.getItems().addAll(FF_IMSI, FF_TABLE, FF_TIMESTAMP, FF_ALL);
-        filterField.setValue(FF_IMSI);
+        filterField.getItems().addAll(ffId(), FF_TABLE, FF_TIMESTAMP, FF_ALL);
+        filterField.setValue(ffId());
         filterField.setMaxWidth(110);
-        filterField.setStyle("-fx-font-family: monospace; -fx-font-size: 11px;");
+        filterField.setStyle("-fx-font-family: monospace; -fx-font-size: 14px;");
 
         filterText = new TextField();
         filterText.setPromptText("Filter…");
-        filterText.setStyle("-fx-font-family: monospace; -fx-font-size: 11px;");
+        filterText.setStyle("-fx-font-family: monospace; -fx-font-size: 14px;");
         HBox.setHgrow(filterText, Priority.ALWAYS);
 
         Button clearBtn = new Button("\u2715");
-        clearBtn.setFont(Font.font("Monospace", 11));
-        clearBtn.setTooltip(new Tooltip("Clear filter"));
+        clearBtn.setFont(Font.font("Monospace", 14));
+        Tooltip clearBtnTooltip = new Tooltip(Lang.t("Filter leeren", "Clear filter"));
+        clearBtn.setTooltip(clearBtnTooltip);
+        Lang.addListener(() -> clearBtnTooltip.setText(Lang.t("Filter leeren", "Clear filter")));
         clearBtn.setOnAction(e -> filterText.clear());
 
         filterCount = new Label();
-        filterCount.setFont(Font.font("Monospace", 10));
+        filterCount.setFont(Font.font("Monospace", 13));
 
         HBox filterBar = new HBox(6, filterField, filterText, clearBtn, filterCount);
         filterBar.setAlignment(Pos.CENTER_LEFT);
         filterBar.setPadding(new Insets(5, 8, 5, 8));
+
+        // Identifier toggle: IMSI | IMEI | Rufnummer
+        idImsiBtn.setToggleGroup(idGroup);
+        idImeiBtn.setToggleGroup(idGroup);
+        idMsisdnBtn.setToggleGroup(idGroup);
+        idImsiBtn.setUserData(IdMode.IMSI);
+        idImeiBtn.setUserData(IdMode.IMEI);
+        idMsisdnBtn.setUserData(IdMode.MSISDN);
+        idImsiBtn.setSelected(true);
+        updateIdBarTexts();
+        Lang.addListener(this::updateIdBarTexts);
+        idGroup.selectedToggleProperty().addListener((obs, o, n) -> {
+            if (n == null) { idGroup.selectToggle(o); return; }   // always keep one selected
+            setIdMode((IdMode) n.getUserData());
+        });
+        idBarLabel.setFont(Font.font("Monospace", 13));
+        idBar = new HBox(0, idBarLabel, idImsiBtn, idImeiBtn, idMsisdnBtn);
+        HBox.setMargin(idBarLabel, new Insets(0, 8, 0, 0));
+        idBar.setAlignment(Pos.CENTER_LEFT);
+        idBar.setPadding(new Insets(5, 8, 0, 8));
 
         // Canvas
         canvas = new Canvas(240, 600);
@@ -213,7 +277,7 @@ public class TimelineView extends BorderPane {
 
         // Layout assembly: filterBar on top, then canvas+scrollbar
         BorderPane inner = new BorderPane();
-        inner.setTop(filterBar);
+        inner.setTop(new VBox(idBar, filterBar));
         inner.setCenter(canvasWrapper);
         inner.setRight(vScrollBar);
         setCenter(inner);
@@ -243,13 +307,56 @@ public class TimelineView extends BorderPane {
                 .filter(p -> p.getTimestamp() != null)
                 .collect(Collectors.toCollection(ArrayList::new));
 
-        // Populate IMSI quick-pick list in the ComboBox
+        // Populate identifier quick-pick list in the ComboBox
+        this.allPointsCache = allPoints;
         populateImsiPicker(allPoints);
 
         hoveredIdx   = -1;
         selectedIdx  = -1;
         scrollOffset = 0;
         applyFilter();   // sets visible, minTs/maxTs, virtualHeight, renders
+    }
+
+    /**
+     * Switches the identifier shown under each dot (and used by filter, pick
+     * list, tooltip and copy action) between IMSI, IMEI and phone number.
+     */
+    public void setIdMode(IdMode mode) {
+        if (mode == null || mode == idMode) return;
+        idMode = mode;
+        for (Toggle t : idGroup.getToggles()) {
+            if (t.getUserData() == mode && !t.isSelected()) idGroup.selectToggle(t);
+        }
+        styleIdButtons();
+        // Rebuild pick list for the new identifier and fall back to the plain id filter
+        filterField.setValue(null);
+        populateImsiPicker(allPointsCache);
+        filterField.setValue(ffId());
+        applyFilter();
+    }
+
+    public IdMode getIdMode() { return idMode; }
+
+    private void updateIdBarTexts() {
+        idBarLabel.setText(Lang.t("Anzeige:", "Label:"));
+        idImsiBtn.setText(IdMode.IMSI.uiLabel());
+        idImeiBtn.setText(IdMode.IMEI.uiLabel());
+        idMsisdnBtn.setText(IdMode.MSISDN.uiLabel());
+    }
+
+    private void styleIdButtons() {
+        if (theme == null) return;
+        ToggleButton[] btns = {idImsiBtn, idImeiBtn, idMsisdnBtn};
+        for (int i = 0; i < btns.length; i++) {
+            boolean sel = btns[i].isSelected();
+            String radius = i == 0 ? "3 0 0 3" : i == btns.length - 1 ? "0 3 3 0" : "0";
+            btns[i].setStyle(
+                    "-fx-font-family: monospace; -fx-font-size: 13px; -fx-padding: 2 10 2 10;" +
+                    "-fx-background-color: " + Theme.hex(sel ? theme.accent1 : theme.bgAlt) + ";" +
+                    "-fx-text-fill: " + Theme.hex(sel ? theme.bg : theme.labelStrong) + ";" +
+                    "-fx-border-color: " + Theme.hex(theme.border) + ";" +
+                    "-fx-background-radius: " + radius + "; -fx-border-radius: " + radius + ";");
+        }
     }
 
     public void setSelectionListener(Consumer<DataPoint> listener) {
@@ -292,7 +399,7 @@ public class TimelineView extends BorderPane {
         filterCount.setTextFill(t.label);
 
         String inputCss =
-                "-fx-font-family: monospace; -fx-font-size: 11px;" +
+                "-fx-font-family: monospace; -fx-font-size: 14px;" +
                 "-fx-background-color: " + Theme.hex(t.bgAlt) + ";" +
                 "-fx-text-fill: " + Theme.hex(t.labelStrong) + ";" +
                 "-fx-border-color: " + Theme.hex(t.border) + ";" +
@@ -302,13 +409,15 @@ public class TimelineView extends BorderPane {
 
         // Style the filter bar background
         // (inner BorderPane top node)
-        if (getCenter() instanceof BorderPane inner && inner.getTop() instanceof HBox fb) {
-            fb.setStyle(t.bgStyle() + t.borderBottomStyle());
+        if (getCenter() instanceof BorderPane inner && inner.getTop() instanceof VBox top) {
+            top.setStyle(t.bgStyle() + t.borderBottomStyle());
         }
+        idBarLabel.setTextFill(t.label);
+        styleIdButtons();
 
         rebuildLegend();
         tooltip.setStyle(
-                "-fx-font-family: monospace; -fx-font-size: 11px;" +
+                "-fx-font-family: monospace; -fx-font-size: 14px;" +
                 "-fx-background-color: " + Theme.hex(t.bgAlt) + ";" +
                 "-fx-text-fill: " + Theme.hex(t.labelStrong) + ";" +
                 "-fx-border-color: " + Theme.hex(t.border) + "; -fx-border-width: 1px;");
@@ -322,11 +431,11 @@ public class TimelineView extends BorderPane {
      * values found in the dataset, so users can select a subscriber directly.
      */
     private void populateImsiPicker(List<DataPoint> allPoints) {
-        List<String> items = new ArrayList<>(List.of(FF_IMSI, FF_TABLE, FF_TIMESTAMP, FF_ALL));
+        List<String> items = new ArrayList<>(List.of(ffId(), FF_TABLE, FF_TIMESTAMP, FF_ALL));
         // Separator-style entry
-        items.add("── Pick IMSI ──");
+        items.add("── Pick " + ffId() + " ──");
         allPoints.stream()
-                .map(DataPoint::getImsi)
+                .map(this::idOf)
                 .filter(m -> m != null && !m.isBlank())
                 .distinct()
                 .sorted()
@@ -334,8 +443,8 @@ public class TimelineView extends BorderPane {
 
         String current = filterField.getValue();
         filterField.getItems().setAll(items);
-        // Restore selection if still valid, else default to IMSI
-        filterField.setValue(items.contains(current) ? current : FF_IMSI);
+        // Restore selection if still valid, else default to the identifier filter
+        filterField.setValue(items.contains(current) ? current : ffId());
     }
 
     /**
@@ -351,7 +460,7 @@ public class TimelineView extends BorderPane {
 
         // If a specific IMSI was picked from the dropdown list, filter by it directly.
         boolean isImsiPickValue = field != null
-                                    && !field.equals(FF_IMSI) && !field.equals(FF_TABLE)
+                                    && !field.equals(ffId()) && !field.equals(FF_TABLE)
                                     && !field.equals(FF_TIMESTAMP) && !field.equals(FF_ALL)
                                     && !field.startsWith("──");
 
@@ -359,21 +468,22 @@ public class TimelineView extends BorderPane {
             // User chose a specific IMSI from the pick list
             final String picked = field;
             filtered = allTimestamped.stream()
-                    .filter(p -> picked.equals(p.getImsi()))
+                    .filter(p -> picked.equals(idOf(p)))
                     .toList();
         } else if (term.isEmpty()) {
             filtered = allTimestamped;
         } else {
             filtered = allTimestamped.stream().filter(p -> {
-                return switch (field == null ? FF_ALL : field) {
-                    case FF_IMSI -> {
-                        String m = p.getImsi();
-                        yield m != null && m.toLowerCase().contains(term);
-                    }
+                String f = field == null ? FF_ALL : field;
+                if (f.equals(ffId())) {
+                    String m = idOf(p);
+                    return m != null && m.toLowerCase().contains(term);
+                }
+                return switch (f) {
                     case FF_TABLE -> p.getTableName().toLowerCase().contains(term);
                     case FF_TIMESTAMP -> p.getFormattedTimestamp().toLowerCase().contains(term);
                     default -> {  // FF_ALL
-                        String m = p.getImsi();
+                        String m = idOf(p);
                         yield p.getTableName().toLowerCase().contains(term)
                               || p.getFormattedTimestamp().toLowerCase().contains(term)
                               || (m != null && m.toLowerCase().contains(term));
@@ -492,7 +602,7 @@ public class TimelineView extends BorderPane {
 
         if (visible.isEmpty()) {
             gc.setFill(theme.label);
-            gc.setFont(Font.font("Monospace", 11));
+            gc.setFont(Font.font("Monospace", 14));
             String msg = allTimestamped.isEmpty()
                     ? "No timestamps found."
                     : "No matches for current filter.";
@@ -542,7 +652,7 @@ public class TimelineView extends BorderPane {
 
         gc.setStroke(theme.tick);
         gc.setFill(theme.label);
-        gc.setFont(Font.font("Monospace", 9));
+        gc.setFont(Font.font("Monospace", 12));
         gc.setLineWidth(1);
 
         for (int i = 0; i <= ticks; i++) {
@@ -607,10 +717,11 @@ public class TimelineView extends BorderPane {
             // Line 1: timestamp  (grey)
             String timeStr   = DateTimeFormatter.ofPattern("MM-dd HH:mm:ss")
                     .withZone(ZoneOffset.UTC).format(dp.getTimestamp());
-            // Line 2: IMSI  (accent colour); empty string when unavailable
-            String imsiStr = dp.getImsi() != null ? dp.getImsi() : "";
+            // Line 2: IMSI / IMEI / phone number (accent colour, see idMode); empty when unavailable
+            String idVal   = idOf(dp);
+            String imsiStr = idVal != null ? idVal : "";
 
-            gc.setFont(Font.font("Monospace", 9));
+            gc.setFont(Font.font("Monospace", 12));
 
             // Vertical anchor: centre between the two text lines
             double lineH   = 11;           // approximate line height at size 9
@@ -681,9 +792,12 @@ public class TimelineView extends BorderPane {
         selectedIdx = hit;
         render();
 
-        String imsi = visible.get(hit).getImsi();
+        String imsi = idOf(visible.get(hit));
+        String name = idMode.uiLabel();
         copyImsiItem.setDisable(imsi == null);
-        copyImsiItem.setText(imsi != null ? "IMSI kopieren (" + imsi + ")" : "IMSI kopieren (nicht verfügbar)");
+        copyImsiItem.setText(imsi != null
+                ? Lang.t(name + " kopieren (", "Copy " + name + " (") + imsi + ")"
+                : Lang.t(name + " kopieren (nicht verfügbar)", "Copy " + name + " (not available)"));
 
         contextMenu.show(canvas, e.getScreenX(), e.getScreenY());
     }
@@ -691,7 +805,7 @@ public class TimelineView extends BorderPane {
     /** Copies the IMSI of the data point the context menu was opened for. */
     private void copySelectedImsi() {
         if (contextMenuIdx < 0 || contextMenuIdx >= visible.size()) return;
-        String imsi = visible.get(contextMenuIdx).getImsi();
+        String imsi = idOf(visible.get(contextMenuIdx));
         if (imsi == null) return;
         ClipboardContent content = new ClipboardContent();
         content.putString(imsi);
@@ -732,8 +846,8 @@ public class TimelineView extends BorderPane {
         sb.append("Table: ").append(dp.getTableName())
                 .append("  (row ").append(dp.getRowIndex()).append(")\n");
         sb.append("Time:  ").append(dp.getFormattedTimestamp()).append(" UTC\n");
-        String imsi = dp.getImsi();
-        if (imsi != null) sb.append("IMSI:  ").append(imsi).append("\n");
+        String imsi = idOf(dp);
+        if (imsi != null) sb.append(idMode.filterLabel).append(":  ").append(imsi).append("\n");
         if (dp.getCoordinate() != null) sb.append("Geo:   ").append(dp.getCoordinate()).append("\n");
         List<String> cols = dp.getColumnNames();
         List<String> row  = dp.getRawRow();
@@ -756,7 +870,7 @@ public class TimelineView extends BorderPane {
         lbl.setGraphic(dot);
         lbl.setText(text);
         lbl.setTextFill(theme.label);
-        lbl.setFont(Font.font("Monospace", 10));
+        lbl.setFont(Font.font("Monospace", 13));
         lbl.setGraphicTextGap(5);
     }
 }

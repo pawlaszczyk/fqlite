@@ -1,8 +1,6 @@
 # FQLite 5.1 — NodeQL integration update
 
-Release date: 2026-10-30. This fork's 5.1 release contains source code only;
-prebuilt installers and a bundled JRE are not included. Installer publication
-is a separate release workflow.
+Special Thanks to Paul Bodach (Kartoffelspalt) and overcuriousity for the pull-request :-)
 
 - Add a dedicated NodeQL graph icon to the main toolbar and remove the top-menu entry.
 - Align the JavaFX editor with the current NodeQL workbench: dark resizable panels,
@@ -34,8 +32,5 @@ is a separate release workflow.
   reproducible JavaFX/SQLite integration smoke test.
 - Set the application and Gradle version to 5.1.
 
-## Previous release: 5.0
+- Bug fixes for WAL archive and rollback journal analysis (23) due to a bug in overflow page parsing.
 
-- Bug fixes for WAL archive and rollback journal analysis.
-- Settings: timestamp conversion format customization (issue 22).
-- Added support for SQLCipher databases (issue 24).

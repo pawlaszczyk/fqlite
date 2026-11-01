@@ -137,31 +137,65 @@ public class MapViewPane extends BorderPane {
 
         // ── App title ─────────────────────────────────────────────────────────
         appTitle = new Label("\u00B7Lighthouse");
-        appTitle.setFont(Font.font("Monospace", FontWeight.BOLD, 15));
+        appTitle.setFont(Font.font("Monospace", FontWeight.BOLD, 19));
 
-        subtitle = new Label("Forensic & Call Data Record (CDR) Analysis");
-        subtitle.setFont(Font.font("Monospace", 11));
+        subtitle = new Label(Lang.t(
+                "Forensische Anrufdatensatz-Analyse (CDR)",
+                "Forensic & Call Data Record (CDR) Analysis"));
+        subtitle.setFont(Font.font("Monospace", 14));
+        Lang.addListener(() -> subtitle.setText(Lang.t(
+                "Forensische Anrufdatensatz-Analyse (CDR)",
+                "Forensic & Call Data Record (CDR) Analysis")));
+
+        // Explicit German/English switch, independent of the system locale
+        // Lang otherwise defaults to. Placed in the title bar so it's
+        // reachable from anywhere in the window, not tucked into a submenu.
+        Button langToggle = new Button(langToggleLabel());
+        langToggle.setFont(Font.font("Monospace", 13));
+        Tooltip langToggleTooltip = new Tooltip(Lang.t(
+                "Zwischen deutscher und englischer Beschriftung umschalten.",
+                "Switch between German and English labeling."));
+        langToggle.setTooltip(langToggleTooltip);
+        Lang.addListener(() -> langToggleTooltip.setText(Lang.t(
+                "Zwischen deutscher und englischer Beschriftung umschalten.",
+                "Switch between German and English labeling.")));
+        langToggle.setOnAction(e -> {
+            Lang.toggleGerman();
+            langToggle.setText(langToggleLabel());
+        });
 
         // ── MBTiles: Pfad aus fqlite.conf laden falls noch nicht gesetzt ──────
         autoLoadMbTilesFromConfig();
 
         // ── MBTiles offline control ───────────────────────────────────────────
-        mbTilesButton = new Button("\uD83D\uDDFA\uFE0F Offline-Karte laden\u2026");
-        mbTilesButton.setFont(Font.font("Monospace", 11));
+        mbTilesButton = new Button(Lang.t("\uD83D\uDDFA\uFE0F Offline-Karte laden\u2026", "\uD83D\uDDFA\uFE0F Load offline map\u2026"));
+        mbTilesButton.setFont(Font.font("Monospace", 14));
         mbTilesButton.setOnAction(e -> onMbTilesButtonClicked());
-        Tooltip.install(mbTilesButton, new Tooltip(
+        Tooltip mbTilesTooltip = new Tooltip(Lang.t(
                 "MBTiles-Datei als Offline-Kartenquelle laden.\n" +
                 "Tiles werden zuerst aus dieser Datei bezogen;\n" +
-                "fehlende Tiles werden weiterhin online geladen."));
+                "fehlende Tiles werden weiterhin online geladen.",
+                "Load an MBTiles file as an offline map source.\n" +
+                "Tiles are fetched from this file first;\n" +
+                "missing tiles are still loaded online."));
+        Tooltip.install(mbTilesButton, mbTilesTooltip);
+        Lang.addListener(() -> mbTilesTooltip.setText(Lang.t(
+                "MBTiles-Datei als Offline-Kartenquelle laden.\n" +
+                "Tiles werden zuerst aus dieser Datei bezogen;\n" +
+                "fehlende Tiles werden weiterhin online geladen.",
+                "Load an MBTiles file as an offline map source.\n" +
+                "Tiles are fetched from this file first;\n" +
+                "missing tiles are still loaded online.")));
 
         mbTilesStatus = new Label();
-        mbTilesStatus.setFont(Font.font("Monospace", 10));
+        mbTilesStatus.setFont(Font.font("Monospace", 13));
         updateMbTilesStatus();
+        Lang.addListener(this::updateMbTilesStatus);
 
         Region spacer = new Region();
         HBox.setHgrow(spacer, Priority.ALWAYS);
 
-        titleBox = new HBox(16, appTitle, subtitle, spacer, mbTilesStatus, mbTilesButton);
+        titleBox = new HBox(16, appTitle, subtitle, spacer, langToggle, mbTilesStatus, mbTilesButton);
         titleBox.setAlignment(Pos.CENTER_LEFT);
         titleBox.setPadding(new Insets(10, 20, 10, 20));
         setTop(titleBox);
@@ -189,13 +223,19 @@ public class MapViewPane extends BorderPane {
         legendGap.setMinWidth(20);
         Region legendSpacer  = new Region();
         HBox.setHgrow(legendSpacer, Priority.ALWAYS);
+        Label mocLegendLabel = new Label(Lang.t("MOC (ausgehend)", "MOC (outgoing)"));
+        Label mtcLegendLabel = new Label(Lang.t("MTC (eingehend)", "MTC (incoming)"));
+        Lang.addListener(() -> {
+            mocLegendLabel.setText(Lang.t("MOC (ausgehend)", "MOC (outgoing)"));
+            mtcLegendLabel.setText(Lang.t("MTC (eingehend)", "MTC (incoming)"));
+        });
         HBox mocMtcLegend = new HBox(6,
-                mocLegendDot, new Label("MOC (ausgehend)"),
-                legendGap, mtcLegendDot, new Label("MTC (eingehend)"),
+                mocLegendDot, mocLegendLabel,
+                legendGap, mtcLegendDot, mtcLegendLabel,
                 legendSpacer, mocMtcCountLabel);
         mocMtcLegend.setAlignment(Pos.CENTER_LEFT);
         mocMtcLegend.setPadding(new Insets(6, 14, 6, 14));
-        mocMtcLegend.setStyle("-fx-font-family: monospace; -fx-font-size: 11px;");
+        mocMtcLegend.setStyle("-fx-font-family: monospace; -fx-font-size: 14px;");
 
         mocMtcTable = buildMocMtcTable();
 
@@ -208,12 +248,16 @@ public class MapViewPane extends BorderPane {
         mocMtcTabContent.setCenter(mocMtcSplit);
 
         // ── Tabs: map/timeline view vs. dedicated police-analysis panel ───────
-        Tab mapTab = new Tab("🗺️ Karte & Zeitleiste", splitPane);
+        Tab mapTab = new Tab(Lang.t("🗺️ Karte & Zeitleiste", "🗺️ Map & Timeline"), splitPane);
         mapTab.setClosable(false);
         Tab mocMtcTab = new Tab("📞 MOC/MTC", mocMtcTabContent);
         mocMtcTab.setClosable(false);
-        Tab policeTab = new Tab("🔎 Statistiken", policeAnalysisPane);
+        Tab policeTab = new Tab(Lang.t("🔎 Statistiken", "🔎 Statistics"), policeAnalysisPane);
         policeTab.setClosable(false);
+        Lang.addListener(() -> {
+            mapTab.setText(Lang.t("🗺️ Karte & Zeitleiste", "🗺️ Map & Timeline"));
+            policeTab.setText(Lang.t("🔎 Statistiken", "🔎 Statistics"));
+        });
 
         TabPane centerTabs = new TabPane(mapTab, mocMtcTab, policeTab);
         centerTabs.setTabClosingPolicy(TabPane.TabClosingPolicy.UNAVAILABLE);
@@ -223,7 +267,7 @@ public class MapViewPane extends BorderPane {
         // database shows immediate feedback instead of an apparently frozen
         // window.
         loadingIndicator.setMaxSize(64, 64);
-        loadingLabel.setFont(Font.font("Monospace", 12));
+        loadingLabel.setFont(Font.font("Monospace", 15));
         loadingOverlay.setAlignment(Pos.CENTER);
         loadingOverlay.setMouseTransparent(false);
         loadingOverlay.setStyle("-fx-background-color: rgba(0,0,0,0.55);");
@@ -255,27 +299,43 @@ public class MapViewPane extends BorderPane {
 
         // ── LLM bar (bottom) ──────────────────────────────────────────────────
         llmPromptField = new TextField();
-        llmPromptField.setPromptText(
-                "Natürlichsprachige Anfrage an LLM (z. B. \"Alle Einträge mit GPS-Koordinaten\")…");
-        llmPromptField.setFont(Font.font("Monospace", 11));
+        llmPromptField.setPromptText(Lang.t(
+                "Natürlichsprachige Anfrage an LLM (z. B. \"Alle Einträge mit GPS-Koordinaten\")…",
+                "Natural-language query to the LLM (e.g. \"All entries with GPS coordinates\")…"));
+        Lang.addListener(() -> llmPromptField.setPromptText(Lang.t(
+                "Natürlichsprachige Anfrage an LLM (z. B. \"Alle Einträge mit GPS-Koordinaten\")…",
+                "Natural-language query to the LLM (e.g. \"All entries with GPS coordinates\")…")));
+        llmPromptField.setFont(Font.font("Monospace", 14));
         HBox.setHgrow(llmPromptField, Priority.ALWAYS);
         llmPromptField.setOnAction(e -> onLlmRun());   // Enter triggers run
 
-        llmRunButton = new Button("Ask \u25B6");
-        llmRunButton.setFont(Font.font("Monospace", FontWeight.BOLD, 11));
-        llmRunButton.setTooltip(new Tooltip(
-                "Prompt an LLM senden → SELECT generieren → Karte aktualisieren"));
+        llmRunButton = new Button(Lang.t("Anfrage \u25B6", "Ask \u25B6"));
+        Lang.addListener(() -> llmRunButton.setText(Lang.t("Anfrage \u25B6", "Ask \u25B6")));
+        llmRunButton.setFont(Font.font("Monospace", FontWeight.BOLD, 14));
+        Tooltip llmRunTooltip = new Tooltip(Lang.t(
+                "Prompt an LLM senden → SELECT generieren → Karte aktualisieren",
+                "Send prompt to LLM → generate SELECT → update map"));
+        llmRunButton.setTooltip(llmRunTooltip);
+        Lang.addListener(() -> llmRunTooltip.setText(Lang.t(
+                "Prompt an LLM senden → SELECT generieren → Karte aktualisieren",
+                "Send prompt to LLM → generate SELECT → update map")));
         llmRunButton.setDisable(true);   // enabled by attachLLM()
         llmRunButton.setOnAction(e -> onLlmRun());
 
         // Small "reset to full dataset" button
         Button llmResetButton = new Button("\u21BA Reset");
-        llmResetButton.setFont(Font.font("Monospace", 11));
-        llmResetButton.setTooltip(new Tooltip("Vollständige Datenmenge wiederherstellen"));
+        llmResetButton.setFont(Font.font("Monospace", 14));
+        Tooltip llmResetTooltip = new Tooltip(Lang.t(
+                "Vollständige Datenmenge wiederherstellen",
+                "Restore the full dataset"));
+        llmResetButton.setTooltip(llmResetTooltip);
+        Lang.addListener(() -> llmResetTooltip.setText(Lang.t(
+                "Vollständige Datenmenge wiederherstellen",
+                "Restore the full dataset")));
         llmResetButton.setOnAction(e -> onLlmReset());
 
-        llmStatusLabel = new Label("\u23F3 LLM wird initialisiert\u2026");
-        llmStatusLabel.setFont(Font.font("Monospace", 10));
+        llmStatusLabel = new Label(Lang.t("\u23F3 LLM wird initialisiert\u2026", "\u23F3 Initializing LLM\u2026"));
+        llmStatusLabel.setFont(Font.font("Monospace", 13));
 
 
         VBox bottom = new VBox();
@@ -333,6 +393,11 @@ public class MapViewPane extends BorderPane {
      * @param mdb      the {@link InMemoryDatabase} that backs the current
      *                 analysis; its name must match the key in {@link DBManager}
      */
+    /** Button caption for the DE/EN toggle, showing the language it would switch to. */
+    private static String langToggleLabel() {
+        return Lang.isGerman() ? "DE | en" : "de | EN";
+    }
+
     public void attachLLM(RAGPipeline pipeline, InMemoryDatabase mdb) {
         this.ragPipeline = pipeline;
         this.inMemoryDB  = mdb;
@@ -341,13 +406,18 @@ public class MapViewPane extends BorderPane {
         Platform.runLater(() -> {
             if (pipeline != null) {
                 llmRunButton.setDisable(false);
-                llmStatusLabel.setText("\u2705 LLM bereit");
+                // Show which compute mode the local LLM actually ended up
+                // running with (GPU offload vs. CPU-only) right behind the
+                // ready-state text, so an examiner can tell at a glance why
+                // a query might be slow without digging into logs.
+                llmStatusLabel.setText(Lang.t("\u2705 LLM bereit (", "\u2705 LLM ready (") + pipeline.getComputeModeLabel() + ")");
                 llmStatusLabel.setTextFill(theme.accent2);
-                llmPromptField.setPromptText(
-                        "Natürlichsprachige Anfrage an LLM (z. B. \"Alle Einträge mit GPS-Koordinaten\")…");
+                llmPromptField.setPromptText(Lang.t(
+                        "Natürlichsprachige Anfrage an LLM (z. B. \"Alle Einträge mit GPS-Koordinaten\")…",
+                        "Natural-language query to the LLM (e.g. \"All entries with GPS coordinates\")…"));
             } else {
                 llmRunButton.setDisable(true);
-                llmStatusLabel.setText("\u26AA LLM nicht verfügbar");
+                llmStatusLabel.setText(Lang.t("\u26AA LLM nicht verfügbar", "\u26AA LLM not available"));
                 llmStatusLabel.setTextFill(theme.detailMuted);
             }
             applyLlmBarTheme();
@@ -357,6 +427,23 @@ public class MapViewPane extends BorderPane {
     public void setData(
             ConcurrentHashMap<String, ObservableList<ObservableList<String>>> resultlist,
             Map<String, List<String>> headers) {
+        setData(resultlist, headers, false);
+    }
+
+    /**
+     * @param clearSequenceSelection forwarded to {@link MapView#setData(List, boolean)}
+     *        — {@code true} forces the IMSI/IMEI sequence-analysis selectors
+     *        back to "no selection" instead of restoring whatever was
+     *        selected before. Used by {@link #onLlmReset()} so "Reset"
+     *        actually returns the window to its initial state, instead of
+     *        immediately re-running the same sequence analysis because the
+     *        previously selected IMSI/IMEI is still present in the restored
+     *        base dataset.
+     */
+    public void setData(
+            ConcurrentHashMap<String, ObservableList<ObservableList<String>>> resultlist,
+            Map<String, List<String>> headers,
+            boolean clearSequenceSelection) {
 
         Map<String, List<String>> safeHeaders = new HashMap<>(headers);
         for (Map.Entry<String, ObservableList<ObservableList<String>>> e : resultlist.entrySet()) {
@@ -393,7 +480,7 @@ public class MapViewPane extends BorderPane {
                 allPoints        = points;
                 currentMapPoints = points;
                 timelineView.setData(points);
-                mapView.setData(points);
+                mapView.setData(points, clearSequenceSelection);
                 List<DataPoint> mocMtc = filterMocMtc(points);
                 mocMtcMapView.setData(mocMtc);
                 mocMtcCountLabel.setText(String.format("%,d Anrufe", mocMtc.size()));
@@ -483,7 +570,7 @@ public class MapViewPane extends BorderPane {
     private static Label legendDot(Color c) {
         Label dot = new Label("●"); // ●
         dot.setTextFill(c);
-        dot.setStyle("-fx-font-size: 13px;");
+        dot.setStyle("-fx-font-size: 17px;");
         return dot;
     }
 
@@ -496,22 +583,24 @@ public class MapViewPane extends BorderPane {
      */
     private TableView<DataPoint> buildMocMtcTable() {
         TableView<DataPoint> table = new TableView<>();
-        table.setPlaceholder(new Label("Keine MOC/MTC-Einträge gefunden."));
+        Label mocMtcPlaceholder = new Label(Lang.t("Keine MOC/MTC-Einträge gefunden.", "No MOC/MTC entries found."));
+        table.setPlaceholder(mocMtcPlaceholder);
+        Lang.addListener(() -> mocMtcPlaceholder.setText(Lang.t("Keine MOC/MTC-Einträge gefunden.", "No MOC/MTC entries found.")));
 
-        TableColumn<DataPoint, String> colTime = new TableColumn<>("Zeit");
+        TableColumn<DataPoint, String> colTime = new TableColumn<>(Lang.t("Zeit", "Time"));
         colTime.setCellValueFactory(cd -> new ReadOnlyObjectWrapper<>(cd.getValue().getFormattedTimestamp()));
         colTime.setPrefWidth(150);
 
-        TableColumn<DataPoint, String> colDirection = new TableColumn<>("Richtung");
+        TableColumn<DataPoint, String> colDirection = new TableColumn<>(Lang.t("Richtung", "Direction"));
         colDirection.setCellValueFactory(cd -> new ReadOnlyObjectWrapper<>(callDirectionLabel(cd.getValue())));
         colDirection.setPrefWidth(150);
 
-        TableColumn<DataPoint, String> colDuration = new TableColumn<>("Dauer");
+        TableColumn<DataPoint, String> colDuration = new TableColumn<>(Lang.t("Dauer", "Duration"));
         colDuration.setCellValueFactory(cd -> new ReadOnlyObjectWrapper<>(
                 formatCallDuration(cd.getValue() instanceof ResponseRecordDataPoint rr ? rr.getDurationSeconds() : null)));
         colDuration.setPrefWidth(90);
 
-        TableColumn<DataPoint, String> colMsisdn = new TableColumn<>("Rufnummer");
+        TableColumn<DataPoint, String> colMsisdn = new TableColumn<>(Lang.t("Rufnummer", "Phone_Number"));
         colMsisdn.setCellValueFactory(cd -> new ReadOnlyObjectWrapper<>(cd.getValue().getMsisdn()));
         colMsisdn.setPrefWidth(130);
 
@@ -519,7 +608,7 @@ public class MapViewPane extends BorderPane {
         colImsi.setCellValueFactory(cd -> new ReadOnlyObjectWrapper<>(cd.getValue().getImsi()));
         colImsi.setPrefWidth(160);
 
-        TableColumn<DataPoint, String> colCoord = new TableColumn<>("Koordinate");
+        TableColumn<DataPoint, String> colCoord = new TableColumn<>(Lang.t("Koordinate", "Coordinate"));
         colCoord.setCellValueFactory(cd -> {
             DataAnalyzer.GeoCoordinate c = cd.getValue().getCoordinate();
             return new ReadOnlyObjectWrapper<>(c != null ? c.toString() : "–");
@@ -528,6 +617,13 @@ public class MapViewPane extends BorderPane {
 
         table.getColumns().addAll(List.of(colTime, colDirection, colDuration, colMsisdn, colImsi, colCoord));
         table.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY);
+        Lang.addListener(() -> {
+            colTime.setText(Lang.t("Zeit", "Time"));
+            colDirection.setText(Lang.t("Richtung", "Direction"));
+            colDuration.setText(Lang.t("Dauer", "Duration"));
+            colMsisdn.setText(Lang.t("Rufnummer", "Phone_Number"));
+            colCoord.setText(Lang.t("Koordinate", "Coordinate"));
+        });
 
         table.setRowFactory(tv -> {
             TableRow<DataPoint> row = new TableRow<>();
@@ -538,6 +634,9 @@ public class MapViewPane extends BorderPane {
             });
             return row;
         });
+
+        // Copy selected cells to clipboard via context menu or Ctrl/Cmd+C.
+        TableClipboardSupport.install(table);
 
         return table;
     }
@@ -550,8 +649,8 @@ public class MapViewPane extends BorderPane {
     private static String callDirectionLabel(DataPoint dp) {
         if (!(dp instanceof ResponseRecordDataPoint rr)) return "–";
         String ci = rr.getCallIndicator();
-        if ("MOC".equals(ci)) return "Ausgehend (MOC)";
-        if ("MTC".equals(ci)) return "Eingehend (MTC)";
+        if ("MOC".equals(ci)) return Lang.t("Ausgehend (MOC)", "Outgoing (MOC)");
+        if ("MTC".equals(ci)) return Lang.t("Eingehend (MTC)", "Incoming (MTC)");
         return "–";
     }
 
@@ -632,7 +731,7 @@ public class MapViewPane extends BorderPane {
                     String min = rs.getString(1);
                     String max = rs.getString(2);
                     if (min != null && !min.isBlank() && max != null && !max.isBlank()) {
-                        return min + " bis " + max;
+                        return min + Lang.t(" bis ", " to ") + max;
                     }
                 }
             } finally {
@@ -645,9 +744,10 @@ public class MapViewPane extends BorderPane {
     private void onLlmRun() {
         String prompt = llmPromptField.getText().trim();
         if (prompt.isEmpty() || ragPipeline == null) return;
+        lastLlmQuestion = prompt;
 
         llmRunButton.setDisable(true);
-        setLlmStatus("⏳ Analysiere Anfrage…", theme.label);
+        setLlmStatus(Lang.t("⏳ Analysiere Anfrage…", "⏳ Analyzing query…"), theme.label);
         setCoLocationTableVisible(false);
         setRoamersTableVisible(false);
         setWechslerTableVisible(false);
@@ -655,6 +755,23 @@ public class MapViewPane extends BorderPane {
         Thread worker = new Thread(() -> {
             try {
                 RAGPipeline.QueryIntent intent = ragPipeline.classifyIntent(prompt, queryDataDateRange());
+
+                if (intent.isAmbiguousTimeOfDayWithoutDate()) {
+                    // The request named a time-of-day (e.g. "zwischen 10:00
+                    // und 10:30 Uhr") but no date, and the loaded dataset
+                    // spans more than one day, so classifyIntent couldn't
+                    // safely guess which day is meant (see
+                    // RAGPipeline.resolveDateForTimeOnlyWindow). Checked
+                    // before every other branch below — cell/country
+                    // overrides and every QueryIntent.is*() gate would
+                    // otherwise run with an unrestricted or guessed time
+                    // window instead of surfacing the ambiguity.
+                    Platform.runLater(() -> {
+                        setLlmStatus(Lang.t("⚠️ Uhrzeit ohne Datum — die Datenbank umfasst mehrere Tage, bitte ein Datum ergänzen", "⚠️ Time without a date — the database spans multiple days, please add a date"), theme.hover);
+                        llmRunButton.setDisable(false);
+                    });
+                    return;
+                }
 
                 // Deterministic safety net, checked FIRST: the small local
                 // model unreliably classifies country-name requests — it has
@@ -669,9 +786,19 @@ public class MapViewPane extends BorderPane {
                 // unambiguous country mention always win, regardless of what
                 // the model classified the rest of the request as.
                 String mentionedPrefix = CountryCallingCodeLookup.findPrefixMentionedInText(prompt);
+                String[] cellIdentifier = RAGPipeline.findCellIdentifierMentionedInText(prompt);
                 if (mentionedPrefix != null) {
                     String country = CountryCallingCodeLookup.getCountryNameByPrefix(mentionedPrefix);
                     runCountryFilterQuery(country, intent.startTime, intent.endTime);
+                } else if (cellIdentifier != null) {
+                    // Same reasoning as the country-mention check above: a
+                    // named LAC/TAC/CI is a small, unambiguous numeric token
+                    // the model has no reliable way to place into structured
+                    // JSON, and — critically — letting this fall through to
+                    // intent.isPlainTimeFilter() below would silently drop
+                    // the cell condition and return every record in the time
+                    // window instead of just the ones at that site.
+                    runCellFilterQuery(cellIdentifier[0], cellIdentifier[1], intent.callSmsType, intent.startTime, intent.endTime);
                 } else if (intent.isColocation()) {
                     runColocationQuery(intent);
                 } else if (intent.isAmbiguousColocation()) {
@@ -682,7 +809,7 @@ public class MapViewPane extends BorderPane {
                     // build the self-join a co-location query needs) — ask
                     // for clarification instead.
                     Platform.runLater(() -> {
-                        setLlmStatus("⚠️ Zeitraum konnte nicht erkannt werden — bitte Zeitraum präzisieren", theme.hover);
+                        setLlmStatus(Lang.t("⚠️ Zeitraum konnte nicht erkannt werden — bitte Zeitraum präzisieren", "⚠️ Could not recognize the time range — please specify a time range"), theme.hover);
                         llmRunButton.setDisable(false);
                     });
                 } else if (intent.isCallsOrSms()) {
@@ -693,6 +820,13 @@ public class MapViewPane extends BorderPane {
                     runRoamersQuery(intent);
                 } else if (intent.isWechsler()) {
                     runWechslerQuery(intent);
+                } else if (intent.isPlainTimeFilter()) {
+                    // classifyIntent already extracted a clean time window
+                    // for this plain filter request — run the fixed SQL
+                    // template directly instead of paying for a second,
+                    // much slower free-form generateSQL() call (see
+                    // RAGPipeline.buildPlainFilterSql).
+                    runPlainTimeFilterQuery(intent);
                 } else {
                     // For intent="filter" pass the date-normalized text (ISO dates,
                     // years injected) to the SQL generator — the raw prompt may
@@ -724,18 +858,23 @@ public class MapViewPane extends BorderPane {
         String sql = ragPipeline.generateSQL(prompt);
         if (!ragPipeline.isValidSQL(sql)) {
             Platform.runLater(() -> {
-                setLlmStatus("⚠️ LLM konnte keine gültige SQL erzeugen — bitte Anfrage umformulieren", theme.hover);
+                setLlmStatus(Lang.t("⚠️ LLM konnte keine gültige SQL erzeugen — bitte Anfrage umformulieren", "⚠️ LLM could not generate valid SQL — please rephrase the query"), theme.hover);
                 llmRunButton.setDisable(false);
             });
             return;
         }
-        Platform.runLater(() -> setLlmStatus("⚙️ Führe aus: " + abbreviate(sql, 60), theme.label));
+        Platform.runLater(() -> setLlmStatus(Lang.t("⚙️ Führe aus: ", "⚙️ Running: ") + abbreviate(sql, 60), theme.label));
 
         // 2. Execute SQL against in-memory DB
         ResultSet rs = inMemoryDB.execute(sql);
         if (rs == null) {
+            // Statt nur "Kein Ergebnis": die SQLite-Fehlermeldung anzeigen (z.B. unbekannte Spalte)
+            String err = fqlite.rag.SqlRepair.prepareError(inMemoryDB.getConnectionObject(), sql);
+            final String msg = err != null
+                    ? Lang.t("⚠️ SQL-Fehler: ", "⚠️ SQL error: ") + abbreviate(err, 90)
+                    : Lang.t("⚠️ Kein Ergebnis", "⚠️ No result");
             Platform.runLater(() -> {
-                setLlmStatus("⚠️ Kein Ergebnis", theme.hover);
+                setLlmStatus(msg, theme.hover);
                 llmRunButton.setDisable(false);
             });
             return;
@@ -746,13 +885,34 @@ public class MapViewPane extends BorderPane {
         rs.close();
 
         final String finalSql = sql;
+
+        // 4. Ergebnisse ohne Zeitstempel + Koordinaten (Anzahlen, Summen, Kontaktlisten, …)
+        //    lassen sich nicht auf Karte/Zeitleiste darstellen → Ergebnisfenster statt setData.
+        //    Karte und Zeitleiste bleiben dabei unveraendert.
+        List<String> resultCols = qr.headers.getOrDefault("response_records", List.of());
+        if (!isMapDisplayable(resultCols) || qr.rowCount == 0) {
+            List<List<String>> resultRows = new ArrayList<>(qr.data.getOrDefault(
+                    "response_records", FXCollections.observableArrayList()));
+            Platform.runLater(() -> {
+                ResultPopup.show(getScene() != null ? getScene().getWindow() : null, theme,
+                        prompt, finalSql, resultCols, resultRows);
+                setLlmStatus(qr.rowCount == 0
+                        ? Lang.t("⚠️ Keine Treffer", "⚠️ No matches") + " | " + abbreviate(finalSql, 50)
+                        : "✅ " + Lang.t("Ergebnis im Fenster angezeigt", "Result shown in window")
+                          + " | " + abbreviate(finalSql, 50),
+                        qr.rowCount == 0 ? theme.hover : theme.accent2);
+                llmRunButton.setDisable(false);
+            });
+            return;
+        }
+
         Platform.runLater(() -> {
             setCoLocationTableVisible(false);
             setRoamersTableVisible(false);
             setWechslerTableVisible(false);
             setData(qr.data, qr.headers);
             setLlmStatus(
-                    "✅ " + qr.rowCount + " Zeile(n) | " + abbreviate(finalSql, 50),
+                    "✅ " + qr.rowCount + " " + Lang.t("Zeile(n)", "row(s)") + " | " + abbreviate(finalSql, 50),
                     theme.accent2);
             llmRunButton.setDisable(false);
         });
@@ -768,12 +928,12 @@ public class MapViewPane extends BorderPane {
      * like in {@link #runColocationQuery}.
      */
     private void runCallsSmsQuery(RAGPipeline.QueryIntent intent) throws Exception {
-        Platform.runLater(() -> setLlmStatus("⚙️ Suche Anrufe/SMS…", theme.label));
+        Platform.runLater(() -> setLlmStatus(Lang.t("⚙️ Suche Anrufe/SMS…", "⚙️ Searching calls/SMS…"), theme.label));
 
         String sql = RAGPipeline.buildCallsSmsSql(intent.callSmsType, intent.startTime, intent.endTime);
         if (sql == null) {
             Platform.runLater(() -> {
-                setLlmStatus("⚠️ Anfrage konnte nicht zugeordnet werden", theme.hover);
+                setLlmStatus(Lang.t("⚠️ Anfrage konnte nicht zugeordnet werden", "⚠️ Could not classify the query"), theme.hover);
                 llmRunButton.setDisable(false);
             });
             return;
@@ -782,7 +942,7 @@ public class MapViewPane extends BorderPane {
         ResultSet rs = inMemoryDB.execute(sql);
         if (rs == null) {
             Platform.runLater(() -> {
-                setLlmStatus("⚠️ Kein Ergebnis", theme.hover);
+                setLlmStatus(Lang.t("⚠️ Kein Ergebnis", "⚠️ No result"), theme.hover);
                 llmRunButton.setDisable(false);
             });
             return;
@@ -790,6 +950,7 @@ public class MapViewPane extends BorderPane {
 
         QueryRows qr = toResponseRecordsTable(rs);
         rs.close();
+        if (showNoHitsIfEmpty(qr, sql)) return;   // Karte unveraendert lassen, "Keine Treffer" im Fenster
 
         Platform.runLater(() -> {
             setCoLocationTableVisible(false);
@@ -798,8 +959,120 @@ public class MapViewPane extends BorderPane {
             setData(qr.data, qr.headers);
             setLlmStatus(
                     qr.rowCount == 0
-                            ? "⚠️ Keine passenden Anrufe/SMS im Zeitfenster gefunden"
-                            : "✅ " + qr.rowCount + " Datensatz/Datensätze gefunden",
+                            ? Lang.t("⚠️ Keine passenden Anrufe/SMS im Zeitfenster gefunden", "⚠️ No matching calls/SMS found in the time window")
+                            : "✅ " + qr.rowCount + " " + Lang.t("Datensatz/Datensätze gefunden", "record(s) found"),
+                    qr.rowCount == 0 ? theme.hover : theme.accent2);
+            llmRunButton.setDisable(false);
+        });
+    }
+
+    /**
+     * Plain time-window filter flow: executes the fixed SQL template (built
+     * by {@link RAGPipeline#buildPlainFilterSql}) for the time window the
+     * LLM extracted, skipping the free-form {@link RAGPipeline#generateSQL}
+     * call entirely. Like {@link #runCallsSmsQuery}, the result is plain
+     * {@code response_records} rows fed straight into {@link #setData} to
+     * redraw the map/timeline.
+     */
+    private void runPlainTimeFilterQuery(RAGPipeline.QueryIntent intent) throws Exception {
+        Platform.runLater(() -> setLlmStatus(Lang.t("⚙️ Suche Teilnehmer im Zeitfenster…", "⚙️ Searching subscribers in the time window…"), theme.label));
+
+        String sql = RAGPipeline.buildPlainFilterSql(intent.startTime, intent.endTime);
+        if (sql == null) {
+            Platform.runLater(() -> {
+                setLlmStatus(Lang.t("⚠️ Zeitraum konnte nicht erkannt werden — bitte Zeitraum präzisieren", "⚠️ Could not recognize the time range — please specify a time range"), theme.hover);
+                llmRunButton.setDisable(false);
+            });
+            return;
+        }
+
+        ResultSet rs = inMemoryDB.execute(sql);
+        if (rs == null) {
+            Platform.runLater(() -> {
+                setLlmStatus(Lang.t("⚠️ Kein Ergebnis", "⚠️ No result"), theme.hover);
+                llmRunButton.setDisable(false);
+            });
+            return;
+        }
+
+        QueryRows qr = toResponseRecordsTable(rs);
+        rs.close();
+        if (showNoHitsIfEmpty(qr, sql)) return;   // Karte unveraendert lassen, "Keine Treffer" im Fenster
+
+        Platform.runLater(() -> {
+            setCoLocationTableVisible(false);
+            setRoamersTableVisible(false);
+            setWechslerTableVisible(false);
+            setData(qr.data, qr.headers);
+            setLlmStatus(
+                    qr.rowCount == 0
+                            ? Lang.t("⚠️ Keine Teilnehmer im Zeitfenster gefunden", "⚠️ No subscribers found in the time window")
+                            : "✅ " + qr.rowCount + " " + Lang.t("Datensatz/Datensätze gefunden", "record(s) found"),
+                    qr.rowCount == 0 ? theme.hover : theme.accent2);
+            llmRunButton.setDisable(false);
+        });
+    }
+
+    /**
+     * Cell/LAC/CI filter flow: executes the fixed SQL template (built by
+     * {@link RAGPipeline#buildCellFilterSql}) for the LAC/TAC and/or CI
+     * value found in the raw prompt by
+     * {@link RAGPipeline#findCellIdentifierMentionedInText}, plus the
+     * (optional) call/SMS direction and time window {@code classifyIntent}
+     * still extracted despite the cell mention taking over dispatch (e.g.
+     * "alle ausgehenden Anrufe an der Funkzelle mit CellID 19" — without
+     * passing {@code callSmsType} through here, the direction would be
+     * silently dropped and every record at that cell returned instead of
+     * just the outgoing calls). Like
+     * {@link #runCountryFilterQuery(String, String, String)}, this is
+     * reached directly from the deterministic text check in
+     * {@link #onLlmRun()}, not via one of the {@code QueryIntent.is*()}
+     * gates.
+     */
+    private void runCellFilterQuery(String lac, String ci, String callSmsType, String startTime, String endTime) throws Exception {
+        String label = (lac != null ? "LAC/TAC " + lac : "") + (lac != null && ci != null ? ", " : "") + (ci != null ? "CI " + ci : "");
+        String directionLabel = switch (callSmsType == null ? "" : callSmsType) {
+            case "ausgehender_anruf" -> Lang.t("ausgehende Anrufe ", "outgoing calls ");
+            case "eingehender_anruf" -> Lang.t("eingehende Anrufe ", "incoming calls ");
+            case "gesendete_sms" -> Lang.t("gesendete SMS ", "sent SMS ");
+            case "empfangene_sms" -> Lang.t("empfangene SMS ", "received SMS ");
+            case "alle_anrufe" -> Lang.t("Anrufe ", "calls ");
+            case "alle_sms" -> Lang.t("SMS ", "SMS ");
+            default -> "";
+        };
+        Platform.runLater(() -> setLlmStatus(Lang.t("⚙️ Suche ", "⚙️ Searching ") + directionLabel + Lang.t("an Funkzelle ", "at cell site ") + label + "…", theme.label));
+
+        String sql = RAGPipeline.buildCellFilterSql(lac, ci, callSmsType, startTime, endTime);
+        if (sql == null) {
+            Platform.runLater(() -> {
+                setLlmStatus(Lang.t("⚠️ Funkzelle konnte nicht erkannt werden", "⚠️ Could not recognize the cell site"), theme.hover);
+                llmRunButton.setDisable(false);
+            });
+            return;
+        }
+
+        ResultSet rs = inMemoryDB.execute(sql);
+        if (rs == null) {
+            Platform.runLater(() -> {
+                setLlmStatus(Lang.t("⚠️ Kein Ergebnis", "⚠️ No result"), theme.hover);
+                llmRunButton.setDisable(false);
+            });
+            return;
+        }
+
+        QueryRows qr = toResponseRecordsTable(rs);
+        rs.close();
+        if (showNoHitsIfEmpty(qr, sql)) return;   // Karte unveraendert lassen, "Keine Treffer" im Fenster
+
+        Platform.runLater(() -> {
+            setCoLocationTableVisible(false);
+            setRoamersTableVisible(false);
+            setWechslerTableVisible(false);
+            setData(qr.data, qr.headers);
+            setLlmStatus(
+                    qr.rowCount == 0
+                            ? Lang.t("⚠️ Keine ", "⚠️ No ") + directionLabel + Lang.t("an Funkzelle ", "at cell site ") + label + Lang.t(" im Zeitfenster gefunden", " found in the time window")
+                            : "✅ " + qr.rowCount + " " + directionLabel + Lang.t("an Funkzelle ", "at cell site ") + label,
                     qr.rowCount == 0 ? theme.hover : theme.accent2);
             llmRunButton.setDisable(false);
         });
@@ -825,12 +1098,12 @@ public class MapViewPane extends BorderPane {
      * rather than relying on the LLM's intent classification.
      */
     private void runCountryFilterQuery(String country, String startTime, String endTime) throws Exception {
-        Platform.runLater(() -> setLlmStatus("⚙️ Suche Rufnummern aus " + country + "…", theme.label));
+        Platform.runLater(() -> setLlmStatus(Lang.t("⚙️ Suche Rufnummern aus ", "⚙️ Searching phone numbers from ") + country + "…", theme.label));
 
         String sql = RAGPipeline.buildCountryFilterSql(country, startTime, endTime);
         if (sql == null) {
             Platform.runLater(() -> {
-                setLlmStatus("⚠️ Land \"" + country + "\" konnte keiner Vorwahl zugeordnet werden", theme.hover);
+                setLlmStatus(Lang.t("⚠️ Land \"" + country + "\" konnte keiner Vorwahl zugeordnet werden", "⚠️ Country \"" + country + "\" could not be matched to a calling code"), theme.hover);
                 llmRunButton.setDisable(false);
             });
             return;
@@ -839,7 +1112,7 @@ public class MapViewPane extends BorderPane {
         ResultSet rs = inMemoryDB.execute(sql);
         if (rs == null) {
             Platform.runLater(() -> {
-                setLlmStatus("⚠️ Kein Ergebnis", theme.hover);
+                setLlmStatus(Lang.t("⚠️ Kein Ergebnis", "⚠️ No result"), theme.hover);
                 llmRunButton.setDisable(false);
             });
             return;
@@ -847,6 +1120,7 @@ public class MapViewPane extends BorderPane {
 
         QueryRows qr = toResponseRecordsTable(rs);
         rs.close();
+        if (showNoHitsIfEmpty(qr, sql)) return;   // Karte unveraendert lassen, "Keine Treffer" im Fenster
 
         Platform.runLater(() -> {
             setCoLocationTableVisible(false);
@@ -855,8 +1129,8 @@ public class MapViewPane extends BorderPane {
             setData(qr.data, qr.headers);
             setLlmStatus(
                     qr.rowCount == 0
-                            ? "⚠️ Keine Rufnummern aus " + country + " im Zeitfenster gefunden"
-                            : "✅ " + qr.rowCount + " Datensatz/Datensätze aus " + country,
+                            ? Lang.t("⚠️ Keine Rufnummern aus ", "⚠️ No phone numbers from ") + country + Lang.t(" im Zeitfenster gefunden", " found in the time window")
+                            : "✅ " + qr.rowCount + " " + Lang.t("Datensatz/Datensätze aus ", "record(s) from ") + country,
                     qr.rowCount == 0 ? theme.hover : theme.accent2);
             llmRunButton.setDisable(false);
         });
@@ -879,14 +1153,14 @@ public class MapViewPane extends BorderPane {
      * their full path.</p>
      */
     private void runRoamersQuery(RAGPipeline.QueryIntent intent) throws Exception {
-        Platform.runLater(() -> setLlmStatus("⚙️ Suche Wanderer…", theme.label));
+        Platform.runLater(() -> setLlmStatus(Lang.t("⚙️ Suche Wanderer…", "⚙️ Searching roamers…"), theme.label));
 
         String sql = RAGPipeline.buildRoamersSql(intent.startTime, intent.endTime, intent.identifierColumn);
 
         ResultSet rs = inMemoryDB.execute(sql);
         if (rs == null) {
             Platform.runLater(() -> {
-                setLlmStatus("⚠️ Kein Ergebnis", theme.hover);
+                setLlmStatus(Lang.t("⚠️ Kein Ergebnis", "⚠️ No result"), theme.hover);
                 llmRunButton.setDisable(false);
             });
             return;
@@ -894,6 +1168,7 @@ public class MapViewPane extends BorderPane {
 
         QueryRows qr = toResponseRecordsTable(rs);
         rs.close();
+        if (showNoHitsIfEmpty(qr, sql)) return;   // Karte unveraendert lassen, "Keine Treffer" im Fenster
 
         String summarySql = PoliceAnalysisQueries.buildSql(
                 PoliceAnalysisQueries.AnalysisType.ROAMERS, intent.startTime, intent.endTime);
@@ -903,11 +1178,11 @@ public class MapViewPane extends BorderPane {
             while (summaryRs.next()) {
                 summaryRows.add(new RoamerRow(
                         summaryRs.getString("IMSI"),
-                        summaryRs.getString("Rufnummer"),
-                        summaryRs.getInt("Anzahl_Funkzellen"),
-                        summaryRs.getString("Funkzellen"),
-                        summaryRs.getString("Von"),
-                        summaryRs.getString("Bis")));
+                        summaryRs.getString(Lang.t("Rufnummer", "Phone_Number")),
+                        summaryRs.getInt(Lang.t("Anzahl_Funkzellen", "Cell_Site_Count")),
+                        summaryRs.getString(Lang.t("Funkzellen", "Cell_Sites")),
+                        summaryRs.getString(Lang.t("Von", "From_Time")),
+                        summaryRs.getString(Lang.t("Bis", "To_Time"))));
             }
             summaryRs.close();
         }
@@ -920,8 +1195,8 @@ public class MapViewPane extends BorderPane {
             setData(qr.data, qr.headers);
             setLlmStatus(
                     qr.rowCount == 0
-                            ? "⚠️ Keine Wanderer im Zeitfenster gefunden"
-                            : "✅ " + summaryRows.size() + " Wanderer (" + qr.rowCount + " Datensatz/Datensätze)",
+                            ? Lang.t("⚠️ Keine Wanderer im Zeitfenster gefunden", "⚠️ No roamers found in the time window")
+                            : "✅ " + summaryRows.size() + " " + Lang.t("Wanderer", "roamers") + " (" + qr.rowCount + " " + Lang.t("Datensatz/Datensätze", "record(s)") + ")",
                     qr.rowCount == 0 ? theme.hover : theme.accent2);
             llmRunButton.setDisable(false);
         });
@@ -944,14 +1219,14 @@ public class MapViewPane extends BorderPane {
      * {@link #runRoamersQuery} shows {@link #roamersTable}.</p>
      */
     private void runWechslerQuery(RAGPipeline.QueryIntent intent) throws Exception {
-        Platform.runLater(() -> setLlmStatus("⚙️ Suche Wechsler…", theme.label));
+        Platform.runLater(() -> setLlmStatus(Lang.t("⚙️ Suche Wechsler…", "⚙️ Searching swaps…"), theme.label));
 
         String sql = RAGPipeline.buildWechslerSql(intent.startTime, intent.endTime);
 
         ResultSet rs = inMemoryDB.execute(sql);
         if (rs == null) {
             Platform.runLater(() -> {
-                setLlmStatus("⚠️ Kein Ergebnis", theme.hover);
+                setLlmStatus(Lang.t("⚠️ Kein Ergebnis", "⚠️ No result"), theme.hover);
                 llmRunButton.setDisable(false);
             });
             return;
@@ -959,6 +1234,7 @@ public class MapViewPane extends BorderPane {
 
         QueryRows qr = toResponseRecordsTable(rs);
         rs.close();
+        if (showNoHitsIfEmpty(qr, sql)) return;   // Karte unveraendert lassen, "Keine Treffer" im Fenster
 
         String summarySql = PoliceAnalysisQueries.buildSql(
                 PoliceAnalysisQueries.AnalysisType.DEVICE_SIM_SWAP, intent.startTime, intent.endTime);
@@ -967,9 +1243,9 @@ public class MapViewPane extends BorderPane {
         if (summaryRs != null) {
             while (summaryRs.next()) {
                 summaryRows.add(new WechslerRow(
-                        summaryRs.getString("Wechseltyp"),
-                        summaryRs.getString("Kennung"),
-                        summaryRs.getInt("Anzahl_Wechsel"),
+                        summaryRs.getString(Lang.t("Wechseltyp", "Swap_Type")),
+                        summaryRs.getString(Lang.t("Kennung", "Identifier")),
+                        summaryRs.getInt(Lang.t("Anzahl_Wechsel", "Swap_Count")),
                         summaryRs.getString("Details")));
             }
             summaryRs.close();
@@ -983,8 +1259,8 @@ public class MapViewPane extends BorderPane {
             setData(qr.data, qr.headers);
             setLlmStatus(
                     qr.rowCount == 0
-                            ? "⚠️ Keine Wechsler im Zeitfenster gefunden"
-                            : "✅ " + summaryRows.size() + " Wechsler (" + qr.rowCount + " Datensatz/Datensätze)",
+                            ? Lang.t("⚠️ Keine Wechsler im Zeitfenster gefunden", "⚠️ No swaps found in the time window")
+                            : "✅ " + summaryRows.size() + " " + Lang.t("Wechsler", "swaps") + " (" + qr.rowCount + " " + Lang.t("Datensatz/Datensätze", "record(s)") + ")",
                     qr.rowCount == 0 ? theme.hover : theme.accent2);
             llmRunButton.setDisable(false);
         });
@@ -1025,6 +1301,44 @@ public class MapViewPane extends BorderPane {
         return new QueryRows(result, headers, rowCount);
     }
 
+    /**
+     * True, wenn eine Ergebnisspalte {@code start_time} sowie Breiten- und
+     * Laengengrad enthaelt — dieselbe Bedingung, unter der
+     * {@link DataAnalyzer} die Zeilen als response_records-Punkte auf Karte und
+     * Zeitleiste abbildet. Sonst (z. B. {@code COUNT(*)}, Kontaktlisten,
+     * Summen) wird das Ergebnis in einem {@link ResultPopup} gezeigt.
+     */
+    private static boolean isMapDisplayable(List<String> cols) {
+        if (cols == null || cols.isEmpty()) return false;
+        Set<String> lower = new HashSet<>();
+        for (String c : cols) if (c != null) lower.add(c.toLowerCase(Locale.ROOT));
+        boolean ts  = lower.contains("start_time");
+        boolean lat = lower.contains("latitude_dec") || lower.contains("latitude");
+        boolean lon = lower.contains("longitude_dec") || lower.contains("longitude");
+        return ts && lat && lon;
+    }
+
+    /** Zuletzt im LLM-Feld gestellte Frage (fuer das Ergebnisfenster). */
+    private volatile String lastLlmQuestion = "";
+
+    /**
+     * Zeigt bei 0 Treffern ein "Keine Treffer"-Fenster und laesst Karte und
+     * Zeitleiste unveraendert (statt sie zu leeren).
+     *
+     * @return {@code true}, wenn es keine Treffer gab und der Aufrufer abbrechen soll
+     */
+    private boolean showNoHitsIfEmpty(QueryRows qr, String sql) {
+        if (qr.rowCount > 0) return false;
+        List<String> cols = qr.headers.getOrDefault("response_records", List.of());
+        Platform.runLater(() -> {
+            ResultPopup.show(getScene() != null ? getScene().getWindow() : null, theme,
+                    lastLlmQuestion, sql, cols, List.of());
+            setLlmStatus(Lang.t("⚠️ Keine Treffer", "⚠️ No matches"), theme.hover);
+            llmRunButton.setDisable(false);
+        });
+        return true;
+    }
+
     /** Small holder returned by {@link #toResponseRecordsTable}. */
     private static final class QueryRows {
         final ConcurrentHashMap<String, ObservableList<ObservableList<String>>> data;
@@ -1047,12 +1361,12 @@ public class MapViewPane extends BorderPane {
      * of redrawing the map via {@link #setData}.
      */
     private void runColocationQuery(RAGPipeline.QueryIntent intent) throws Exception {
-        Platform.runLater(() -> setLlmStatus("⚙️ Suche gemeinsame Funkzellen…", theme.label));
+        Platform.runLater(() -> setLlmStatus(Lang.t("⚙️ Suche gemeinsame Funkzellen…", "⚙️ Searching shared cell sites…"), theme.label));
 
         String sql = RAGPipeline.buildColocationSql(intent.startTime, intent.endTime, intent.identifierColumn);
         if (sql == null) {
             Platform.runLater(() -> {
-                setLlmStatus("⚠️ Zeitraum konnte nicht erkannt werden", theme.hover);
+                setLlmStatus(Lang.t("⚠️ Zeitraum konnte nicht erkannt werden", "⚠️ Could not recognize the time range"), theme.hover);
                 llmRunButton.setDisable(false);
             });
             return;
@@ -1061,7 +1375,7 @@ public class MapViewPane extends BorderPane {
         ResultSet rs = inMemoryDB.execute(sql);
         if (rs == null) {
             Platform.runLater(() -> {
-                setLlmStatus("⚠️ Kein Ergebnis", theme.hover);
+                setLlmStatus(Lang.t("⚠️ Kein Ergebnis", "⚠️ No result"), theme.hover);
                 llmRunButton.setDisable(false);
             });
             return;
@@ -1120,7 +1434,7 @@ public class MapViewPane extends BorderPane {
         final QueryRows finalDetailRows = detailRows;
 
         Platform.runLater(() -> {
-            colCoLocationCount.setText("Anzahl " + intent.identifierLabel + "s");
+            colCoLocationCount.setText(Lang.t("Anzahl " + intent.identifierLabel + "s", intent.identifierLabel + " Count"));
             colCoLocationIds.setText(intent.identifierLabel + "s");
             coLocationTable.getItems().setAll(result);
             setCoLocationTableVisible(!result.isEmpty());
@@ -1129,10 +1443,14 @@ public class MapViewPane extends BorderPane {
             if (finalDetailRows != null) {
                 setData(finalDetailRows.data, finalDetailRows.headers);
             }
+            if (result.isEmpty()) {
+                ResultPopup.show(getScene() != null ? getScene().getWindow() : null, theme,
+                        lastLlmQuestion, sql, List.of(), List.of());
+            }
             setLlmStatus(
                     result.isEmpty()
-                            ? "⚠️ Keine gemeinsamen Funkzellen im Zeitfenster gefunden (" + intent.identifierLabel + ")"
-                            : "✅ " + result.size() + " Standort(e) mit gemeinsamer Anmeldung (" + intent.identifierLabel + ")",
+                            ? Lang.t("⚠️ Keine gemeinsamen Funkzellen im Zeitfenster gefunden (", "⚠️ No shared cell sites found in the time window (") + intent.identifierLabel + ")"
+                            : "✅ " + result.size() + " " + Lang.t("Standort(e) mit gemeinsamer Anmeldung (", "location(s) with shared registration (") + intent.identifierLabel + ")",
                     result.isEmpty() ? theme.hover : theme.accent2);
             llmRunButton.setDisable(false);
         });
@@ -1146,8 +1464,8 @@ public class MapViewPane extends BorderPane {
         setRoamersTableVisible(false);
         setWechslerTableVisible(false);
         if (baseResultList != null) {
-            setData(baseResultList, baseHeaders != null ? baseHeaders : Map.of());
-            setLlmStatus("↺ Alle Daten wiederhergestellt", theme.label);
+            setData(baseResultList, baseHeaders != null ? baseHeaders : Map.of(), true);
+            setLlmStatus(Lang.t("↺ Alle Daten wiederhergestellt", "↺ All data restored"), theme.label);
         }
     }
 
@@ -1175,25 +1493,27 @@ public class MapViewPane extends BorderPane {
     /** Builds the (initially empty/hidden) co-location results table. */
     private TableView<CoLocationGroup> buildCoLocationTable() {
         TableView<CoLocationGroup> table = new TableView<>();
-        table.setPlaceholder(new Label("Keine gemeinsamen Funkzellen gefunden."));
+        Label coLocationPlaceholder = new Label(Lang.t("Keine gemeinsamen Funkzellen gefunden.", "No shared cell sites found."));
+        table.setPlaceholder(coLocationPlaceholder);
+        Lang.addListener(() -> coLocationPlaceholder.setText(Lang.t("Keine gemeinsamen Funkzellen gefunden.", "No shared cell sites found.")));
 
-        TableColumn<CoLocationGroup, String> colPos = new TableColumn<>("Standort");
+        TableColumn<CoLocationGroup, String> colPos = new TableColumn<>(Lang.t("Standort", "Location"));
         colPos.setCellValueFactory(cd -> new ReadOnlyObjectWrapper<>(cd.getValue().position()));
         colPos.setPrefWidth(150);
 
-        TableColumn<CoLocationGroup, String> colCell = new TableColumn<>("Funkzelle (MCC-MNC-LAC/TAC-CI)");
+        TableColumn<CoLocationGroup, String> colCell = new TableColumn<>(Lang.t("Funkzelle (MCC-MNC-LAC/TAC-CI)", "Cell Site (MCC-MNC-LAC/TAC-CI)"));
         colCell.setCellValueFactory(cd -> new ReadOnlyObjectWrapper<>(cd.getValue().cellLabel()));
         colCell.setPrefWidth(190);
 
-        TableColumn<CoLocationGroup, String> colFrom = new TableColumn<>("Von");
+        TableColumn<CoLocationGroup, String> colFrom = new TableColumn<>(Lang.t("Von", "From"));
         colFrom.setCellValueFactory(cd -> new ReadOnlyObjectWrapper<>(cd.getValue().earliest));
         colFrom.setPrefWidth(150);
 
-        TableColumn<CoLocationGroup, String> colTo = new TableColumn<>("Bis");
+        TableColumn<CoLocationGroup, String> colTo = new TableColumn<>(Lang.t("Bis", "To"));
         colTo.setCellValueFactory(cd -> new ReadOnlyObjectWrapper<>(cd.getValue().latest));
         colTo.setPrefWidth(150);
 
-        colCoLocationCount = new TableColumn<>("Anzahl IMSIs");
+        colCoLocationCount = new TableColumn<>(Lang.t("Anzahl IMSIs", "IMSI Count"));
         colCoLocationCount.setCellValueFactory(cd -> new ReadOnlyObjectWrapper<>(cd.getValue().ids.size()));
         colCoLocationCount.setPrefWidth(100);
 
@@ -1202,6 +1522,12 @@ public class MapViewPane extends BorderPane {
 
         table.getColumns().addAll(List.of(colPos, colCell, colFrom, colTo, colCoLocationCount, colCoLocationIds));
         table.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY);
+        Lang.addListener(() -> {
+            colPos.setText(Lang.t("Standort", "Location"));
+            colCell.setText(Lang.t("Funkzelle (MCC-MNC-LAC/TAC-CI)", "Cell Site (MCC-MNC-LAC/TAC-CI)"));
+            colFrom.setText(Lang.t("Von", "From"));
+            colTo.setText(Lang.t("Bis", "To"));
+        });
 
         table.setRowFactory(tv -> {
             TableRow<CoLocationGroup> row = new TableRow<>();
@@ -1210,6 +1536,9 @@ public class MapViewPane extends BorderPane {
             });
             return row;
         });
+
+        // Copy selected cells to clipboard via context menu or Ctrl/Cmd+C.
+        TableClipboardSupport.install(table);
 
         return table;
     }
@@ -1269,33 +1598,42 @@ public class MapViewPane extends BorderPane {
     /** Builds the (initially empty/hidden) roamers results table. */
     private TableView<RoamerRow> buildRoamersTable() {
         TableView<RoamerRow> table = new TableView<>();
-        table.setPlaceholder(new Label("Keine Wanderer gefunden."));
+        Label roamersPlaceholder = new Label(Lang.t("Keine Wanderer gefunden.", "No roamers found."));
+        table.setPlaceholder(roamersPlaceholder);
+        Lang.addListener(() -> roamersPlaceholder.setText(Lang.t("Keine Wanderer gefunden.", "No roamers found.")));
 
         TableColumn<RoamerRow, String> colImsi = new TableColumn<>("IMSI");
         colImsi.setCellValueFactory(cd -> new ReadOnlyObjectWrapper<>(cd.getValue().imsi));
         colImsi.setPrefWidth(160);
 
-        TableColumn<RoamerRow, String> colMsisdn = new TableColumn<>("Rufnummer");
+        TableColumn<RoamerRow, String> colMsisdn = new TableColumn<>(Lang.t("Rufnummer", "Phone_Number"));
         colMsisdn.setCellValueFactory(cd -> new ReadOnlyObjectWrapper<>(cd.getValue().msisdn));
         colMsisdn.setPrefWidth(130);
 
-        TableColumn<RoamerRow, Number> colCount = new TableColumn<>("Anzahl Funkzellen");
+        TableColumn<RoamerRow, Number> colCount = new TableColumn<>(Lang.t("Anzahl Funkzellen", "Cell Site Count"));
         colCount.setCellValueFactory(cd -> new ReadOnlyObjectWrapper<>(cd.getValue().cellCount));
         colCount.setPrefWidth(120);
 
-        TableColumn<RoamerRow, String> colFrom = new TableColumn<>("Von");
+        TableColumn<RoamerRow, String> colFrom = new TableColumn<>(Lang.t("Von", "From"));
         colFrom.setCellValueFactory(cd -> new ReadOnlyObjectWrapper<>(cd.getValue().earliest));
         colFrom.setPrefWidth(150);
 
-        TableColumn<RoamerRow, String> colTo = new TableColumn<>("Bis");
+        TableColumn<RoamerRow, String> colTo = new TableColumn<>(Lang.t("Bis", "To"));
         colTo.setCellValueFactory(cd -> new ReadOnlyObjectWrapper<>(cd.getValue().latest));
         colTo.setPrefWidth(150);
 
-        TableColumn<RoamerRow, String> colSites = new TableColumn<>("Funkzellen");
+        TableColumn<RoamerRow, String> colSites = new TableColumn<>(Lang.t("Funkzellen", "Cell Sites"));
         colSites.setCellValueFactory(cd -> new ReadOnlyObjectWrapper<>(cd.getValue().sitesRaw));
 
         table.getColumns().addAll(List.of(colImsi, colMsisdn, colCount, colFrom, colTo, colSites));
         table.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY);
+        Lang.addListener(() -> {
+            colMsisdn.setText(Lang.t("Rufnummer", "Phone_Number"));
+            colCount.setText(Lang.t("Anzahl Funkzellen", "Cell Site Count"));
+            colFrom.setText(Lang.t("Von", "From"));
+            colTo.setText(Lang.t("Bis", "To"));
+            colSites.setText(Lang.t("Funkzellen", "Cell Sites"));
+        });
 
         table.setRowFactory(tv -> {
             TableRow<RoamerRow> row = new TableRow<>();
@@ -1311,6 +1649,9 @@ public class MapViewPane extends BorderPane {
             });
             return row;
         });
+
+        // Copy selected cells to clipboard via context menu or Ctrl/Cmd+C.
+        TableClipboardSupport.install(table);
 
         return table;
     }
@@ -1373,17 +1714,19 @@ public class MapViewPane extends BorderPane {
     /** Builds the (initially empty/hidden) Wechsler results table. */
     private TableView<WechslerRow> buildWechslerTable() {
         TableView<WechslerRow> table = new TableView<>();
-        table.setPlaceholder(new Label("Keine Wechsler gefunden."));
+        Label wechslerPlaceholder = new Label(Lang.t("Keine Wechsler gefunden.", "No swaps found."));
+        table.setPlaceholder(wechslerPlaceholder);
+        Lang.addListener(() -> wechslerPlaceholder.setText(Lang.t("Keine Wechsler gefunden.", "No swaps found.")));
 
-        TableColumn<WechslerRow, String> colType = new TableColumn<>("Wechseltyp");
+        TableColumn<WechslerRow, String> colType = new TableColumn<>(Lang.t("Wechseltyp", "Swap_Type"));
         colType.setCellValueFactory(cd -> new ReadOnlyObjectWrapper<>(cd.getValue().wechseltyp));
         colType.setPrefWidth(260);
 
-        TableColumn<WechslerRow, String> colKennung = new TableColumn<>("Kennung");
+        TableColumn<WechslerRow, String> colKennung = new TableColumn<>(Lang.t("Kennung", "Identifier"));
         colKennung.setCellValueFactory(cd -> new ReadOnlyObjectWrapper<>(cd.getValue().kennung));
         colKennung.setPrefWidth(160);
 
-        TableColumn<WechslerRow, Number> colCount = new TableColumn<>("Anzahl Wechsel");
+        TableColumn<WechslerRow, Number> colCount = new TableColumn<>(Lang.t("Anzahl Wechsel", "Swap_Count"));
         colCount.setCellValueFactory(cd -> new ReadOnlyObjectWrapper<>(cd.getValue().anzahlWechsel));
         colCount.setPrefWidth(110);
 
@@ -1392,6 +1735,11 @@ public class MapViewPane extends BorderPane {
 
         table.getColumns().addAll(List.of(colType, colKennung, colCount, colDetails));
         table.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY);
+        Lang.addListener(() -> {
+            colType.setText(Lang.t("Wechseltyp", "Swap_Type"));
+            colKennung.setText(Lang.t("Kennung", "Identifier"));
+            colCount.setText(Lang.t("Anzahl Wechsel", "Swap_Count"));
+        });
 
         // The summary query (PoliceAnalysisQueries.AnalysisType.DEVICE_SIM_SWAP)
         // has no lat/lon columns to centre the map on directly, so a row click
@@ -1411,6 +1759,9 @@ public class MapViewPane extends BorderPane {
             });
             return row;
         });
+
+        // Copy selected cells to clipboard via context menu or Ctrl/Cmd+C.
+        TableClipboardSupport.install(table);
 
         return table;
     }
@@ -1437,7 +1788,8 @@ public class MapViewPane extends BorderPane {
         }
 
         boolean isGeraeteWechsel() {
-            return wechseltyp != null && wechseltyp.startsWith("Geräte-Wechsel");
+            return wechseltyp != null
+                    && (wechseltyp.startsWith("Geräte-Wechsel") || wechseltyp.startsWith("Device swap"));
         }
 
         /** First comma-separated entry of {@link #details}, or {@code null} if empty. */
@@ -1460,7 +1812,15 @@ public class MapViewPane extends BorderPane {
     }
 
     private void onMapPointSelected(DataPoint dp) {
-        mapView.setData(currentMapPoints);
+        // NOTE: this used to call mapView.setData(currentMapPoints) here,
+        // which unconditionally re-fits the view to the whole dataset's
+        // bounding box (see MapView.setData -> fitView()) — since the
+        // dataset itself never actually changes on a marker click, that
+        // silently reset the user's current zoom/pan on every single click
+        // (reported as clicking a cell tower "jumping back out" of a zoomed-in
+        // view). highlightPoint() only marks dp as focused and repaints,
+        // leaving centerLat/centerLon/zoom untouched.
+        mapView.highlightPoint(dp);
         detailPane.show(dp, theme);
         timelineView.selectPoint(dp);
     }
@@ -1508,10 +1868,10 @@ public class MapViewPane extends BorderPane {
 
     private void onMbTilesButtonClicked() {
         FileChooser fc = new FileChooser();
-        fc.setTitle("MBTiles-Offline-Karte öffnen");
+        fc.setTitle(Lang.t("MBTiles-Offline-Karte öffnen", "Open MBTiles offline map"));
         fc.getExtensionFilters().addAll(
-                new ExtensionFilter("MBTiles-Dateien", "*.mbtiles"),
-                new ExtensionFilter("Alle Dateien",    "*.*"));
+                new ExtensionFilter(Lang.t("MBTiles-Dateien", "MBTiles files"), "*.mbtiles"),
+                new ExtensionFilter(Lang.t("Alle Dateien", "All files"),    "*.*"));
         File initial = lastMbTilesDir();
         if (initial != null) fc.setInitialDirectory(initial);
         File chosen = fc.showOpenDialog(getScene() != null ? getScene().getWindow() : null);
@@ -1526,11 +1886,11 @@ public class MapViewPane extends BorderPane {
         if (tc.isMbTilesLoaded()) {
             mbTilesStatus.setText("\u2705 " + tc.getMbTilesName());
             mbTilesStatus.setTextFill(theme.accent2);
-            mbTilesButton.setText("\uD83D\uDDFA\uFE0F Andere Karte\u2026");
+            mbTilesButton.setText(Lang.t("\uD83D\uDDFA\uFE0F Andere Karte\u2026", "\uD83D\uDDFA\uFE0F Other map\u2026"));
         } else {
             mbTilesStatus.setText("\u26AA offline");
             mbTilesStatus.setTextFill(theme.detailMuted);
-            mbTilesButton.setText("\uD83D\uDDFA\uFE0F Offline-Karte laden\u2026");
+            mbTilesButton.setText(Lang.t("\uD83D\uDDFA\uFE0F Offline-Karte laden\u2026", "\uD83D\uDDFA\uFE0F Load offline map\u2026"));
         }
     }
 
@@ -1608,7 +1968,8 @@ public class MapViewPane extends BorderPane {
             setContent(content);
             setMinSize(0, 0);
 
-            MenuItem copyCsv = new MenuItem("Copy as CSV");
+            MenuItem copyCsv = new MenuItem(Lang.t("Als CSV kopieren", "Copy as CSV"));
+            Lang.addListener(() -> copyCsv.setText(Lang.t("Als CSV kopieren", "Copy as CSV")));
             copyCsv.setOnAction(e -> copyAsCsv());
             ContextMenu menu = new ContextMenu(copyCsv);
             // Grey the item out instead of showing it when there's nothing
@@ -1681,7 +2042,7 @@ public class MapViewPane extends BorderPane {
             content.getChildren().clear();
             applyTheme(t);
             Label placeholder = new Label("\u2190 Select a dot\non the timeline\nor a map marker");
-            placeholder.setFont(Font.font("Monospace", 11));
+            placeholder.setFont(Font.font("Monospace", 14));
             placeholder.setTextFill(t.axis);
             placeholder.setAlignment(Pos.CENTER);
             content.getChildren().add(placeholder);
@@ -1741,7 +2102,7 @@ public class MapViewPane extends BorderPane {
 
         private void addSectionHeader(String title, Theme t) {
             Label h = new Label(title);
-            h.setFont(Font.font("Monospace", FontWeight.BOLD, 10));
+            h.setFont(Font.font("Monospace", FontWeight.BOLD, 13));
             h.setTextFill(t.accent1);
             h.setPadding(new Insets(4, 0, 2, 0));
             content.getChildren().add(h);
@@ -1769,12 +2130,12 @@ public class MapViewPane extends BorderPane {
 
         private void addRow(String key, String value, String valueHex, Theme t) {
             Label k = new Label(key);
-            k.setFont(Font.font("Monospace", FontWeight.BOLD, 10));
+            k.setFont(Font.font("Monospace", FontWeight.BOLD, 13));
             k.setTextFill(t.detailMuted);
             k.setPrefWidth(82);
 
             Label v = new Label(value);
-            v.setFont(Font.font("Monospace", 10));
+            v.setFont(Font.font("Monospace", 13));
             v.setTextFill(Color.web(valueHex));
             v.setWrapText(true);
             v.setMaxWidth(Double.MAX_VALUE);

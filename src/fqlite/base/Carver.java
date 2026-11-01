@@ -306,6 +306,13 @@ public class Carver{
 	@SuppressWarnings("unlikely-arg-type")
 	private void updateResultSet(LinkedList<String> line, LinkedList<byte[]> hex)
 	{
+		// called concurrently by all worker threads: the backing lists are plain (non thread-safe)
+		// ArrayLists and containsKey()/put() is a check-then-act race → lost rows / corrupt lists
+		synchronized (job.resultlist) { updateResultSet0(line, hex); }
+	}
+
+	private void updateResultSet0(LinkedList<String> line, LinkedList<byte[]> hex)
+	{
 		// entry for table name already exists
 		if (job.resultlist.containsKey(line.getFirst())) {
 			ObservableList<ObservableList<String>> tablelist = job.resultlist.get(line.getFirst());

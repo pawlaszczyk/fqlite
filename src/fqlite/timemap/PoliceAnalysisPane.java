@@ -51,6 +51,13 @@ import java.util.logging.Logger;
  * {@link InMemoryDatabase}. Results are shown in a generic table whose
  * columns are built dynamically from the query's {@link ResultSetMetaData},
  * the same approach used by {@code fqlite.sql.SQLParser#fillTable}.</p>
+ *
+ * <p>Every user-facing label/button/status text in this panel is bilingual
+ * (German/English) via {@link Lang#t}, following the same runtime
+ * "DE | EN" toggle used elsewhere in the Lighthouse window; a single
+ * {@link Lang#addListener} registered in the constructor re-applies all of
+ * them (plus the analysis combo box's display and the parameter-field
+ * labels) whenever the language is switched.</p>
  */
 public class PoliceAnalysisPane extends BorderPane {
 
@@ -59,29 +66,32 @@ public class PoliceAnalysisPane extends BorderPane {
     private static final Pattern TIMESTAMP_PATTERN =
             Pattern.compile("\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2}");
 
+    private final Label title = new Label();
+
     private final ComboBox<AnalysisType> typeBox = new ComboBox<>();
     private final Label descriptionLabel = new Label();
 
-    private final CheckBox timeFilterEnabled = new CheckBox("Zeitraum einschränken");
+    private final CheckBox timeFilterEnabled = new CheckBox();
     private final TextField fromField = new TextField();
     private final TextField toField   = new TextField();
 
     // Identifier/Gebiet-Eingabe — nur sichtbar/benötigt für Auswertungen mit
     // AnalysisType#requiresIdentifier bzw. #requiresArea, siehe
     // updateParamFieldsVisibility().
-    private final Label identifierLabel = new Label("Kennung (Rufnummer/IMSI/IMEI):");
+    private final Label identifierLabel = new Label();
     private final TextField identifierField = new TextField();
-    private final Label areaLabel = new Label("Gebiet (Breitengrad,Längengrad):");
+    private final Label areaLabel = new Label();
     private final TextField areaField = new TextField();
-    private final Label radiusLabel = new Label("Radius (m):");
+    private final Label radiusLabel = new Label();
     private final TextField radiusField = new TextField();
 
     /** Shows the (optional, online) HiCellTek device-info result for DEVICE_INFO_LOOKUP — hidden otherwise. */
     private final Label deviceInfoLabel = new Label();
 
-    private final Button runButton = new Button("▶ Ausführen");
+    private final Button runButton = new Button();
     private final TableView<ObservableList<String>> resultTable = new TableView<>();
-    private final Label statusLabel = new Label("⚪ Keine Datenbank verbunden");
+    private final Label resultTablePlaceholder = new Label();
+    private final Label statusLabel = new Label();
 
     private InMemoryDatabase inMemoryDB = null;
     private Theme theme = Theme.DARK;
@@ -119,8 +129,8 @@ public class PoliceAnalysisPane extends BorderPane {
 
     public PoliceAnalysisPane() {
 
-        Label title = new Label("🔎 Statistiken");
-        title.setFont(Font.font("Monospace", FontWeight.BOLD, 14));
+        title.setText(Lang.t("🔎 Statistiken", "🔎 Statistics"));
+        title.setFont(Font.font("Monospace", FontWeight.BOLD, 18));
 
         typeBox.getItems().addAll(AnalysisType.values());
         typeBox.getSelectionModel().selectFirst();
@@ -131,13 +141,14 @@ public class PoliceAnalysisPane extends BorderPane {
         });
 
         descriptionLabel.setWrapText(true);
-        descriptionLabel.setFont(Font.font("Monospace", 10));
+        descriptionLabel.setFont(Font.font("Monospace", 13));
         updateDescription();
 
-        fromField.setPromptText("JJJJ-MM-TT HH:MM:SS (von)");
-        toField.setPromptText("JJJJ-MM-TT HH:MM:SS (bis)");
-        fromField.setFont(Font.font("Monospace", 11));
-        toField.setFont(Font.font("Monospace", 11));
+        timeFilterEnabled.setText(Lang.t("Zeitraum einschränken", "Restrict time range"));
+        fromField.setPromptText(Lang.t("JJJJ-MM-TT HH:MM:SS (von)", "YYYY-MM-DD HH:MM:SS (from)"));
+        toField.setPromptText(Lang.t("JJJJ-MM-TT HH:MM:SS (bis)", "YYYY-MM-DD HH:MM:SS (to)"));
+        fromField.setFont(Font.font("Monospace", 14));
+        toField.setFont(Font.font("Monospace", 14));
         fromField.setDisable(true);
         toField.setDisable(true);
 
@@ -147,22 +158,25 @@ public class PoliceAnalysisPane extends BorderPane {
             toField.setDisable(!on);
         });
 
-        identifierField.setFont(Font.font("Monospace", 11));
-        areaField.setFont(Font.font("Monospace", 11));
+        identifierField.setFont(Font.font("Monospace", 14));
+        areaField.setFont(Font.font("Monospace", 14));
         areaField.setPromptText("52.5200,13.4050");
-        radiusField.setFont(Font.font("Monospace", 11));
+        radiusField.setFont(Font.font("Monospace", 14));
         radiusField.setPromptText("500");
         radiusField.setPrefWidth(70);
-        identifierLabel.setFont(Font.font("Monospace", 10));
-        areaLabel.setFont(Font.font("Monospace", 10));
-        radiusLabel.setFont(Font.font("Monospace", 10));
+        identifierLabel.setFont(Font.font("Monospace", 13));
+        areaLabel.setFont(Font.font("Monospace", 13));
+        radiusLabel.setFont(Font.font("Monospace", 13));
+        areaLabel.setText(Lang.t("Gebiet (Breitengrad,Längengrad):", "Area (latitude,longitude):"));
+        radiusLabel.setText(Lang.t("Radius (m):", "Radius (m):"));
 
         deviceInfoLabel.setWrapText(true);
-        deviceInfoLabel.setFont(Font.font("Monospace", 10));
+        deviceInfoLabel.setFont(Font.font("Monospace", 13));
         deviceInfoLabel.setManaged(false);
         deviceInfoLabel.setVisible(false);
 
-        runButton.setFont(Font.font("Monospace", FontWeight.BOLD, 11));
+        runButton.setText(Lang.t("▶ Ausführen", "▶ Run"));
+        runButton.setFont(Font.font("Monospace", FontWeight.BOLD, 14));
         runButton.setDisable(true);   // enabled by setDatabase()
         runButton.setOnAction(e -> runAnalysis());
 
@@ -184,23 +198,60 @@ public class PoliceAnalysisPane extends BorderPane {
         updateParamFieldsVisibility();
 
         resultTable.setColumnResizePolicy(TableView.UNCONSTRAINED_RESIZE_POLICY);
-        resultTable.setPlaceholder(new Label("Auswertungstyp wählen und auf \"Ausführen\" klicken."));
+        resultTablePlaceholder.setText(Lang.t(
+                "Auswertungstyp wählen und auf \"Ausführen\" klicken.",
+                "Select an analysis type and click \"Run\"."));
+        resultTable.setPlaceholder(resultTablePlaceholder);
+        // Copy selected cells to clipboard via context menu or Ctrl/Cmd+C —
+        // merged into the existing per-row menu below rather than a second,
+        // competing table-level one.
+        TableClipboardSupport.enableCellSelectionAndCopyShortcut(resultTable);
+
         resultTable.setRowFactory(tv -> {
             TableRow<ObservableList<String>> row = new TableRow<>();
-            MenuItem showOnMapItem = new MenuItem("📍 Auf Karte anzeigen");
+            MenuItem showOnMapItem = new MenuItem(Lang.t("📍 Auf Karte anzeigen", "📍 Show on map"));
+            Lang.addListener(() -> showOnMapItem.setText(Lang.t("📍 Auf Karte anzeigen", "📍 Show on map")));
             showOnMapItem.setOnAction(e -> showSelectedRowOnMap(row.getItem()));
-            ContextMenu rowMenu = new ContextMenu(showOnMapItem);
+            ContextMenu rowMenu = new ContextMenu(showOnMapItem, TableClipboardSupport.copyMenuItem(resultTable));
             row.contextMenuProperty().bind(
                     Bindings.when(row.emptyProperty()).then((ContextMenu) null).otherwise(rowMenu));
             return row;
         });
         setCenter(resultTable);
 
-        statusLabel.setFont(Font.font("Monospace", 10));
+        statusLabel.setText(Lang.t("⚪ Keine Datenbank verbunden", "⚪ No database connected"));
+        statusLabel.setFont(Font.font("Monospace", 13));
         statusLabel.setPadding(new Insets(6, 16, 8, 16));
         setBottom(statusLabel);
 
         applyTheme(theme);
+
+        // Re-applies every static label/button/placeholder above, plus the
+        // combo box's own display (AnalysisType#toString() reflects
+        // Lang.isGerman() dynamically, but the ComboBox skin only re-reads
+        // it when the item list itself changes) and the parameter-field
+        // labels/prompts (via updateParamFieldsVisibility(), which already
+        // branches on Lang.isGerman()) — so a language switch mid-session
+        // updates everything already on screen, not just newly created widgets.
+        Lang.addListener(() -> {
+            title.setText(Lang.t("🔎 Statistiken", "🔎 Statistics"));
+            timeFilterEnabled.setText(Lang.t("Zeitraum einschränken", "Restrict time range"));
+            fromField.setPromptText(Lang.t("JJJJ-MM-TT HH:MM:SS (von)", "YYYY-MM-DD HH:MM:SS (from)"));
+            toField.setPromptText(Lang.t("JJJJ-MM-TT HH:MM:SS (bis)", "YYYY-MM-DD HH:MM:SS (to)"));
+            areaLabel.setText(Lang.t("Gebiet (Breitengrad,Längengrad):", "Area (latitude,longitude):"));
+            radiusLabel.setText(Lang.t("Radius (m):", "Radius (m):"));
+            runButton.setText(Lang.t("▶ Ausführen", "▶ Run"));
+            resultTablePlaceholder.setText(Lang.t(
+                    "Auswertungstyp wählen und auf \"Ausführen\" klicken.",
+                    "Select an analysis type and click \"Run\"."));
+
+            AnalysisType selected = typeBox.getSelectionModel().getSelectedItem();
+            typeBox.setItems(FXCollections.observableArrayList(AnalysisType.values()));
+            typeBox.getSelectionModel().select(selected);
+
+            updateDescription();
+            updateParamFieldsVisibility();
+        });
     }
 
     /** Connects the in-memory database that backs the current case. Call this whenever the underlying data changes. */
@@ -208,7 +259,10 @@ public class PoliceAnalysisPane extends BorderPane {
         this.inMemoryDB = mdb;
         Platform.runLater(() -> {
             runButton.setDisable(mdb == null);
-            setStatus(mdb == null ? "⚪ Keine Datenbank verbunden" : "✅ Bereit", mdb == null ? theme.detailMuted : theme.accent2);
+            setStatus(mdb == null
+                    ? Lang.t("⚪ Keine Datenbank verbunden", "⚪ No database connected")
+                    : Lang.t("✅ Bereit", "✅ Ready"),
+                    mdb == null ? theme.detailMuted : theme.accent2);
         });
     }
 
@@ -244,7 +298,7 @@ public class PoliceAnalysisPane extends BorderPane {
 
     private void updateDescription() {
         AnalysisType type = typeBox.getSelectionModel().getSelectedItem();
-        descriptionLabel.setText(type != null ? type.description : "");
+        descriptionLabel.setText(type != null ? type.description() : "");
     }
 
     /**
@@ -282,10 +336,10 @@ public class PoliceAnalysisPane extends BorderPane {
         deviceInfoLabel.setText("");
 
         if (type == AnalysisType.FILTER_BY_COUNTRY) {
-            identifierLabel.setText("Landesvorwahl (z. B. 49):");
+            identifierLabel.setText(Lang.t("Landesvorwahl (z. B. 49):", "Country calling code (e.g. 49):"));
             identifierField.setPromptText("49");
         } else {
-            identifierLabel.setText("Kennung (Rufnummer/IMSI/IMEI):");
+            identifierLabel.setText(Lang.t("Kennung (Rufnummer/IMSI/IMEI):", "Identifier (phone number/IMSI/IMEI):"));
             identifierField.setPromptText("491701234567");
         }
     }
@@ -296,15 +350,17 @@ public class PoliceAnalysisPane extends BorderPane {
         deviceInfoLabel.setVisible(true);
         if (r.hasDeviceInfo()) {
             String sourceLabel = "lokal".equals(r.source)
-                    ? "lokale TAC-Datenbank"
-                    : "HiCellTek-Onlineabfrage, ungeprüfte Schnittstelle — siehe Javadoc von TacLookupService";
+                    ? Lang.t("lokale TAC-Datenbank", "local TAC database")
+                    : Lang.t(
+                        "HiCellTek-Onlineabfrage, ungeprüfte Schnittstelle — siehe Javadoc von TacLookupService",
+                        "HiCellTek online lookup, unverified interface — see TacLookupService's Javadoc");
             deviceInfoLabel.setText("📱 TAC " + r.tac + " (" + sourceLabel + "): "
-                    + "Hersteller=" + (r.brand != null ? r.brand : "?")
-                    + ", Modell=" + (r.model != null ? r.model : "?")
-                    + (r.chipsetFamily != null ? ", Chipsatz=" + r.chipsetFamily : ""));
+                    + Lang.t("Hersteller=", "Manufacturer=") + (r.brand != null ? r.brand : "?")
+                    + Lang.t(", Modell=", ", Model=") + (r.model != null ? r.model : "?")
+                    + (r.chipsetFamily != null ? Lang.t(", Chipsatz=", ", Chipset=") + r.chipsetFamily : ""));
             deviceInfoLabel.setTextFill(theme.accent2);
         } else {
-            deviceInfoLabel.setText("📱 Gerätelookup: " + r.error);
+            deviceInfoLabel.setText(Lang.t("📱 Gerätelookup: ", "📱 Device lookup: ") + r.error);
             deviceInfoLabel.setTextFill(theme.detailMuted);
         }
     }
@@ -333,7 +389,9 @@ public class PoliceAnalysisPane extends BorderPane {
             params.fromIso = fromField.getText().trim();
             params.toIso = toField.getText().trim();
             if (!TIMESTAMP_PATTERN.matcher(params.fromIso).matches() || !TIMESTAMP_PATTERN.matcher(params.toIso).matches()) {
-                setStatus("⚠️ Zeitraum bitte im Format JJJJ-MM-TT HH:MM:SS angeben", theme.hover);
+                setStatus(Lang.t(
+                        "⚠️ Zeitraum bitte im Format JJJJ-MM-TT HH:MM:SS angeben",
+                        "⚠️ Please enter the time range in the format YYYY-MM-DD HH:MM:SS"), theme.hover);
                 return;
             }
         }
@@ -341,7 +399,7 @@ public class PoliceAnalysisPane extends BorderPane {
         if (type.requiresIdentifier) {
             params.identifier = identifierField.getText().trim();
             if (params.identifier.isEmpty()) {
-                setStatus("⚠️ Bitte eine Kennung eingeben", theme.hover);
+                setStatus(Lang.t("⚠️ Bitte eine Kennung eingeben", "⚠️ Please enter an identifier"), theme.hover);
                 return;
             }
         }
@@ -349,7 +407,9 @@ public class PoliceAnalysisPane extends BorderPane {
         if (type.requiresArea) {
             params.areaCenter = areaField.getText().trim();
             if (params.areaCenter.isEmpty()) {
-                setStatus("⚠️ Bitte ein Gebiet (Breitengrad,Längengrad) eingeben", theme.hover);
+                setStatus(Lang.t(
+                        "⚠️ Bitte ein Gebiet (Breitengrad,Längengrad) eingeben",
+                        "⚠️ Please enter an area (latitude,longitude)"), theme.hover);
                 return;
             }
             String radiusText = radiusField.getText().trim();
@@ -357,7 +417,9 @@ public class PoliceAnalysisPane extends BorderPane {
                 try {
                     params.radiusMeters = Double.parseDouble(radiusText);
                 } catch (NumberFormatException ex) {
-                    setStatus("⚠️ Radius bitte als Zahl in Metern angeben", theme.hover);
+                    setStatus(Lang.t(
+                            "⚠️ Radius bitte als Zahl in Metern angeben",
+                            "⚠️ Please enter the radius as a number in meters"), theme.hover);
                     return;
                 }
             }
@@ -374,7 +436,7 @@ public class PoliceAnalysisPane extends BorderPane {
         final String lookupIdentifier = (type == AnalysisType.DEVICE_INFO_LOOKUP) ? params.identifier : null;
 
         runButton.setDisable(true);
-        setStatus("⏳ Führe Auswertung aus…", theme.label);
+        setStatus(Lang.t("⏳ Führe Auswertung aus…", "⏳ Running analysis…"), theme.label);
         deviceInfoLabel.setManaged(false);
         deviceInfoLabel.setVisible(false);
 
@@ -383,7 +445,7 @@ public class PoliceAnalysisPane extends BorderPane {
                 ResultSet rs = inMemoryDB.execute(sql);
                 if (rs == null) {
                     Platform.runLater(() -> {
-                        setStatus("⚠️ Kein Ergebnis", theme.hover);
+                        setStatus(Lang.t("⚠️ Kein Ergebnis", "⚠️ No result"), theme.hover);
                         runButton.setDisable(false);
                     });
                     return;
@@ -410,7 +472,7 @@ public class PoliceAnalysisPane extends BorderPane {
                 Platform.runLater(() -> {
                     fillResultTable(colNames, rows);
                     if (deviceInfo != null) showDeviceInfo(deviceInfo);
-                    setStatus("✅ " + rows.size() + " Zeile(n) | " + type.label, theme.accent2);
+                    setStatus("✅ " + rows.size() + " " + Lang.t("Zeile(n)", "row(s)") + " | " + type.label(), theme.accent2);
                     runButton.setDisable(false);
                 });
             } catch (Exception ex) {
@@ -444,14 +506,15 @@ public class PoliceAnalysisPane extends BorderPane {
 
     /**
      * Handles "Auf Karte anzeigen" for the right-clicked result row: looks up
-     * a "Funkzelle"-named column (the convention every coordinate-bearing
-     * {@link PoliceAnalysisQueries} template uses) and forwards a coordinate
-     * to {@link #mapCenterListener}. Two cell formats are supported:
+     * the shared cell-site column (see {@link PoliceAnalysisQueries#isCellSiteColumn})
+     * that every coordinate-bearing {@link PoliceAnalysisQueries} template
+     * uses, and forwards a coordinate to {@link #mapCenterListener}. Two
+     * cell formats are supported:
      * <ul>
      *   <li>a single site, {@code "<lat>, <lon>"} (most analyses); or</li>
      *   <li>several sites, {@code "<lat>|<lon>,<lat>|<lon>,..."} (e.g.
-     *       {@link PoliceAnalysisQueries.AnalysisType#ROAMERS}'s "Funkzellen"
-     *       column) — the first listed site is used.</li>
+     *       {@link PoliceAnalysisQueries.AnalysisType#ROAMERS}'s
+     *       "Funkzellen"/"Cell_Sites" column) — the first listed site is used.</li>
      * </ul>
      * Shows a status hint instead of failing silently if the current
      * analysis has no such column or the row has no coordinate.
@@ -461,26 +524,31 @@ public class PoliceAnalysisPane extends BorderPane {
 
         int idx = -1;
         for (int i = 0; i < currentColumnNames.size(); i++) {
-            if (currentColumnNames.get(i).startsWith("Funkzelle")) { idx = i; break; }
+            if (PoliceAnalysisQueries.isCellSiteColumn(currentColumnNames.get(i))) { idx = i; break; }
         }
         if (idx < 0 || idx >= rowData.size()) {
-            setStatus("⚠️ Diese Auswertung enthält keine Funkzellen-Koordinate", theme.hover);
+            setStatus(Lang.t(
+                    "⚠️ Diese Auswertung enthält keine Funkzellen-Koordinate",
+                    "⚠️ This analysis has no cell-site coordinate"), theme.hover);
             return;
         }
 
         String cell = rowData.get(idx);
         if (cell == null || cell.isBlank()) {
-            setStatus("⚠️ Keine Koordinate in dieser Zeile", theme.hover);
+            setStatus(Lang.t("⚠️ Keine Koordinate in dieser Zeile", "⚠️ No coordinate in this row"), theme.hover);
             return;
         }
 
-        // Multi-site cell (e.g. ROAMERS' "Funkzellen" list): take the first
-        // "<lat>|<lon>" entry before the first ',' that separates sites.
+        // Multi-site cell (e.g. ROAMERS' "Funkzellen"/"Cell_Sites" list):
+        // take the first "<lat>|<lon>" entry before the first ',' that
+        // separates sites.
         boolean multiSite = cell.indexOf('|') >= 0;
         String first = multiSite ? cell.split(",")[0] : cell;
         String[] parts = first.split(multiSite ? "\\|" : ",");
         if (parts.length != 2) {
-            setStatus("⚠️ Koordinate konnte nicht gelesen werden: " + cell, theme.hover);
+            setStatus(Lang.t(
+                    "⚠️ Koordinate konnte nicht gelesen werden: ",
+                    "⚠️ Could not read coordinate: ") + cell, theme.hover);
             return;
         }
         try {
@@ -488,7 +556,9 @@ public class PoliceAnalysisPane extends BorderPane {
             double lon = Double.parseDouble(parts[1].trim());
             mapCenterListener.accept(lat, lon);
             if (multiSite) {
-                setStatus("📍 Erste von mehreren Funkzellen angezeigt: " + first.replace("|", ", "), theme.accent2);
+                setStatus(Lang.t(
+                        "📍 Erste von mehreren Funkzellen angezeigt: ",
+                        "📍 Showing first of several cell sites: ") + first.replace("|", ", "), theme.accent2);
             }
 
             // If this analysis has an "IMSI" column, also select it in the
@@ -501,7 +571,9 @@ public class PoliceAnalysisPane extends BorderPane {
                 if (imsi != null && !imsi.isBlank()) imsiSelectListener.accept(imsi);
             }
         } catch (NumberFormatException ex) {
-            setStatus("⚠️ Koordinate konnte nicht gelesen werden: " + cell, theme.hover);
+            setStatus(Lang.t(
+                    "⚠️ Koordinate konnte nicht gelesen werden: ",
+                    "⚠️ Could not read coordinate: ") + cell, theme.hover);
         }
     }
 }

@@ -485,8 +485,8 @@ public class Auxiliary {
                 buffer.position(last);
 
                 ByteBuffer bf;
-                if (overflow > 0 && overflow < job.numberofpages) {
-                    byte[] extended = readOverflowIterativ(overflow - 1, false);
+                if (overflow > 0 && overflow < job.numberofpages && plausibleOverflow((long) pll - so)) {
+                    byte[] extended = readOverflowIterativ(overflow - 1, false, pll - so);
                     byte[] originalbuffer = copyBufferToArray(buffer);
                     byte[] c = new byte[pll + job.ps];
                     buffer.position(last);
@@ -869,15 +869,19 @@ public class Auxiliary {
 
             int overflow = buffer.getInt();
             if (overflow < 0) return null;
+            if (!plausibleOverflow((long) pll - so)) {
+                AppLog.debug("readRecord: implausible payload length " + pll + " — record skipped.");
+                return null;
+            }
             AppLog.debug("Regular overflow: " + overflow + " (" + Integer.toHexString(overflow) + ")");
 
             buffer.position(last);
 
             byte[] extended;
             if (filetype == Global.WAL_ARCHIVE_FILE) {
-                extended = readOverflowIterativ(overflow, true);
+                extended = readOverflowIterativ(overflow, true, pll - so);
             } else {
-                extended = readOverflowIterativ(overflow - 1, false);
+                extended = readOverflowIterativ(overflow - 1, false, pll - so);
             }
 
             byte[] originalbuffer = copyBufferToArray(buffer);
@@ -1438,7 +1442,28 @@ public class Auxiliary {
      * for very long overflow chains, and supports WAL-file overflow pages.
      */
     private byte[] readOverflowIterativ(int pagenumber, boolean fromWAL) {
+        return readOverflowIterativ(pagenumber, fromWAL, Integer.MAX_VALUE);
+    }
+
+    /**
+     * Returns true if an overflow payload of {@code overflowBytes} can physically fit into
+     * the database. Carved (deleted) records often carry garbage payload lengths; without
+     * this check a single bogus record could allocate gigabytes and walk the whole file.
+     */
+    private boolean plausibleOverflow(long overflowBytes) {
+        if (overflowBytes <= 0) return false;
+        long capacity = (long) job.numberofpages * (job.ps - 4);
+        return overflowBytes <= capacity && overflowBytes < Integer.MAX_VALUE - 2L * job.ps;
+    }
+
+    /**
+     * Reads an overflow chain, but stops as soon as {@code maxBytes} payload bytes have been
+     * collected. The chain length is thus bounded by ceil(maxBytes / (ps-4)) pages instead of
+     * following arbitrary (possibly reused or garbage) next-pointers through the whole file.
+     */
+    private byte[] readOverflowIterativ(int pagenumber, boolean fromWAL, int maxBytes) {
         List<ByteBuffer> parts   = new LinkedList<>();
+        long             collected = 0;
         Set<Integer>     visited = new HashSet<>();
         int              next    = pagenumber;
         int              saved   = -1;
@@ -1454,6 +1479,10 @@ public class Auxiliary {
 
             if (visited.contains(next)) {
                 AppLog.debug("readOverflowIterativ: cycle detected at page " + next + " — stopping.");
+                break;
+            }
+            if (!fromWAL && (next < 0 || next >= job.numberofpages)) {
+                AppLog.debug("readOverflowIterativ: page " + next + " out of range — stopping.");
                 break;
             }
 
@@ -1474,6 +1503,8 @@ public class Auxiliary {
             overflowpage.position(4);
             overflowpage.get(current, 0, job.ps - 4);
             parts.add(ByteBuffer.wrap(current));
+            collected += current.length;
+            if (collected >= maxBytes) break;
 
             boolean more = fromWAL ? (nextRaw > 0) : (next >= 0);
             if (!more) break;

@@ -86,11 +86,6 @@ Volume 57, 2026, 302100, ISSN 2666-2817,
 https://doi.org/10.1016/j.fsidi.2026.302100
 
 
-### Prerequisites
-
-In the latest version, the FQLite is bundled with a Java Runtime Environment (JRE) and all required libraries.
-
-> **Important note:** With version 2.0, the support for the command line mode was cancelled.
 
 ### NodeQL Implementation
 
@@ -101,11 +96,6 @@ In the latest version, the FQLite is bundled with a Java Runtime Environment (JR
 Version **5.1** updates the visual SQLite editor to follow the current
 [NodeQL](https://github.com/Kartoffelspalt/NodeQL) block shapes, colors and workflow.
 This is a JavaFX integration, not the standalone Flutter application.
-
-This fork's [5.1 release](https://github.com/Kartoffelspalt/fqlite-nodeql_integration/releases/tag/5.1)
-provides **source code only**, without prebuilt installers or a bundled JRE.
-Use JDK 21 and the [source launch instructions](#run-from-source) below.
-See the [release notes](docs/releases/5.1.md) for scope and verification.
 
 1. Open a SQLite database in FQLite and click the **NodeQL graph icon in the toolbar**.
    There is no separate NodeQL entry in the top menu bar.
@@ -152,33 +142,6 @@ See the [integration and usage guide](NODEQL_INTEGRATION_GUIDE.md),
 [verification notes](design-qa.md) and [5.1 changelog](CHANGELOG.md).
 The upstream FQLite PDF user manual is unchanged; this guide documents the
 NodeQL-specific workflow.
-
-### Run from source
-
-Use JDK 21 and the included Gradle wrapper. On macOS, `./run-fqlite.sh` locates
-a compatible JDK and starts the application. On other platforms, set
-`JAVA_HOME` to your JDK 21 installation and run:
-
-```sh
-./gradlew run
-```
-
-Compile and process resources without opening the GUI:
-
-```sh
-./gradlew compileJava processResources
-```
-
-Run the NodeQL integration smoke test on a graphical desktop:
-
-```sh
-./gradlew nodeQlSmokeTest
-```
-
-The test opens and closes a temporary editor, uses an in-memory sample database,
-and writes screenshots to `build/reports/nodeql/editor.png` and
-`build/reports/nodeql/editor-light.png`. It does not open
-or modify user databases or projects.
 
 # Installation
 ## macOS

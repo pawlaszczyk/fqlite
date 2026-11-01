@@ -237,15 +237,37 @@ public final class SequenceAnalyzer {
             return String.format("%02d:%02d:%02d", h, m, s);
         }
 
-        /** Short cell-identity label, e.g. "LAC 1234 / CI 56", or "–" if unknown. */
+        /**
+         * Short cell-identity label, e.g. "LAC 1234 / CI 56", or "–" if unknown.
+         *
+         * <p>Prefers {@link #cellInfo} (the LAC/CI decoded directly from
+         * THIS record's own {@code user_location_info} — exact and
+         * necessarily distinct whenever the underlying data is) over
+         * {@link #cellTower} (an external OpenCelliD/BeaconDB lookup used
+         * elsewhere for the tower's real-world antenna position/range).
+         * {@code cellTower} is only a best-effort match: when the exact
+         * (mcc,mnc,lac,cellId) isn't in the local CSV, {@code
+         * CellTowerResolver} falls back to the geographically NEAREST known
+         * tower of the same MNC (see {@code CellTowerResolver#resolveWithGps},
+         * level 4) — several genuinely different masts a few hundred metres
+         * apart can all resolve to that same single nearest CSV entry, which
+         * previously made every stop in a "Wanderer"/sequence path show an
+         * identical CellID here despite sitting at clearly different
+         * positions on the map (whose markers are placed by each record's
+         * own reported lat/lon, not by {@code cellTower}, and were therefore
+         * unaffected). {@code cellTower} is now only a fallback for records
+         * whose ULI couldn't be decoded at all.</p>
+         */
         public String cellLabel() {
+            if (cellInfo != null && (cellInfo.lac >= 0 || cellInfo.cellId >= 0)) {
+                String lacPart = cellInfo.lac >= 0 ? "LAC " + cellInfo.lac : "LAC –";
+                String ciPart  = cellInfo.cellId >= 0 ? " / CI " + cellInfo.cellId : "";
+                return lacPart + ciPart;
+            }
             if (cellTower != null) {
                 String op = cellTower.operatorName != null ? cellTower.operatorName + " " : "";
                 return op + "LAC/TAC " + cellTower.lac
                         + (cellTower.cellId >= 0 ? " / CI " + cellTower.cellId : "");
-            }
-            if (cellInfo != null) {
-                return "LAC " + cellInfo.lac + " / CI " + cellInfo.cellId;
             }
             return "–";
         }
@@ -261,9 +283,9 @@ public final class SequenceAnalyzer {
         public String callIndicatorLabel() {
             if (callIndicator == null) return null;
             return switch (callIndicator) {
-                case "SGP" -> "Session GPRS / Packetdaten";
-                case "MOM" -> "Mobile Originated Message (gesendete SMS)";
-                case "MTM" -> "Mobile Terminated Message (empfangene SMS)";
+                case "SGP" -> Lang.t("Session GPRS / Packetdaten", "Session GPRS / packet data");
+                case "MOM" -> Lang.t("Mobile Originated Message (gesendete SMS)", "Mobile Originated Message (sent SMS)");
+                case "MTM" -> Lang.t("Mobile Terminated Message (empfangene SMS)", "Mobile Terminated Message (received SMS)");
                 default    -> callIndicator;
             };
         }
@@ -272,8 +294,8 @@ public final class SequenceAnalyzer {
         public String callActionCodeLabel() {
             if (callActionCode == null) return null;
             return switch (callActionCode) {
-                case "1" -> "terminierend (eingehend)";
-                case "2" -> "originierend (ausgehend)";
+                case "1" -> Lang.t("terminierend (eingehend)", "terminating (incoming)");
+                case "2" -> Lang.t("originierend (ausgehend)", "originating (outgoing)");
                 default  -> callActionCode;
             };
         }
@@ -282,10 +304,10 @@ public final class SequenceAnalyzer {
         public String callSubtypeLabel() {
             if (callSubtype == null) return null;
             return switch (callSubtype) {
-                case "S" -> "Single Accounting Record (vollständiger Vorgang)";
-                case "F" -> "First Record (Sitzungsbeginn)";
-                case "I" -> "Interim Record (Zwischenintervall)";
-                case "L" -> "Last Record (Sitzungsende)";
+                case "S" -> Lang.t("Single Accounting Record (vollständiger Vorgang)", "Single Accounting Record (complete transaction)");
+                case "F" -> Lang.t("First Record (Sitzungsbeginn)", "First Record (session start)");
+                case "I" -> Lang.t("Interim Record (Zwischenintervall)", "Interim Record (interim interval)");
+                case "L" -> Lang.t("Last Record (Sitzungsende)", "Last Record (session end)");
                 default  -> callSubtype;
             };
         }

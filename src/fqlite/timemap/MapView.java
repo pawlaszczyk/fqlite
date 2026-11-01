@@ -22,6 +22,8 @@ import javafx.scene.control.TableColumn;
 import javafx.scene.control.TableView;
 import javafx.scene.control.Tooltip;
 import javafx.scene.image.Image;
+import javafx.scene.input.Clipboard;
+import javafx.scene.input.ClipboardContent;
 import javafx.scene.input.ContextMenuEvent;
 import javafx.scene.input.MouseEvent;
 import javafx.scene.input.ScrollEvent;
@@ -201,6 +203,15 @@ public class MapView extends BorderPane {
      * diamond used when no azimuth is available.</p>
      */
     private boolean dbCellLayerEnabled = false;
+
+    /**
+     * True once {@link #resolveCellTowers()} has been kicked off at least
+     * once (by either toggle button). Guards against re-triggering the
+     * async OpenCelliD/BeaconDB lookups every time the dataset cell-site
+     * layer ("Funkzellen (Datensatz)") is toggled off and on again, once a
+     * resolution pass is already running or done.
+     */
+    private boolean towerResolutionStarted = false;
 
     /** Deduplicated cell-site positions derived from {@link #geoPoints}. */
     private List<DbCellSite> dbCellSites = new ArrayList<>();
@@ -405,6 +416,19 @@ public class MapView extends BorderPane {
     private final Canvas    canvas;
     private final StackPane canvasWrapper;
     private final Label     statusLabel;
+
+    /**
+     * The two halves that make up {@link #statusLabel}'s text, kept apart so
+     * the tower-resolution suffix (see {@link #resolveCellTowers()}) can be
+     * replaced in place instead of appended on top of the previous one. This
+     * fixed a bug where toggling "Funkmasten" off/on repeatedly (each pass
+     * unconditionally re-runs {@code resolveCellTowers()}) — or that layer
+     * plus the "Funkzellen (Datensatz)" auto-trigger both firing — kept
+     * appending another "N Masten (…)" onto the status bar instead of
+     * replacing the previous count.
+     */
+    private String baseStatusText  = "";
+    private String towerStatusText = "";
     private final Label     titleLabel;
     private final HBox      header;
     private final HBox      seqBar;
@@ -436,32 +460,68 @@ public class MapView extends BorderPane {
     public MapView() {
 
         // ── Header ────────────────────────────────────────────────────────────
-        titleLabel = new Label("MAP");
-        titleLabel.setFont(Font.font("Monospace", FontWeight.BOLD, 13));
+        titleLabel = new Label(Lang.t("KARTE", "MAP"));
+        titleLabel.setFont(Font.font("Monospace", FontWeight.BOLD, 17));
         titleLabel.setPadding(new Insets(12, 16, 8, 16));
+        Lang.addListener(() -> titleLabel.setText(Lang.t("KARTE", "MAP")));
 
-        Label hint = new Label("Scroll \u2014 zoom  \u00b7  Drag \u2014 pan  \u00b7  Click marker \u2014 details");
-        hint.setFont(Font.font("Monospace", 11));
+        Label hint = new Label(Lang.t(
+                "Scrollen \u2014 zoomen  \u00b7  Ziehen \u2014 verschieben  \u00b7  Klick auf Marker \u2014 Details",
+                "Scroll \u2014 zoom  \u00b7  Drag \u2014 pan  \u00b7  Click marker \u2014 details"));
+        hint.setFont(Font.font("Monospace", 14));
+        Lang.addListener(() -> hint.setText(Lang.t(
+                "Scrollen \u2014 zoomen  \u00b7  Ziehen \u2014 verschieben  \u00b7  Klick auf Marker \u2014 Details",
+                "Scroll \u2014 zoom  \u00b7  Drag \u2014 pan  \u00b7  Click marker \u2014 details")));
 
         // Cell-tower toggle button (right side of header)
-        Button btnTower = new Button("\uD83D\uDCF6 Funkmasten");
-        btnTower.setFont(Font.font("Monospace", 10));
-        btnTower.setTooltip(new Tooltip(
+        Button btnTower = new Button(Lang.t("\uD83D\uDCF6 Funkmasten", "\uD83D\uDCF6 Cell Towers"));
+        btnTower.setFont(Font.font("Monospace", 13));
+        Tooltip btnTowerTooltip = new Tooltip(Lang.t(
                 "Funkzellmasten aus OpenCelliD einblenden.\n" +
                 "Erfordert einen API-Schlüssel (opencellid.org).\n" +
-                "Bereits aufgelöste Masten werden aus dem lokalen Cache geladen."));
+                "Bereits aufgelöste Masten werden aus dem lokalen Cache geladen.",
+                "Show cell towers from OpenCelliD.\n" +
+                "Requires an API key (opencellid.org).\n" +
+                "Already resolved towers are loaded from the local cache."));
+        btnTower.setTooltip(btnTowerTooltip);
+        Lang.addListener(() -> {
+            btnTower.setText(Lang.t("\uD83D\uDCF6 Funkmasten", "\uD83D\uDCF6 Cell Towers"));
+            btnTowerTooltip.setText(Lang.t(
+                    "Funkzellmasten aus OpenCelliD einblenden.\n" +
+                    "Erfordert einen API-Schlüssel (opencellid.org).\n" +
+                    "Bereits aufgelöste Masten werden aus dem lokalen Cache geladen.",
+                    "Show cell towers from OpenCelliD.\n" +
+                    "Requires an API key (opencellid.org).\n" +
+                    "Already resolved towers are loaded from the local cache."));
+        });
         btnTower.setOnAction(e -> toggleCellTowerLayer(btnTower));
 
         // Dataset cell-site toggle button — shows the unique tower positions
         // taken directly from the record's own geo columns (e.g. latitude_dec/
         // longitude_dec), as opposed to the ULI/OpenCelliD-resolved towers above.
-        Button btnDbCell = new Button("🗼 Funkzellen (Datensatz)");
-        btnDbCell.setFont(Font.font("Monospace", 10));
-        btnDbCell.setTooltip(new Tooltip(
+        Button btnDbCell = new Button(Lang.t("🗼 Funkzellen (Datensatz)", "🗼 Cell Sites (Record)"));
+        btnDbCell.setFont(Font.font("Monospace", 13));
+        Tooltip btnDbCellTooltip = new Tooltip(Lang.t(
                 "Zeigt die eindeutigen Funkzellen-Standorte, die direkt aus den\n" +
                 "Geo-Spalten des Datensatzes stammen (z. B. latitude_dec/longitude_dec).\n" +
                 "Diese Koordinaten bezeichnen die Position des Funkmasts, an dem der\n" +
-                "Teilnehmer angemeldet war — nicht die Position des Endgeräts."));
+                "Teilnehmer angemeldet war — nicht die Position des Endgeräts.",
+                "Shows the unique cell site locations taken directly from the\n" +
+                "record's own geo columns (e.g. latitude_dec/longitude_dec).\n" +
+                "These coordinates denote the position of the cell tower the\n" +
+                "subscriber was registered with — not the position of the device."));
+        btnDbCell.setTooltip(btnDbCellTooltip);
+        Lang.addListener(() -> {
+            btnDbCellTooltip.setText(Lang.t(
+                    "Zeigt die eindeutigen Funkzellen-Standorte, die direkt aus den\n" +
+                    "Geo-Spalten des Datensatzes stammen (z. B. latitude_dec/longitude_dec).\n" +
+                    "Diese Koordinaten bezeichnen die Position des Funkmasts, an dem der\n" +
+                    "Teilnehmer angemeldet war — nicht die Position des Endgeräts.",
+                    "Shows the unique cell site locations taken directly from the\n" +
+                    "record's own geo columns (e.g. latitude_dec/longitude_dec).\n" +
+                    "These coordinates denote the position of the cell tower the\n" +
+                    "subscriber was registered with — not the position of the device."));
+        });
         btnDbCell.setOnAction(e -> toggleDbCellLayer(btnDbCell));
 
         Region headerSpacer = new Region();
@@ -471,59 +531,107 @@ public class MapView extends BorderPane {
         header.setAlignment(Pos.CENTER_LEFT);
 
         // ── Sequenzanalyse-Leiste (IMSI-Auswahl) ─────────────────────────────
-        Label seqLabel = new Label("🧭 Sequenzanalyse (IMSI):");
-        seqLabel.setFont(Font.font("Monospace", 10));
+        Label seqLabel = new Label(Lang.t("🧭 Sequenzanalyse (IMSI):", "🧭 Sequence analysis (IMSI):"));
+        seqLabel.setFont(Font.font("Monospace", 13));
+        Lang.addListener(() -> seqLabel.setText(Lang.t("🧭 Sequenzanalyse (IMSI):", "🧭 Sequence analysis (IMSI):")));
 
         imsiCombo = new ComboBox<>();
-        imsiCombo.setPromptText("IMSI wählen …");
+        imsiCombo.setPromptText(Lang.t("IMSI wählen …", "Select IMSI …"));
         imsiCombo.setPrefWidth(220);
-        imsiCombo.setTooltip(new Tooltip(
+        Tooltip imsiComboTooltip = new Tooltip(Lang.t(
                 "Zeigt den zeitlichen Bewegungsverlauf der gewählten IMSI:\n" +
                 "verbindet die Funkzellen, an denen sie chronologisch angemeldet\n" +
                 "war, als nummerierten Pfad auf der Karte und listet sie unten\n" +
-                "als Tabelle auf."));
+                "als Tabelle auf.",
+                "Shows the chronological movement history of the selected IMSI:\n" +
+                "connects the cell sites it was registered with, in chronological\n" +
+                "order, as a numbered path on the map and lists them below as a\n" +
+                "table."));
+        imsiCombo.setTooltip(imsiComboTooltip);
         imsiCombo.setOnAction(e -> onImsiSelected(imsiCombo.getValue()));
+        Lang.addListener(() -> {
+            imsiCombo.setPromptText(Lang.t("IMSI wählen …", "Select IMSI …"));
+            imsiComboTooltip.setText(Lang.t(
+                    "Zeigt den zeitlichen Bewegungsverlauf der gewählten IMSI:\n" +
+                    "verbindet die Funkzellen, an denen sie chronologisch angemeldet\n" +
+                    "war, als nummerierten Pfad auf der Karte und listet sie unten\n" +
+                    "als Tabelle auf.",
+                    "Shows the chronological movement history of the selected IMSI:\n" +
+                    "connects the cell sites it was registered with, in chronological\n" +
+                    "order, as a numbered path on the map and lists them below as a\n" +
+                    "table."));
+        });
 
         seqStatusLabel = new Label("");
-        seqStatusLabel.setFont(Font.font("Monospace", 10));
+        seqStatusLabel.setFont(Font.font("Monospace", 13));
 
         seqBar = new HBox(10, seqLabel, imsiCombo, seqStatusLabel);
         seqBar.setAlignment(Pos.CENTER_LEFT);
         seqBar.setPadding(new Insets(0, 16, 8, 16));
 
         // ── Storyboard-Leiste (IMEI-Auswahl + Animation-Transport) ───────────
-        Label storyLabel = new Label("🎬 Storyboard (IMEI):");
-        storyLabel.setFont(Font.font("Monospace", 10));
+        Label storyLabel = new Label(Lang.t("🎬 Storyboard (IMEI):", "🎬 Storyboard (IMEI):"));
+        storyLabel.setFont(Font.font("Monospace", 13));
 
         imeiCombo = new ComboBox<>();
-        imeiCombo.setPromptText("IMEI wählen …");
+        imeiCombo.setPromptText(Lang.t("IMEI wählen …", "Select IMEI …"));
         imeiCombo.setPrefWidth(220);
-        imeiCombo.setTooltip(new Tooltip(
+        Tooltip imeiComboTooltip = new Tooltip(Lang.t(
                 "Animiert die einzelnen Aktivitäten (Sessions, SMS, Sprache, …)\n" +
                 "des gewählten Geräts (IMEI) in chronologischer Reihenfolge als\n" +
                 "bewegten Marker mit Spur auf der Karte. Nutzt dieselbe Pfad-\n" +
                 "Anzeige wie die IMSI-Sequenzanalyse links, aber ohne Zusammen-\n" +
                 "fassung gleicher Standorte, damit jede einzelne Aktivität\n" +
-                "sichtbar bleibt."));
+                "sichtbar bleibt.",
+                "Animates the individual activities (sessions, SMS, voice, …)\n" +
+                "of the selected device (IMEI) in chronological order as a\n" +
+                "moving marker with a trail on the map. Uses the same path\n" +
+                "display as the IMSI sequence analysis on the left, but without\n" +
+                "merging identical locations, so every single activity stays\n" +
+                "visible."));
+        imeiCombo.setTooltip(imeiComboTooltip);
         imeiCombo.setOnAction(e -> onImeiSelected(imeiCombo.getValue()));
+        Lang.addListener(() -> {
+            imeiCombo.setPromptText(Lang.t("IMEI wählen …", "Select IMEI …"));
+            imeiComboTooltip.setText(Lang.t(
+                    "Animiert die einzelnen Aktivitäten (Sessions, SMS, Sprache, …)\n" +
+                    "des gewählten Geräts (IMEI) in chronologischer Reihenfolge als\n" +
+                    "bewegten Marker mit Spur auf der Karte. Nutzt dieselbe Pfad-\n" +
+                    "Anzeige wie die IMSI-Sequenzanalyse links, aber ohne Zusammen-\n" +
+                    "fassung gleicher Standorte, damit jede einzelne Aktivität\n" +
+                    "sichtbar bleibt.",
+                    "Animates the individual activities (sessions, SMS, voice, …)\n" +
+                    "of the selected device (IMEI) in chronological order as a\n" +
+                    "moving marker with a trail on the map. Uses the same path\n" +
+                    "display as the IMSI sequence analysis on the left, but without\n" +
+                    "merging identical locations, so every single activity stays\n" +
+                    "visible."));
+        });
 
         btnStoryPlay = new Button("▶"); // ▶
-        btnStoryPlay.setFont(Font.font("Monospace", FontWeight.BOLD, 11));
+        btnStoryPlay.setFont(Font.font("Monospace", FontWeight.BOLD, 14));
         btnStoryPlay.setDisable(true);
-        btnStoryPlay.setTooltip(new Tooltip("Animation abspielen / pausieren"));
+        Tooltip btnStoryPlayTooltip = new Tooltip(Lang.t("Animation abspielen / pausieren", "Play / pause animation"));
+        btnStoryPlay.setTooltip(btnStoryPlayTooltip);
+        Lang.addListener(() -> btnStoryPlayTooltip.setText(Lang.t("Animation abspielen / pausieren", "Play / pause animation")));
         btnStoryPlay.setOnAction(e -> toggleStoryPlayback());
 
-        Label speedLabel = new Label("Tempo:");
-        speedLabel.setFont(Font.font("Monospace", 10));
+        Label speedLabel = new Label(Lang.t("Tempo:", "Speed:"));
+        speedLabel.setFont(Font.font("Monospace", 13));
+        Lang.addListener(() -> speedLabel.setText(Lang.t("Tempo:", "Speed:")));
         storySpeedSlider = new Slider(0.25, 4.0, 1.0);
         storySpeedSlider.setPrefWidth(90);
         storySpeedSlider.setDisable(true);
-        storySpeedSlider.setTooltip(new Tooltip("Animationsgeschwindigkeit (0.25× – 4×)"));
+        Tooltip storySpeedTooltip = new Tooltip(Lang.t("Animationsgeschwindigkeit (0.25× – 4×)", "Animation speed (0.25× – 4×)"));
+        storySpeedSlider.setTooltip(storySpeedTooltip);
+        Lang.addListener(() -> storySpeedTooltip.setText(Lang.t("Animationsgeschwindigkeit (0.25× – 4×)", "Animation speed (0.25× – 4×)")));
 
         storyScrubber = new Slider(0, 1, 0);
         storyScrubber.setPrefWidth(220);
         storyScrubber.setDisable(true);
-        storyScrubber.setTooltip(new Tooltip("Zeitleiste — zu einer Aktivität springen"));
+        Tooltip storyScrubberTooltip = new Tooltip(Lang.t("Zeitleiste — zu einer Aktivität springen", "Timeline — jump to an activity"));
+        storyScrubber.setTooltip(storyScrubberTooltip);
+        Lang.addListener(() -> storyScrubberTooltip.setText(Lang.t("Zeitleiste — zu einer Aktivität springen", "Timeline — jump to an activity")));
         // Only react to value changes the USER caused by dragging the
         // scrubber; our own animation tick / reset also moves this slider
         // (see setStoryPos()) and must not re-trigger a seek.
@@ -532,7 +640,7 @@ public class MapView extends BorderPane {
         });
 
         storyPosLabel = new Label("");
-        storyPosLabel.setFont(Font.font("Monospace", 10));
+        storyPosLabel.setFont(Font.font("Monospace", 13));
 
         storyBar = new HBox(10, storyLabel, imeiCombo, btnStoryPlay, speedLabel, storySpeedSlider, storyScrubber, storyPosLabel);
         storyBar.setAlignment(Pos.CENTER_LEFT);
@@ -560,9 +668,9 @@ public class MapView extends BorderPane {
         btnZoomOut = makeZoomButton("\u2212"); // minus sign
 
         zoomLabel = new Label("Z" + zoom);
-        zoomLabel.setFont(Font.font("Monospace", FontWeight.BOLD, 11));
+        zoomLabel.setFont(Font.font("Monospace", FontWeight.BOLD, 14));
         zoomLabel.setAlignment(Pos.CENTER);
-        zoomLabel.setPrefWidth(36);
+        zoomLabel.setPrefWidth(44); // matches the 44×44 zoom buttons (see makeZoomButton)
 
         zoomControl = new VBox(0, btnZoomIn, zoomLabel, btnZoomOut);
         zoomControl.setAlignment(Pos.CENTER);
@@ -599,7 +707,7 @@ public class MapView extends BorderPane {
 
         // ── Status bar ────────────────────────────────────────────────────────
         statusLabel = new Label("No geo data loaded.");
-        statusLabel.setFont(Font.font("Monospace", 11));
+        statusLabel.setFont(Font.font("Monospace", 14));
         statusLabel.setPadding(new Insets(6, 16, 6, 16));
         setBottom(statusLabel);
 
@@ -612,14 +720,30 @@ public class MapView extends BorderPane {
 
     /** Loads data and re-centres the view to fit all geo-tagged points. */
     public void setData(List<DataPoint> allPoints) {
+        setData(allPoints, false);
+    }
+
+    /**
+     * @param clearSequenceSelection when {@code true}, forces the IMSI/IMEI
+     *        sequence-analysis selectors back to "no selection" instead of
+     *        restoring whatever was selected before this call — used by the
+     *        LLM bar's "Reset" button so it actually returns the window to
+     *        its initial state. The normal {@link #setData(List)} passes
+     *        {@code false}, which restores the previous selection when it's
+     *        still present in the new dataset (e.g. when an LLM query
+     *        narrows the same underlying data further).
+     */
+    public void setData(List<DataPoint> allPoints, boolean clearSequenceSelection) {
         geoPoints = allPoints.stream()
                 .filter(p -> p.getCoordinate() != null)
                 .toList();
 
         long withTs = geoPoints.stream().filter(p -> p.getTimestamp() != null).count();
-        statusLabel.setText(String.format(
+        baseStatusText = String.format(
                 "%d geo points  |  %d with timestamp  |  %d total",
-                geoPoints.size(), withTs, allPoints.size()));
+                geoPoints.size(), withTs, allPoints.size());
+        towerStatusText = "";
+        updateStatusLabel();
 
         cellTowers.clear();
         focusedPoint = null;
@@ -635,10 +759,12 @@ public class MapView extends BorderPane {
         // Repopulate the IMSI/IMEI selectors for the sequence-analysis and
         // storyboard layers and clear any sequence built from the previous
         // dataset.
-        String previousImsiSelection = imsiCombo.getValue();
-        String previousImeiSelection = imeiCombo.getValue();
-        imsiCombo.getItems().setAll(SequenceAnalyzer.listImsis(allPoints));
-        imeiCombo.getItems().setAll(SequenceAnalyzer.listImeis(allPoints));
+        String previousImsiSelection = clearSequenceSelection ? null : imsiCombo.getValue();
+        String previousImeiSelection = clearSequenceSelection ? null : imeiCombo.getValue();
+        imsiCombo.getItems().setAll(noSelectionItem());
+        imsiCombo.getItems().addAll(SequenceAnalyzer.listImsis(allPoints));
+        imeiCombo.getItems().setAll(noSelectionItem());
+        imeiCombo.getItems().addAll(SequenceAnalyzer.listImeis(allPoints));
         clearSequenceOverlay();
         if (previousImsiSelection != null && imsiCombo.getItems().contains(previousImsiSelection)) {
             imsiCombo.setValue(previousImsiSelection);
@@ -681,6 +807,30 @@ public class MapView extends BorderPane {
         if (dp == null || dp.getCoordinate() == null) return;
         focusedPoint = dp;
         centerOn(dp.getCoordinate().getLatitude(), dp.getCoordinate().getLongitude());
+    }
+
+    /**
+     * Marks {@code dp} as the focused/highlighted point (extra ring) and
+     * repaints, WITHOUT touching {@code centerLat}/{@code centerLon}/
+     * {@code zoom}. Called when the point was selected directly on THIS map
+     * (a marker/cell-tower click) — unlike {@link #focusPoint}, which is for
+     * jumping here from another view (e.g. the timeline) and deliberately
+     * recentres/zooms in, the current pan/zoom must be left exactly as the
+     * user set it.
+     *
+     * <p>Previously, a marker click went through {@link #setData}, which
+     * unconditionally calls {@link #fitView()} — recentring on and zooming
+     * to fit the *entire* dataset's bounding box. Since a marker click never
+     * actually changes the dataset, that reset the user's zoom/pan on every
+     * single click, which is exactly the "jumps back out" behaviour this
+     * method avoids.</p>
+     *
+     * @param dp the data point to highlight, or {@code null} to clear
+     *           the highlight
+     */
+    public void highlightPoint(DataPoint dp) {
+        focusedPoint = dp;
+        render();
     }
 
     /**
@@ -740,7 +890,7 @@ public class MapView extends BorderPane {
         styleZoomControl(t);
 
         tooltip.setStyle(
-                "-fx-font-family: monospace; -fx-font-size: 11px;" +
+                "-fx-font-family: monospace; -fx-font-size: 14px;" +
                 "-fx-background-color: " + Theme.hex(t.bgAlt) + ";" +
                 "-fx-text-fill: "        + Theme.hex(t.labelStrong) + ";" +
                 "-fx-border-color: "     + Theme.hex(t.border) + "; -fx-border-width: 1;");
@@ -901,7 +1051,7 @@ public class MapView extends BorderPane {
 
     private void drawAttribution(GraphicsContext gc, double W, double H) {
         String text = "\u00a9 OpenStreetMap contributors";
-        gc.setFont(Font.font("Monospace", 9));
+        gc.setFont(Font.font("Monospace", 12));
         double tw = text.length() * 5.4;
         gc.setFill(Color.rgb(255, 255, 255, 0.72));
         gc.fillRect(W - tw - 8, H - 15, tw + 6, 14);
@@ -942,7 +1092,7 @@ public class MapView extends BorderPane {
 
         // ── 3. Project cached cluster centroids to the current pan offset
         // and draw ──────────────────────────────────────────────────────────
-        gc.setFont(Font.font("Monospace", FontWeight.BOLD, 9));
+        gc.setFont(Font.font("Monospace", FontWeight.BOLD, 12));
 
         for (int ci = 0; ci < clusters.size(); ci++) {
             MarkerCluster c = clusters.get(ci);
@@ -1139,18 +1289,38 @@ public class MapView extends BorderPane {
     }
 
     /**
-     * Toggles the dataset cell-site layer on/off. Unlike the ULI-resolved
-     * {@link #cellTowers} layer, this needs no async lookup — the positions
-     * already exist in {@link #geoPoints} — so it can be rebuilt synchronously.
+     * Toggles the dataset cell-site layer on/off. The sector <em>positions</em>
+     * need no async lookup — unlike {@link #cellTowers}, they already exist in
+     * {@link #geoPoints} — so {@link #rebuildDbCellSites()} runs synchronously
+     * and the schematic placeholder wedges appear immediately. The per-site
+     * <em>range estimate</em> is different: it is only known once the same
+     * external {@link #resolveCellTowers()} lookup the "Funkmasten" button
+     * uses has resolved each record's {@link CellTower}, so enabling this
+     * layer also kicks that resolution off (once) if nobody has already —
+     * otherwise every wedge would keep the identical schematic length forever.
      */
     private void toggleDbCellLayer(Button btn) {
         dbCellLayerEnabled = !dbCellLayerEnabled;
         if (dbCellLayerEnabled) {
-            btn.setText("🗼 Funkzellen (Datensatz) ✓");
+            btn.setText(Lang.t("🗼 Funkzellen (Datensatz) ✓", "🗼 Cell Sites (Record) ✓"));
             btn.setStyle("-fx-text-fill: #22c55e;");
+            // Show the schematic placeholder wedges immediately so the layer
+            // isn't empty while resolution runs …
             rebuildDbCellSites();
+            // … then kick off the same external range lookup the "Funkmasten"
+            // button uses, if nobody has done so yet. Without this, opening
+            // this layer without ever having opened "Funkmasten" first leaves
+            // every ResponseRecordDataPoint.getCellTower() null forever, so
+            // rebuildDbCellSites() never finds a real rangeMetres and every
+            // sector wedge silently keeps the same fixed schematic length —
+            // exactly the "same estimated distance for every cell" symptom.
+            // resolveCellTowers() itself rebuilds dbCellSites again once the
+            // async lookups complete (see its allOf(...).thenRun(...)).
+            if (!towerResolutionStarted) {
+                resolveCellTowers();
+            }
         } else {
-            btn.setText("🗼 Funkzellen (Datensatz)");
+            btn.setText(Lang.t("🗼 Funkzellen (Datensatz)", "🗼 Cell Sites (Record)"));
             btn.setStyle("");
             dbCellSites.clear();
             dbCellScreenX = new double[0];
@@ -1388,7 +1558,7 @@ public class MapView extends BorderPane {
             // when it's actually informative (several records, or hovering).
             {
                 String text = (hovered || count > 1) ? label + " (" + count + ")" : label;
-                gc.setFont(Font.font("Monospace", FontWeight.BOLD, 9));
+                gc.setFont(Font.font("Monospace", FontWeight.BOLD, 12));
                 gc.setFill(c);
                 double tw = text.length() * 5.5;
                 double lx = cx + Math.sin(az) * (len + 10);
@@ -1407,7 +1577,7 @@ public class MapView extends BorderPane {
 
         {
             String text = (hovered || count > 1) ? label + " (" + count + ")" : label;
-            gc.setFont(Font.font("Monospace", FontWeight.BOLD, 9));
+            gc.setFont(Font.font("Monospace", FontWeight.BOLD, 12));
             gc.setFill(c);
             double tw = text.length() * 5.5;
             gc.fillText(text, cx - tw / 2.0, cy - r - 4);
@@ -1419,12 +1589,29 @@ public class MapView extends BorderPane {
     // -------------------------------------------------------------------------
 
     /**
+     * Text of the extra first entry added to {@link #imsiCombo}/
+     * {@link #imeiCombo} so the sequence-analysis selectors can be cleared
+     * from the dropdown itself, not just via the LLM bar's "Reset" button.
+     * Recomputed on every call (rather than cached) so it always reflects
+     * the current {@link Lang} setting.
+     */
+    private static String noSelectionItem() {
+        return Lang.t("\u2014 Keine Auswahl \u2014", "\u2014 No selection \u2014");
+    }
+
+    /** True if {@code value} is the "no selection" placeholder item, in either language. */
+    private static boolean isNoSelectionItem(String value) {
+        return "\u2014 Keine Auswahl \u2014".equals(value) || "\u2014 No selection \u2014".equals(value);
+    }
+
+    /**
      * Called when the user picks an IMSI from {@link #imsiCombo} (or clears
      * the selection). Rebuilds {@link #sequenceStops} via
      * {@link SequenceAnalyzer#buildSequence}, updates the result table and
      * repaints the path overlay.
      */
     private void onImsiSelected(String imsi) {
+        if (isNoSelectionItem(imsi)) imsi = null;
         // IMSI and IMEI overlays are now independent — no mutual exclusion.
         if (imsi == null || imsi.isBlank()) {
             imsiStops = new ArrayList<>();
@@ -1443,11 +1630,11 @@ public class MapView extends BorderPane {
         updateSequenceTable();
 
         if (imsiStops.isEmpty()) {
-            seqStatusLabel.setText("⚠ keine Geo-Datensätze für diese IMSI");
+            seqStatusLabel.setText(Lang.t("⚠ keine Geo-Datensätze für diese IMSI", "⚠ no geo records for this IMSI"));
         } else if (imsiStops.size() == 1) {
-            seqStatusLabel.setText("nur 1 Standort — keine Bewegung erkennbar");
+            seqStatusLabel.setText(Lang.t("nur 1 Standort — keine Bewegung erkennbar", "only 1 location — no movement detectable"));
         } else {
-            seqStatusLabel.setText(imsiStops.size() + " Standorte chronologisch");
+            seqStatusLabel.setText(imsiStops.size() + " " + Lang.t("Standorte chronologisch", "locations chronologically"));
         }
 
         fitViewToSequence();
@@ -1462,6 +1649,7 @@ public class MapView extends BorderPane {
      * storyboard's Play/Pause button, speed slider and timeline scrubber.
      */
     private void onImeiSelected(String imei) {
+        if (isNoSelectionItem(imei)) imei = null;
         // IMSI overlay is independent — keep it active alongside the IMEI storyboard.
         if (imei == null || imei.isBlank()) {
             clearImeiOverlay();
@@ -1473,11 +1661,11 @@ public class MapView extends BorderPane {
         updateSequenceTable();
 
         if (sequenceStops.isEmpty()) {
-            seqStatusLabel.setText("⚠ keine Geo-Datensätze für diese IMEI");
+            seqStatusLabel.setText(Lang.t("⚠ keine Geo-Datensätze für diese IMEI", "⚠ no geo records for this IMEI"));
         } else if (sequenceStops.size() == 1) {
-            seqStatusLabel.setText("nur 1 Aktivität — keine Animation möglich");
+            seqStatusLabel.setText(Lang.t("nur 1 Aktivität — keine Animation möglich", "only 1 activity — no animation possible"));
         } else {
-            seqStatusLabel.setText(sequenceStops.size() + " Aktivitäten chronologisch");
+            seqStatusLabel.setText(sequenceStops.size() + " " + Lang.t("Aktivitäten chronologisch", "activities chronologically"));
         }
 
         resetStoryboardPlayback();
@@ -1671,7 +1859,7 @@ public class MapView extends BorderPane {
             return;
         }
         int idx = Math.min(sequenceStops.size() - 1, (int) Math.round(storyPos)) + 1;
-        storyPosLabel.setText("Aktivität " + idx + " / " + sequenceStops.size());
+        storyPosLabel.setText(Lang.t("Aktivität ", "Activity ") + idx + " / " + sequenceStops.size());
     }
 
     /** Shows/hides the sequence-result table beneath the map. */
@@ -1684,54 +1872,65 @@ public class MapView extends BorderPane {
     /** Builds the (initially empty/hidden) sequence-result table. */
     private TableView<SequenceAnalyzer.Stop> buildSequenceTable() {
         TableView<SequenceAnalyzer.Stop> table = new TableView<>();
-        table.setPlaceholder(new Label("Keine Sequenz ausgewählt."));
+        Label sequencePlaceholder = new Label(Lang.t("Keine Sequenz ausgewählt.", "No sequence selected."));
+        table.setPlaceholder(sequencePlaceholder);
+        Lang.addListener(() -> sequencePlaceholder.setText(Lang.t("Keine Sequenz ausgewählt.", "No sequence selected.")));
 
         TableColumn<SequenceAnalyzer.Stop, Integer> colIdx = new TableColumn<>("#");
         colIdx.setCellValueFactory(cd -> new ReadOnlyObjectWrapper<>(
                 table.getItems().indexOf(cd.getValue()) + 1));
         colIdx.setPrefWidth(36);
 
-        TableColumn<SequenceAnalyzer.Stop, String> colFrom = new TableColumn<>("Von");
+        TableColumn<SequenceAnalyzer.Stop, String> colFrom = new TableColumn<>(Lang.t("Von", "From"));
         colFrom.setCellValueFactory(cd -> new ReadOnlyObjectWrapper<>(cd.getValue().formattedFirstSeen()));
         colFrom.setPrefWidth(150);
 
-        TableColumn<SequenceAnalyzer.Stop, String> colTo = new TableColumn<>("Bis");
+        TableColumn<SequenceAnalyzer.Stop, String> colTo = new TableColumn<>(Lang.t("Bis", "To"));
         colTo.setCellValueFactory(cd -> new ReadOnlyObjectWrapper<>(cd.getValue().formattedLastSeen()));
         colTo.setPrefWidth(150);
 
-        TableColumn<SequenceAnalyzer.Stop, String> colDwell = new TableColumn<>("Verweildauer");
+        TableColumn<SequenceAnalyzer.Stop, String> colDwell = new TableColumn<>(Lang.t("Verweildauer", "Dwell Time"));
         colDwell.setCellValueFactory(cd -> new ReadOnlyObjectWrapper<>(cd.getValue().formattedDwell()));
         colDwell.setPrefWidth(100);
 
         // Populated only for IMEI storyboard stops (one record each); shows
         // "–" for plain IMSI movement stops, which carry no call metadata.
-        TableColumn<SequenceAnalyzer.Stop, String> colActivity = new TableColumn<>("Aktivität");
+        TableColumn<SequenceAnalyzer.Stop, String> colActivity = new TableColumn<>(Lang.t("Aktivität", "Activity"));
         colActivity.setCellValueFactory(cd -> new ReadOnlyObjectWrapper<>(
                 cd.getValue().activityLabel() != null ? cd.getValue().activityLabel() : "–"));
         colActivity.setPrefWidth(220);
 
-        TableColumn<SequenceAnalyzer.Stop, String> colCell = new TableColumn<>("Zelle");
+        TableColumn<SequenceAnalyzer.Stop, String> colCell = new TableColumn<>(Lang.t("Zelle", "Cell"));
         colCell.setCellValueFactory(cd -> new ReadOnlyObjectWrapper<>(cd.getValue().cellLabel()));
         colCell.setPrefWidth(180);
 
-        TableColumn<SequenceAnalyzer.Stop, String> colPos = new TableColumn<>("Position");
+        TableColumn<SequenceAnalyzer.Stop, String> colPos = new TableColumn<>(Lang.t("Position", "Position"));
         colPos.setCellValueFactory(cd -> new ReadOnlyObjectWrapper<>(
                 String.format("%.5f, %.5f", cd.getValue().lat, cd.getValue().lon)));
         colPos.setPrefWidth(150);
 
-        TableColumn<SequenceAnalyzer.Stop, String> colDist = new TableColumn<>("Distanz z. vorh.");
+        TableColumn<SequenceAnalyzer.Stop, String> colDist = new TableColumn<>(Lang.t("Distanz z. vorh.", "Distance from prev."));
         colDist.setCellValueFactory(cd -> new ReadOnlyObjectWrapper<>(
                 cd.getValue().distanceFromPreviousKm > 0
                         ? String.format("%.2f km", cd.getValue().distanceFromPreviousKm)
                         : "–"));
         colDist.setPrefWidth(110);
 
-        TableColumn<SequenceAnalyzer.Stop, Integer> colCount = new TableColumn<>("Datensätze");
+        TableColumn<SequenceAnalyzer.Stop, Integer> colCount = new TableColumn<>(Lang.t("Datensätze", "Records"));
         colCount.setCellValueFactory(cd -> new ReadOnlyObjectWrapper<>(cd.getValue().recordCount));
         colCount.setPrefWidth(90);
 
         table.getColumns().addAll(List.of(colIdx, colFrom, colTo, colDwell, colActivity, colCell, colPos, colDist, colCount));
         table.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY);
+        Lang.addListener(() -> {
+            colFrom.setText(Lang.t("Von", "From"));
+            colTo.setText(Lang.t("Bis", "To"));
+            colDwell.setText(Lang.t("Verweildauer", "Dwell Time"));
+            colActivity.setText(Lang.t("Aktivität", "Activity"));
+            colCell.setText(Lang.t("Zelle", "Cell"));
+            colDist.setText(Lang.t("Distanz z. vorh.", "Distance from prev."));
+            colCount.setText(Lang.t("Datensätze", "Records"));
+        });
 
         table.setRowFactory(tv -> {
             javafx.scene.control.TableRow<SequenceAnalyzer.Stop> row = new javafx.scene.control.TableRow<>();
@@ -1740,6 +1939,9 @@ public class MapView extends BorderPane {
             });
             return row;
         });
+
+        // Copy selected cells to clipboard via context menu or Ctrl/Cmd+C.
+        TableClipboardSupport.install(table);
 
         return table;
     }
@@ -1774,7 +1976,7 @@ public class MapView extends BorderPane {
         gc.setLineDashes(null);
 
         // ── Numbered stop markers ─────────────────────────────────────────────
-        gc.setFont(Font.font("Monospace", FontWeight.BOLD, 9));
+        gc.setFont(Font.font("Monospace", FontWeight.BOLD, 12));
         for (int i = 0; i < seqScreenX.length; i++) {
             double sx = seqScreenX[i], sy = seqScreenY[i];
             if (sx < -40 || sx > W + 40 || sy < -40 || sy > H + 40) continue;
@@ -1825,7 +2027,7 @@ public class MapView extends BorderPane {
         }
         gc.setLineDashes(null);
 
-        gc.setFont(Font.font("Monospace", FontWeight.BOLD, 9));
+        gc.setFont(Font.font("Monospace", FontWeight.BOLD, 12));
         for (int i = 0; i < imsiScreenX.length; i++) {
             double sx = imsiScreenX[i], sy = imsiScreenY[i];
             if (sx < -40 || sx > W + 40 || sy < -40 || sy > H + 40) continue;
@@ -1961,17 +2163,17 @@ public class MapView extends BorderPane {
     private String buildImsiStopTooltip(int index) {
         SequenceAnalyzer.Stop s = imsiStops.get(index);
         StringBuilder sb = new StringBuilder();
-        sb.append("🟣  IMSI-STANDORT #").append(index + 1).append(" / ").append(imsiStops.size()).append("\n");
+        sb.append(Lang.t("🟣  IMSI-STANDORT #", "🟣  IMSI LOCATION #")).append(index + 1).append(" / ").append(imsiStops.size()).append("\n");
         sb.append("─".repeat(36)).append("\n");
-        row(sb, "Von",         s.formattedFirstSeen() + " UTC");
-        row(sb, "Bis",         s.formattedLastSeen()  + " UTC");
-        row(sb, "Verweildauer",s.formattedDwell());
-        row(sb, "Zelle",       s.cellLabel());
+        row(sb, Lang.t("Von", "From"),         s.formattedFirstSeen() + " UTC");
+        row(sb, Lang.t("Bis", "To"),         s.formattedLastSeen()  + " UTC");
+        row(sb, Lang.t("Verweildauer", "Dwell Time"),s.formattedDwell());
+        row(sb, Lang.t("Zelle", "Cell"),       s.cellLabel());
         row(sb, "Lat",         String.format("%.6f°", s.lat));
         row(sb, "Lon",         String.format("%.6f°", s.lon));
-        row(sb, "Datensätze",  String.valueOf(s.recordCount));
+        row(sb, Lang.t("Datensätze", "Records"),  String.valueOf(s.recordCount));
         if (s.distanceFromPreviousKm > 0)
-            row(sb, "Distanz", String.format("%.2f km zum vorherigen Standort", s.distanceFromPreviousKm));
+            row(sb, Lang.t("Distanz", "Distance"), String.format(Lang.t("%.2f km zum vorherigen Standort", "%.2f km from previous location"), s.distanceFromPreviousKm));
         return sb.toString().stripTrailing();
     }
 
@@ -1979,17 +2181,17 @@ public class MapView extends BorderPane {
     private String buildSeqStopTooltip(int index) {
         SequenceAnalyzer.Stop s = sequenceStops.get(index);
         StringBuilder sb = new StringBuilder();
-        sb.append("🔵  STANDORT #").append(index + 1).append(" / ").append(sequenceStops.size()).append("\n");
+        sb.append(Lang.t("🔵  STANDORT #", "🔵  LOCATION #")).append(index + 1).append(" / ").append(sequenceStops.size()).append("\n");
         sb.append("─".repeat(36)).append("\n");
-        row(sb, "Von",         s.formattedFirstSeen() + " UTC");
-        row(sb, "Bis",         s.formattedLastSeen()  + " UTC");
-        row(sb, "Verweildauer",s.formattedDwell());
-        row(sb, "Zelle",       s.cellLabel());
+        row(sb, Lang.t("Von", "From"),         s.formattedFirstSeen() + " UTC");
+        row(sb, Lang.t("Bis", "To"),         s.formattedLastSeen()  + " UTC");
+        row(sb, Lang.t("Verweildauer", "Dwell Time"),s.formattedDwell());
+        row(sb, Lang.t("Zelle", "Cell"),       s.cellLabel());
         row(sb, "Lat",         String.format("%.6f°", s.lat));
         row(sb, "Lon",         String.format("%.6f°", s.lon));
-        row(sb, "Datensätze",  String.valueOf(s.recordCount));
+        row(sb, Lang.t("Datensätze", "Records"),  String.valueOf(s.recordCount));
         if (s.distanceFromPreviousKm > 0)
-            row(sb, "Distanz", String.format("%.2f km zum vorherigen Standort", s.distanceFromPreviousKm));
+            row(sb, Lang.t("Distanz", "Distance"), String.format(Lang.t("%.2f km zum vorherigen Standort", "%.2f km from previous location"), s.distanceFromPreviousKm));
         // Storyboard (IMEI) stops additionally carry the raw record's
         // call-type fields — shown together with their forensic meaning
         // (see SequenceAnalyzer.Stop#callIndicatorLabel() and friends).
@@ -2013,7 +2215,13 @@ public class MapView extends BorderPane {
      * the ULI-decoded cell identity is absent from the CSV (common for crowd-sourced
      * databases with incomplete coverage).</p>
      */
+    /** Recomposes {@link #statusLabel}'s text from its two current parts. */
+    private void updateStatusLabel() {
+        statusLabel.setText(baseStatusText + towerStatusText);
+    }
+
     private void resolveCellTowers() {
+        towerResolutionStarted = true;
         CellTowerResolver resolver = CellTowerResolver.getInstance();
         BeaconDbClient    beaconDb = BeaconDbClient.getInstance();
 
@@ -2022,9 +2230,10 @@ public class MapView extends BorderPane {
         boolean hasBeaconDb = beaconDb.isEnabled();
 
         if (!hasCsv && !hasBeaconDb) {
-            Platform.runLater(() -> statusLabel.setText(
-                    statusLabel.getText()
-                    + "  |  ⚠ Keine Quelle: CSV oder beaconDB konfigurieren"));
+            Platform.runLater(() -> {
+                towerStatusText = Lang.t("  |  ⚠ Keine Quelle: CSV oder beaconDB konfigurieren", "  |  ⚠ No source: configure CSV or beaconDB");
+                updateStatusLabel();
+            });
             return;
         }
 
@@ -2080,10 +2289,11 @@ public class MapView extends BorderPane {
         render();
 
         if (futures.isEmpty()) {
-            Platform.runLater(() -> statusLabel.setText(
-                    statusLabel.getText()
-                    + "  |  ⚠ Keine ResponseRecord-Punkte ("
-                    + finalRr + " RR, " + finalGps + " mit GPS)"));
+            Platform.runLater(() -> {
+                towerStatusText = Lang.t("  |  ⚠ Keine ResponseRecord-Punkte (", "  |  ⚠ No ResponseRecord points (")
+                        + finalRr + Lang.t(" RR, ", " RR, ") + finalGps + Lang.t(" mit GPS)", " with GPS)");
+                updateStatusLabel();
+            });
             return;
         }
 
@@ -2093,9 +2303,9 @@ public class MapView extends BorderPane {
                             .filter(p -> p instanceof ResponseRecordDataPoint rr
                                          && rr.getCellTower() != null)
                             .count();
-                    statusLabel.setText(statusLabel.getText()
-                                        + "  |  \uD83D\uDCF6 " + cellTowers.size() + " Masten"
-                                        + " (" + resolved + "/" + finalRr + " aufgelöst)");
+                    towerStatusText = "  |  \uD83D\uDCF6 " + cellTowers.size() + " " + Lang.t("Masten", "towers")
+                                        + " (" + resolved + "/" + finalRr + " " + Lang.t("aufgelöst", "resolved") + ")";
+                    updateStatusLabel();
                     // The dataset cell-site sectors' range estimate comes from
                     // these same resolved CellTowers (see DbCellSite.rangeMetres
                     // / wedgeBaseLenPx), but rebuildDbCellSites() only reads
@@ -2332,7 +2542,7 @@ public class MapView extends BorderPane {
     /** Builds a tooltip for a dataset-reported cell site. */
     private String buildDbCellTooltip(DbCellSite s) {
         StringBuilder sb = new StringBuilder();
-        sb.append("🗼  FUNKZELLE (aus Datensatz)  —  Kennung ").append(s.label).append("\n");
+        sb.append(Lang.t("🗼  FUNKZELLE (aus Datensatz)  —  Kennung ", "🗼  CELL SITE (from record)  —  Identifier ")).append(s.label).append("\n");
         sb.append("─".repeat(36)).append("\n");
         row(sb, "Lat",         String.format("%.6f°", s.lat));
         row(sb, "Lon",         String.format("%.6f°", s.lon));
@@ -2340,17 +2550,17 @@ public class MapView extends BorderPane {
             row(sb, "Azimuth", String.format("%.0f° (%s)", s.azimuthDeg, compassAbbrev(s.azimuthDeg)));
         }
         if (s.rangeMetres != null) {
-            row(sb, "Reichweite", formatRange(s.rangeMetres) + "  (Schätzung, OpenCelliD/BeaconDB)");
+            row(sb, Lang.t("Reichweite", "Range"), formatRange(s.rangeMetres) + Lang.t("  (Schätzung, OpenCelliD/BeaconDB)", "  (estimate, OpenCelliD/BeaconDB)"));
         }
-        row(sb, "Datenpunkte", String.valueOf(s.count));
+        row(sb, Lang.t("Datenpunkte", "Data Points"), String.valueOf(s.count));
 
         // Decoded user_location_info (ULI), if any contributing record had
         // a decodable value — same fields/labels as the OpenCelliD tower
         // tooltip (buildTowerTooltip) so both layers read consistently.
         UliDecoder.CellInfo ci = s.cellInfo;
         if (ci != null) {
-            sb.append("\n── Zellenidentität (ULI) ────────────\n");
-            row(sb, "Typ",  ci.networkType);
+            sb.append(Lang.t("\n── Zellenidentität (ULI) ────────────\n", "\n── Cell Identity (ULI) ────────────\n"));
+            row(sb, Lang.t("Typ", "Type"),  ci.networkType);
             row(sb, "MCC",  String.valueOf(ci.mcc));
             row(sb, "MNC",  String.valueOf(ci.mnc));
             String lacLabel = (ci.networkType != null
@@ -2361,8 +2571,8 @@ public class MapView extends BorderPane {
         }
 
         sb.append("\n");
-        sb.append("Position des Funkmasts laut Datensatz —\n");
-        sb.append("nicht die tatsächliche Geräteposition.");
+        sb.append(Lang.t("Position des Funkmasts laut Datensatz —\n", "Position of the cell tower per the record —\n"));
+        sb.append(Lang.t("nicht die tatsächliche Geräteposition.", "not the actual device position."));
         return sb.toString().stripTrailing();
     }
 
@@ -2373,9 +2583,11 @@ public class MapView extends BorderPane {
     /**
      * Handles a right-click (or platform-equivalent context-menu gesture) on
      * the canvas. If the gesture lands on a {@link DbCellSite} marker, shows
-     * {@link #dbCellContextMenu} with an action that opens that site's
-     * position on cellmapper.net in the system browser. No-op everywhere
-     * else on the map.
+     * {@link #dbCellContextMenu} with two actions: opening that site's
+     * position on cellmapper.net in the system browser, and copying its
+     * decoded Cell-ID (disabled if none could be decoded — see
+     * {@link UliDecoder.CellInfo#cellId}) to the system clipboard. No-op
+     * everywhere else on the map.
      */
     private void onContextMenuRequested(ContextMenuEvent e) {
         dbCellContextMenu.hide();
@@ -2385,10 +2597,24 @@ public class MapView extends BorderPane {
 
         DbCellSite site = dbCellSites.get(hit);
         dbCellContextMenu.getItems().clear();
-        MenuItem openItem = new MenuItem("Auf cellmapper.net öffnen (" + site.label + ")");
+        MenuItem openItem = new MenuItem(Lang.t("Auf cellmapper.net öffnen (", "Open on cellmapper.net (") + site.label + ")");
         openItem.setOnAction(ev -> openInBrowser(buildCellMapperUrl(site)));
         dbCellContextMenu.getItems().add(openItem);
+
+        MenuItem copyCellIdItem = new MenuItem(Lang.t("CellID in Zwischenablage kopieren", "Copy Cell-ID to clipboard"));
+        Integer cellId = (site.cellInfo != null && site.cellInfo.cellId >= 0) ? site.cellInfo.cellId : null;
+        copyCellIdItem.setDisable(cellId == null);
+        copyCellIdItem.setOnAction(ev -> copyToClipboard(String.valueOf(cellId)));
+        dbCellContextMenu.getItems().add(copyCellIdItem);
+
         dbCellContextMenu.show(canvas, e.getScreenX(), e.getScreenY());
+    }
+
+    /** Puts {@code text} on the system clipboard as plain text. */
+    private static void copyToClipboard(String text) {
+        ClipboardContent content = new ClipboardContent();
+        content.putString(text);
+        Clipboard.getSystemClipboard().setContent(content);
     }
 
     /**
@@ -2460,25 +2686,25 @@ public class MapView extends BorderPane {
 
         // Match-type suffix: extract how the tower was found
         String matchType = "";
-        if (radio.contains("eNB-centroid"))       matchType = " (eNB-Schwerpunkt)";
-        else if (radio.contains("gps-fallback"))  matchType = " (GPS-Nächster)";
-        else if (radio.contains("exact"))         matchType = " (Exakt)";
+        if (radio.contains("eNB-centroid"))       matchType = Lang.t(" (eNB-Schwerpunkt)", " (eNB centroid)");
+        else if (radio.contains("gps-fallback"))  matchType = Lang.t(" (GPS-Nächster)", " (GPS nearest)");
+        else if (radio.contains("exact"))         matchType = Lang.t(" (Exakt)", " (Exact)");
 
         StringBuilder sb = new StringBuilder();
 
         // ── Header ───────────────────────────────────────────────────────────
-        sb.append("📡  FUNKZELLMAST").append(matchType).append("\n");
+        sb.append(Lang.t("📡  FUNKZELLMAST", "📡  CELL TOWER")).append(matchType).append("\n");
         sb.append("─".repeat(36)).append("\n");
 
         // ── Betreiber ─────────────────────────────────────────────────────────
         if (t.operatorName != null)
-            row(sb, "Betreiber",  t.operatorName);
-        row(sb, "Netz",       gen);
-        row(sb, "Land",       t.country != null ? t.country : "DE");
+            row(sb, Lang.t("Betreiber", "Operator"),  t.operatorName);
+        row(sb, Lang.t("Netz", "Network"),       gen);
+        row(sb, Lang.t("Land", "Country"),       t.country != null ? t.country : "DE");
         sb.append("\n");
 
         // ── Zellenidentität ───────────────────────────────────────────────────
-        sb.append("── Zellenidentität ──────────────────\n");
+        sb.append(Lang.t("── Zellenidentität ──────────────────\n", "── Cell Identity ──────────────────\n"));
         row(sb, "MCC",        String.valueOf(t.mcc));
         row(sb, "MNC",        String.valueOf(t.mnc));
 
@@ -2497,18 +2723,18 @@ public class MapView extends BorderPane {
         sb.append("\n");
 
         // ── Standort ─────────────────────────────────────────────────────────
-        sb.append("── Standort ─────────────────────────\n");
+        sb.append(Lang.t("── Standort ─────────────────────────\n", "── Location ─────────────────────────\n"));
         row(sb, "Lat",  String.format("%.5f°", t.latitude));
         row(sb, "Lon",  String.format("%.5f°", t.longitude));
         if (t.rangeMetres > 0)
-            row(sb, "Reichweite", formatRange(t.rangeMetres));
+            row(sb, Lang.t("Reichweite", "Range"), formatRange(t.rangeMetres));
         sb.append("\n");
 
         // ── Datenqualität ─────────────────────────────────────────────────────
-        sb.append("── Datenqualität ───────────────────\n");
+        sb.append(Lang.t("── Datenqualität ───────────────────\n", "── Data Quality ───────────────────\n"));
         if (t.samples > 0)
-            row(sb, "Messungen", t.samples + (t.isReliable ? "  ✓ zuverlässig" : "  ⚠ gering"));
-        row(sb, "Quelle", "OpenCelliD");
+            row(sb, Lang.t("Messungen", "Measurements"), t.samples + (t.isReliable ? Lang.t("  ✓ zuverlässig", "  ✓ reliable") : Lang.t("  ⚠ gering", "  ⚠ low")));
+        row(sb, Lang.t("Quelle", "Source"), "OpenCelliD");
 
         return sb.toString().stripTrailing();
     }
@@ -2666,10 +2892,19 @@ public class MapView extends BorderPane {
 
     private Button makeZoomButton(String label) {
         Button b = new Button(label);
-        b.setFont(Font.font("Monospace", FontWeight.BOLD, 14));
-        b.setPrefSize(36, 36);
-        b.setMinSize(36, 36);
-        b.setMaxSize(36, 36);
+        b.setFont(Font.font("Monospace", FontWeight.BOLD, 18));
+        // Button size was left at its old 36×36 value when the font here was
+        // bumped 14px → 18px for readability elsewhere in this window.
+        // JavaFX's default button padding scales with the font (em-based),
+        // so the larger font's padding alone nearly filled the fixed 36px
+        // box, clipping the "+"/"−" glyph itself away entirely — the button
+        // (background/border/click handling) still rendered and worked
+        // fine, only the label became invisible. Enlarging the box to match
+        // and pinning a small fixed padding (so this can't recur if the font
+        // is bumped again later) fixes it.
+        b.setPrefSize(44, 44);
+        b.setMinSize(44, 44);
+        b.setMaxSize(44, 44);
         b.setCursor(Cursor.HAND);
         return b;
     }
@@ -2685,6 +2920,13 @@ public class MapView extends BorderPane {
                 "-fx-border-width: 1px;" +
                 "-fx-background-radius: 0;" +
                 "-fx-border-radius: 0;" +
+                // Fixed (not em-relative) padding: JavaFX's default button
+                // padding scales with font size, which — combined with the
+                // fixed 44×44 box — left too little room for the "+"/"−"
+                // glyph once the font here was bumped for readability,
+                // clipping it away entirely. A small fixed value keeps that
+                // from recurring if the font is ever changed again.
+                "-fx-padding: 2px;" +
                 "-fx-cursor: hand;";
         btnZoomIn.setStyle(btnCss);
         btnZoomOut.setStyle(btnCss);

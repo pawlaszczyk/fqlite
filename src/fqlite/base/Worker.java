@@ -56,7 +56,16 @@ public class Worker implements Runnable {
 		{
 			
 			RecoveryTask next = toDo.pop();
-			next.run();
+			try {
+				next.run();
+			}
+			catch (Throwable t) {
+				// RecoveryTask.run() catches Exceptions only. An Error (e.g. OutOfMemoryError,
+				// StackOverflowError) would otherwise kill this worker; all tasks still queued here
+				// would never run, runningTasks would never reach 0 and Job.scan() would wait forever
+				// ("Loading..." in the GUI).
+				fqlite.log.AppLog.error("Worker: task aborted with " + t.getClass().getSimpleName() + " — " + t.getMessage());
+			}
 		}
 
 		

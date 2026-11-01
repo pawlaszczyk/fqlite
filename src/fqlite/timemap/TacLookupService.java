@@ -107,7 +107,7 @@ public final class TacLookupService {
         String digits = imeiOrTac == null ? "" : imeiOrTac.replaceAll("[^0-9]", "");
         if (digits.length() < 8) {
             Result r = new Result(digits);
-            r.error = "IMEI/TAC zu kurz (mindestens 8 Ziffern nötig): '" + imeiOrTac + "'";
+            r.error = Lang.t("IMEI/TAC zu kurz (mindestens 8 Ziffern nötig): '", "IMEI/TAC too short (at least 8 digits required): '") + imeiOrTac + "'";
             return r;
         }
         String tac = digits.substring(0, 8);
@@ -130,20 +130,24 @@ public final class TacLookupService {
 
         if (!enabled) {
             result.error = (localConfigured
-                    ? "TAC " + tac + " nicht in der lokalen TAC-Datenbank gefunden. "
+                    ? Lang.t("TAC " + tac + " nicht in der lokalen TAC-Datenbank gefunden. ", "TAC " + tac + " not found in the local TAC database. ")
                     : "")
-                    + "Online-Gerätelookup (HiCellTek) ist deaktiviert (Einstellungen → Location) "
-                    + "— es wird nur der lokale Datensatzbefund angezeigt.";
+                    + Lang.t("Online-Gerätelookup (HiCellTek) ist deaktiviert (Einstellungen → Location) "
+                    + "— es wird nur der lokale Datensatzbefund angezeigt.",
+                    "Online device lookup (HiCellTek) is disabled (Settings → Location) "
+                    + "— only the local record lookup is shown.");
             return result;
         }
 
         String key = apiKey != null ? apiKey : System.getProperty(API_KEY_PROPERTY);
         if (key == null || key.isBlank()) {
             result.error = (localConfigured
-                    ? "TAC " + tac + " nicht in der lokalen TAC-Datenbank gefunden. "
+                    ? Lang.t("TAC " + tac + " nicht in der lokalen TAC-Datenbank gefunden. ", "TAC " + tac + " not found in the local TAC database. ")
                     : "")
-                    + "Kein API-Key konfiguriert (Einstellungen → Location, oder System-Property '"
-                    + API_KEY_PROPERTY + "') — es wird nur der lokale Datensatzbefund angezeigt.";
+                    + Lang.t("Kein API-Key konfiguriert (Einstellungen → Location, oder System-Property '"
+                    + API_KEY_PROPERTY + "') — es wird nur der lokale Datensatzbefund angezeigt.",
+                    "No API key configured (Settings → Location, or system property '"
+                    + API_KEY_PROPERTY + "') — only the local record lookup is shown.");
             return result;
         }
 
@@ -162,7 +166,7 @@ public final class TacLookupService {
             result.rawResponse = response.body();
 
             if (response.statusCode() != 200) {
-                result.error = "HiCellTek-API antwortete mit Status " + response.statusCode()
+                result.error = Lang.t("HiCellTek-API antwortete mit Status ", "HiCellTek API responded with status ") + response.statusCode()
                         + (result.rawResponse != null ? (": " + truncate(result.rawResponse, 300)) : "");
                 return result;
             }
@@ -172,16 +176,18 @@ public final class TacLookupService {
             result.chipsetFamily = extractJsonField(result.rawResponse, "chipsetFamily");
 
             if (!result.hasDeviceInfo()) {
-                result.error = "Antwort der HiCellTek-API enthielt keines der erwarteten Felder "
-                        + "(brand/model/chipsetFamily) — Rohantwort: " + truncate(result.rawResponse, 300);
+                result.error = Lang.t("Antwort der HiCellTek-API enthielt keines der erwarteten Felder "
+                        + "(brand/model/chipsetFamily) — Rohantwort: ",
+                        "HiCellTek API response contained none of the expected fields "
+                        + "(brand/model/chipsetFamily) — raw response: ") + truncate(result.rawResponse, 300);
             } else {
                 result.source = "online";
             }
         } catch (IOException | InterruptedException ex) {
-            result.error = "Netzwerkfehler beim Abruf der HiCellTek-API: " + ex.getMessage();
+            result.error = Lang.t("Netzwerkfehler beim Abruf der HiCellTek-API: ", "Network error calling the HiCellTek API: ") + ex.getMessage();
             LOG.warning("TacLookupService: lookup failed for TAC " + tac + ": " + ex.getMessage());
         } catch (RuntimeException ex) {
-            result.error = "Unerwarteter Fehler beim Abruf der HiCellTek-API: " + ex.getMessage();
+            result.error = Lang.t("Unerwarteter Fehler beim Abruf der HiCellTek-API: ", "Unexpected error calling the HiCellTek API: ") + ex.getMessage();
             LOG.warning("TacLookupService: lookup failed for TAC " + tac + ": " + ex.getMessage());
         }
         return result;

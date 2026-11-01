@@ -36,6 +36,8 @@ public class GPSParser {
             try { fracSec = Double.parseDouble("0" + fracStr); } catch (NumberFormatException ignored) { }
             digits = digits.substring(0, dotIdx);
         }
+        // Non-digit characters would otherwise throw NumberFormatException and abort the whole import.
+        if (digits.isEmpty() || !digits.chars().allMatch(Character::isDigit)) return null;
 
         if (hemi == 'N' || hemi == 'S') {
             if (digits.length() != 6) return null;
@@ -53,7 +55,12 @@ public class GPSParser {
             sec = Integer.parseInt(digits.substring(5, 7));
         }
 
+        // Reject impossible values instead of converting them into a plausible but wrong
+        // position (e.g. N517525 would otherwise become 52.2569 deg, about 130 km north).
+        if (min >= 60 || sec + fracSec >= 60.0) return null;
+        if ((hemi == 'N' || hemi == 'S') ? deg > 90 : deg > 180) return null;
         double decimal = deg + min / 60.0 + (sec + fracSec) / 3600.0;
+        if ((hemi == 'N' || hemi == 'S') ? decimal > 90.0 : decimal > 180.0) return null;
         if (hemi == 'S' || hemi == 'W') {
             decimal = -decimal;
         }
@@ -73,7 +80,12 @@ public class GPSParser {
         char hemi = Character.toUpperCase(raw.charAt(0));
         if (hemi != 'N' && hemi != 'S' && hemi != 'E' && hemi != 'W') return null;
         try {
-            double val = Double.parseDouble(raw.substring(1));
+            String body = raw.substring(1);
+            // Only genuine decimal degrees; an integer string such as a rejected DMS value
+            // ("517525") must not be read as 517525 degrees.
+            if (body.indexOf('.') < 0) return null;
+            double val = Double.parseDouble(body);
+            if (val < 0 || ((hemi == 'N' || hemi == 'S') ? val > 90 : val > 180)) return null;
             if (hemi == 'S' || hemi == 'W') val = -val;
             return Math.round(val * 1_000_000.0) / 1_000_000.0;
         } catch (NumberFormatException e) {

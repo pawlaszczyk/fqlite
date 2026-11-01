@@ -602,6 +602,13 @@ public class RecoveryTask implements Runnable {
 	 */
 	private void updateResultSet(DataRow row)
 	{
+		// called concurrently by all worker threads: the backing lists are plain (non thread-safe)
+		// ArrayLists and containsKey()/put() is a check-then-act race → lost rows / corrupt lists
+		synchronized (job.resultlist) { updateResultSet0(row); }
+	}
+
+	private void updateResultSet0(DataRow row)
+	{
 		int empty_columns = 0;
 
 		// entry for table name already exists

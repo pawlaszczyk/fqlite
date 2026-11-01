@@ -456,6 +456,10 @@ public class DataAnalyzer {
         int idxMapDatum     = colIndex(cols, delta, "map_datum");
         int idxAzimuth      = colIndex(cols, delta, "azimuth");
         int idxUserLoc      = colIndex(cols, delta, "user_location_info");
+        int idxCellMcc      = colIndex(cols, delta, "cell_mcc");
+        int idxCellMnc      = colIndex(cols, delta, "cell_mnc");
+        int idxCellLacTac   = colIndex(cols, delta, "cell_lac_tac");
+        int idxCellCi       = colIndex(cols, delta, "cell_ci");
         int idxImsi         = colIndex(cols, delta, "imsi");
         int idxMsisdn       = colIndex(cols, delta, "msisdn");
         int idxApn          = colIndex(cols, delta, "apn");
@@ -553,11 +557,40 @@ public class DataAnalyzer {
             rrdp.setTypeOfDataExtra(cell(r, idxTypeExtra));
             rrdp.setDurationSeconds(cell(r, idxDuration));
 
-            // ── ULI decoding ─────────────────────────────────────────────────
-            // Attempt to decode the user_location_info hex field into structured
-            // cell identity (MCC, MNC, LAC/TAC, CI).  This is a best-effort
-            // operation; rows with missing or malformed ULI simply get null.
-            UliDecoder.CellInfo cellInfo = UliDecoder.decode(cell(r, idxUserLoc));
+            // ── Cell identity ────────────────────────────────────────────────
+            // Prefer cell_mcc/cell_mnc/cell_lac_tac/cell_ci — decoded ONCE,
+            // correctly, from the raw ULI bytes at import time (see
+            // EtsiXmlImporter.writeRow's javadoc: these columns exist
+            // specifically "so that forensic SQL ... can match on cell
+            // identity directly without having to re-decode
+            // user_location_info at query time"). Re-decoding the raw hex
+            // again here, from a column position resolved by name and by
+            // this method's own value-based shift heuristic, previously
+            // made every stop in a subscriber's movement path
+            // (SequenceAnalyzer.Stop.cellLabel()) show the identical
+            // CellID regardless of how far apart the records' actual
+            // (correctly positioned) coordinates were — the on-the-fly
+            // decode of idxUserLoc was landing on the same value across
+            // rows even though cell_lac_tac/cell_ci differ correctly.
+            // Only fall back to the raw-hex decode for older databases
+            // that predate these columns (both NULL for every row).
+            Integer cellMcc    = parseIntCell(cell(r, idxCellMcc));
+            Integer cellMnc    = parseIntCell(cell(r, idxCellMnc));
+            Integer cellLacTac = parseIntCell(cell(r, idxCellLacTac));
+            Integer cellCi     = parseIntCell(cell(r, idxCellCi));
+            UliDecoder.CellInfo cellInfo;
+            if (cellLacTac != null || cellCi != null) {
+                UliDecoder.CellInfo rawDecoded = UliDecoder.decode(cell(r, idxUserLoc));
+                cellInfo = new UliDecoder.CellInfo(
+                        rawDecoded != null ? rawDecoded.networkType : null,
+                        cellMcc    != null ? cellMcc    : -1,
+                        cellMnc    != null ? cellMnc    : -1,
+                        cellLacTac != null ? cellLacTac : -1,
+                        cellCi     != null ? cellCi     : -1,
+                        rawDecoded != null ? rawDecoded.eci : -1);
+            } else {
+                cellInfo = UliDecoder.decode(cell(r, idxUserLoc));
+            }
             rrdp.setCellInfo(cellInfo);
             // CellTower resolution (OpenCelliD lookup) is deferred: MapView
             // triggers it asynchronously when the cell-tower layer is enabled.
@@ -580,6 +613,16 @@ public class DataAnalyzer {
         if (s == null || s.isBlank()) return null;
         try {
             return Double.parseDouble(s.trim());
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
+    /** Parses an integer-valued cell (e.g. {@code cell_lac_tac}), or {@code null} if blank/unparseable. */
+    private static Integer parseIntCell(String s) {
+        if (s == null || s.isBlank()) return null;
+        try {
+            return Integer.parseInt(s.trim());
         } catch (NumberFormatException e) {
             return null;
         }
@@ -904,6 +947,26 @@ public class DataAnalyzer {
             return null;
         }
 
+        /**
+         * Returns the IMEI (device identity, ETSI column {@code na_device_id})
+         * for this data point, or {@code null} if none is available.
+         *
+         * <p>For {@link ResponseRecordDataPoint} the dedicated field is used.
+         * For other table types the value is looked up by the column name
+         * {@code "na_device_id"} or {@code "imei"} (case-insensitive).</p>
+         */
+        public String getImei() {
+            if (columnNames == null || rawRow == null) return null;
+            for (int i = 0; i < columnNames.size(); i++) {
+                String c = columnNames.get(i);
+                if (("na_device_id".equalsIgnoreCase(c) || "imei".equalsIgnoreCase(c)) && i < rawRow.size()) {
+                    String v = rawRow.get(i);
+                    return (v != null && !v.isBlank()) ? v : null;
+                }
+            }
+            return null;
+        }
+
         /** Returns the timestamp formatted as {@code yyyy-MM-dd HH:mm:ss} (UTC). */
         public String getFormattedTimestamp() {
             if (timestamp == null) return "\u2013";
@@ -974,6 +1037,8 @@ public class DataAnalyzer {
         public String getPartyType()            { return partyType;        }
         public String getNwAccessType()         { return nwAccessType;     }
         public String getNaDeviceId()           { return naDeviceId;       }
+        @Override
+        public String getImei()                 { return naDeviceId;       }
         public String getLtRaw()                { return ltRaw;            }
         public String getLoRaw()                { return loRaw;            }
         public String getMapDatum()             { return mapDatum;         }
@@ -981,6 +1046,7 @@ public class DataAnalyzer {
         public String getUserLocationInfo()     { return userLocationInfo; }
         @Override
         public String getImsi()                 { return imsi;             }
+        @Override
         public String getMsisdn()               { return msisdn;           }
         public String getApn()                  { return apn;              }
         public String getOtherInformation()     { return otherInformation; }

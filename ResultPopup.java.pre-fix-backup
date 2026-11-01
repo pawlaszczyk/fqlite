@@ -1,0 +1,202 @@
+package fqlite.timemap;
+
+import javafx.beans.property.ReadOnlyStringWrapper;
+import javafx.collections.FXCollections;
+import javafx.collections.ObservableList;
+import javafx.geometry.Insets;
+import javafx.geometry.Pos;
+import javafx.scene.Node;
+import javafx.scene.Scene;
+import javafx.scene.control.*;
+import javafx.scene.input.Clipboard;
+import javafx.scene.input.ClipboardContent;
+import javafx.scene.layout.*;
+import javafx.scene.text.Font;
+import javafx.scene.text.FontWeight;
+import javafx.stage.FileChooser;
+import javafx.stage.Stage;
+import javafx.stage.Window;
+
+import java.io.File;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.util.List;
+import java.util.Locale;
+
+/**
+ * Einfaches Ergebnisfenster fuer LLM-Anfragen, deren Ergebnis sich nicht auf
+ * Karte/Zeitleiste darstellen laesst (z. B. "Wie viele SMS hat X empfangen?",
+ * "Wie viele verschiedene Funkzellen gab es am …?", Kontaktlisten, Summen).
+ *
+ * <p>Ein einzelner Wert (1 Zeile × 1 Spalte) wird gross angezeigt, alles
+ * andere als Tabelle. Frage und ausgefuehrtes SQL stehen immer mit dabei,
+ * damit das Ergebnis nachvollziehbar bleibt. Kopieren (TSV) und Export (CSV)
+ * sind moeglich. Das Fenster ist nicht modal; Karte und Zeitleiste bleiben
+ * unveraendert.</p>
+ */
+public final class ResultPopup {
+
+    private ResultPopup() { }
+
+    /** Maximale Zeilenzahl in der Tabelle (Export/Kopieren enthalten immer alles). */
+    private static final int MAX_TABLE_ROWS = 5000;
+
+    public static void show(Window owner, Theme t, String question, String sql,
+                            List<String> columns, List<List<String>> rows) {
+        Stage stage = new Stage();
+        if (owner != null) stage.initOwner(owner);
+        stage.setTitle(Lang.t("Ergebnis der Anfrage", "Query result"));
+
+        String fg  = Theme.hex(t.labelStrong);
+        String mut = Theme.hex(t.label);
+
+        Label q = new Label(question == null ? "" : question);
+        q.setWrapText(true);
+        q.setFont(Font.font("Monospace", FontWeight.BOLD, 15));
+        q.setStyle("-fx-text-fill: " + fg + ";");
+
+        TextArea sqlArea = new TextArea(sql == null ? "" : sql);
+        sqlArea.setEditable(false);
+        sqlArea.setWrapText(true);
+        sqlArea.setPrefRowCount(2);
+        sqlArea.setStyle("-fx-font-family: monospace; -fx-font-size: 12px;"
+                + "-fx-control-inner-background: " + Theme.hex(t.bgAlt) + "; -fx-text-fill: " + mut + ";");
+        TitledPane sqlPane = new TitledPane("SQL", sqlArea);
+        sqlPane.setExpanded(false);
+
+        Node center;
+        String summary;
+        boolean single = rows.size() == 1 && columns.size() == 1;
+        if (single) {
+            String v = rows.get(0).get(0);
+            Label value = new Label(v == null ? "–" : v);
+            value.setFont(Font.font("Monospace", FontWeight.BOLD, 44));
+            value.setStyle("-fx-text-fill: " + Theme.hex(t.accent1) + ";");
+            Label name = new Label(humanColumnName(columns.get(0)));
+            name.setFont(Font.font("Monospace", 14));
+            name.setStyle("-fx-text-fill: " + mut + ";");
+            VBox box = new VBox(6, value, name);
+            box.setAlignment(Pos.CENTER);
+            box.setPadding(new Insets(24));
+            center = box;
+            summary = "";
+        } else if (rows.isEmpty()) {
+            Label none = new Label(Lang.t("Keine Treffer.", "No matches."));
+            none.setFont(Font.font("Monospace", FontWeight.BOLD, 20));
+            none.setStyle("-fx-text-fill: " + mut + ";");
+            StackPane sp = new StackPane(none);
+            sp.setPadding(new Insets(24));
+            center = sp;
+            summary = Lang.t("0 Zeilen", "0 rows");
+        } else {
+            TableView<List<String>> table = new TableView<>();
+            table.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY_FLEX_LAST_COLUMN);
+            for (int c = 0; c < columns.size(); c++) {
+                final int ci = c;
+                TableColumn<List<String>, String> col = new TableColumn<>(humanColumnName(columns.get(c)));
+                col.setCellValueFactory(r -> new ReadOnlyStringWrapper(
+                        ci < r.getValue().size() ? r.getValue().get(ci) : null));
+                col.setComparator(ResultPopup::compareMixed);
+                table.getColumns().add(col);
+            }
+            ObservableList<List<String>> items = FXCollections.observableArrayList(
+                    rows.size() > MAX_TABLE_ROWS ? rows.subList(0, MAX_TABLE_ROWS) : rows);
+            table.setItems(items);
+            table.setStyle("-fx-font-family: monospace; -fx-font-size: 13px;");
+            table.setPrefHeight(Math.min(520, 60 + 26.0 * items.size()));
+            center = table;
+            summary = rows.size() + " " + Lang.t("Zeile(n)", "row(s)")
+                    + (rows.size() > MAX_TABLE_ROWS
+                       ? Lang.t(" – Tabelle zeigt die ersten ", " – table shows the first ") + MAX_TABLE_ROWS : "");
+        }
+
+        Label info = new Label(summary);
+        info.setFont(Font.font("Monospace", 12));
+        info.setStyle("-fx-text-fill: " + mut + ";");
+
+        Button copy = new Button(Lang.t("Kopieren", "Copy"));
+        copy.setOnAction(e -> {
+            ClipboardContent cc = new ClipboardContent();
+            cc.putString(toDelimited(columns, rows, '\t'));
+            Clipboard.getSystemClipboard().setContent(cc);
+        });
+        Button export = new Button(Lang.t("Als CSV speichern…", "Save as CSV…"));
+        export.setOnAction(e -> {
+            FileChooser fc = new FileChooser();
+            fc.setInitialFileName("lighthouse_ergebnis.csv");
+            fc.getExtensionFilters().add(new FileChooser.ExtensionFilter("CSV", "*.csv"));
+            File f = fc.showSaveDialog(stage);
+            if (f == null) return;
+            try {
+                String header = "# " + Lang.t("Frage", "Question") + ": " + oneLine(question) + "\n"
+                              + "# SQL: " + oneLine(sql) + "\n";
+                Files.writeString(f.toPath(), header + toDelimited(columns, rows, ';'), StandardCharsets.UTF_8);
+            } catch (Exception ex) {
+                new Alert(Alert.AlertType.ERROR, ex.getMessage()).showAndWait();
+            }
+        });
+        Button close = new Button(Lang.t("Schließen", "Close"));
+        close.setOnAction(e -> stage.close());
+        close.setDefaultButton(true);
+
+        Region spacer = new Region();
+        HBox.setHgrow(spacer, Priority.ALWAYS);
+        HBox buttons = new HBox(8, info, spacer, copy, export, close);
+        buttons.setAlignment(Pos.CENTER_LEFT);
+
+        VBox root = new VBox(10, q, center, sqlPane, buttons);
+        VBox.setVgrow(center, Priority.ALWAYS);
+        root.setPadding(new Insets(14));
+        root.setStyle(t.bgStyle());
+
+        stage.setScene(new Scene(root, single ? 460 : 760, single ? 330 : 560));
+        stage.show();
+    }
+
+    /** "COUNT(*)" → "Anzahl", "SUM(duration_seconds)" → "Summe (duration_seconds)" usw. */
+    static String humanColumnName(String c) {
+        if (c == null) return "";
+        String l = c.trim().toLowerCase(Locale.ROOT);
+        String inner = c.contains("(") && c.endsWith(")")
+                ? c.substring(c.indexOf('(') + 1, c.length() - 1).replaceFirst("(?i)^distinct\\s+", "").trim() : "";
+        if (l.startsWith("count(")) {
+            return l.contains("distinct") ? Lang.t("Anzahl verschiedener ", "Number of distinct ") + inner
+                                          : Lang.t("Anzahl", "Count");
+        }
+        if (l.startsWith("sum("))   return Lang.t("Summe", "Sum") + " (" + inner + ")";
+        if (l.startsWith("avg("))   return Lang.t("Durchschnitt", "Average") + " (" + inner + ")";
+        if (l.startsWith("min("))   return "Minimum (" + inner + ")";
+        if (l.startsWith("max("))   return "Maximum (" + inner + ")";
+        return c;
+    }
+
+    private static int compareMixed(String a, String b) {
+        if (a == null) return b == null ? 0 : -1;
+        if (b == null) return 1;
+        try { return Double.compare(Double.parseDouble(a), Double.parseDouble(b)); }
+        catch (NumberFormatException e) { return a.compareTo(b); }
+    }
+
+    private static String toDelimited(List<String> cols, List<List<String>> rows, char sep) {
+        StringBuilder sb = new StringBuilder();
+        sb.append(String.join(String.valueOf(sep), cols.stream().map(c -> esc(c, sep)).toList())).append('\n');
+        for (List<String> r : rows) {
+            for (int i = 0; i < r.size(); i++) {
+                if (i > 0) sb.append(sep);
+                sb.append(esc(r.get(i), sep));
+            }
+            sb.append('\n');
+        }
+        return sb.toString();
+    }
+
+    private static String esc(String v, char sep) {
+        if (v == null) return "";
+        if (v.indexOf(sep) >= 0 || v.indexOf('"') >= 0 || v.indexOf('\n') >= 0) {
+            return '"' + v.replace("\"", "\"\"") + '"';
+        }
+        return v;
+    }
+
+    private static String oneLine(String s) { return s == null ? "" : s.replaceAll("\\s+", " ").trim(); }
+}
