@@ -27,6 +27,7 @@ import fqlite.erm.SchemaToMermaidConverter;
 import fqlite.fts.SearchDialog;
 import fqlite.location.GPSParser;
 import fqlite.location.GeoCoordinate;
+import fqlite.nodeql.NodeQlBuilderWindow;
 import fqlite.rag.*;
 import fqlite.sql.DBManager;
 import fqlite.sql.InMemoryDatabase;
@@ -61,6 +62,7 @@ import javafx.collections.transformation.SortedList;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
 import javafx.scene.Scene;
+import javafx.scene.Group;
 import javafx.scene.control.Alert.AlertType;
 import javafx.scene.control.TableColumn.CellDataFeatures;
 import javafx.scene.image.Image;
@@ -72,6 +74,9 @@ import javafx.scene.input.KeyCodeCombination;
 import javafx.scene.input.KeyCombination;
 import javafx.scene.input.MouseButton;
 import javafx.scene.input.TransferMode;
+import javafx.scene.paint.Color;
+import javafx.scene.shape.Circle;
+import javafx.scene.shape.Line;
 import javafx.stage.FileChooser;
 import javafx.stage.Modality;
 import javafx.stage.Screen;
@@ -166,6 +171,8 @@ public class GUI extends Application {
 	 * Callbacks notified whenever the user switches the theme.
 	 */
 	private final List<Runnable> themeListeners = new ArrayList<>();
+	private final ChangeListener<Boolean> sharedThemeListener =
+			(observable, wasDark, isDark) -> syncThemeControls();
 
 	public static byte[] currently_selected_hex;
 
@@ -211,6 +218,7 @@ public class GUI extends Application {
 
 	/* Buttons for toolbar */
 	Button btnSQL;
+	Button btnNodeQl;
 	Button btnLLM;
 	Button btnLocation;
 	Button btnExport;
@@ -560,6 +568,13 @@ public class GUI extends Application {
 		toolBar.getItems().add(btnSQL);
 		btnSQL.setOnAction(e -> showSqlWindow(null, getDatabaseNode()));
 
+		btnNodeQl = new Button();
+		btnNodeQl.setGraphic(createNodeQlIcon());
+		btnNodeQl.setDisable(true);
+		btnNodeQl.setTooltip(new Tooltip("Open NodeQL Builder"));
+		btnNodeQl.setOnAction(e -> showNodeQlBuilder());
+		toolBar.getItems().add(btnNodeQl);
+
 		s = Objects.requireNonNull(GUI.class.getResource("/icon24_reasoning.png")).toExternalForm();
 		btnLLM = new Button();
 		iv = new ImageView(s);
@@ -725,6 +740,11 @@ public class GUI extends Application {
 		topContainer.getChildren().add(splitPane);
 		scene = new Scene(topContainer, Screen.getPrimary().getVisualBounds().getWidth() * 0.9, Screen.getPrimary().getVisualBounds().getHeight() * 0.9);
 		ThemeManager.register(scene);   // ← register main window
+		ThemeManager.darkProperty().addListener(sharedThemeListener);
+		stage.addEventHandler(javafx.stage.WindowEvent.WINDOW_HIDDEN, event -> {
+			ThemeManager.darkProperty().removeListener(sharedThemeListener);
+			ThemeManager.unregister(scene);
+		});
 		VBox.setVgrow(splitPane, Priority.ALWAYS);
 
 		stage.showingProperty().addListener(new ChangeListener<>() {
@@ -831,11 +851,13 @@ public class GUI extends Application {
 	// ══════════════════════════════════════════════════════════════════════
 
 	private void toggleTheme() {
-		currentTheme = (currentTheme == GUI.Theme.DARK) ? GUI.Theme.LIGHT : GUI.Theme.DARK;
-		// Sync ThemeManager state and repaint ALL registered scenes (main + all dialogs)
-		ThemeManager.setDark(currentTheme == GUI.Theme.DARK);
+		ThemeManager.setDark(!ThemeManager.isDark());
+	}
 
-		tree.refresh();
+	private void syncThemeControls() {
+		currentTheme = ThemeManager.isDark() ? GUI.Theme.DARK : GUI.Theme.LIGHT;
+
+		if (tree != null) tree.refresh();
 		// Update the toggle button label/style
 		if (themeBtn != null) {
 			themeBtn.setText(ThemeManager.toggleLabel());
@@ -866,7 +888,7 @@ public class GUI extends Application {
 	 * Returns {@code true} when the dark theme is currently active.
 	 */
 	public boolean isDarkTheme() {
-		return currentTheme == GUI.Theme.DARK;
+		return ThemeManager.isDark();
 	}
 
 	/**
@@ -1199,6 +1221,45 @@ public class GUI extends Application {
 			});
 		});
 
+	}
+
+	private void showNodeQlBuilder() {
+		TreeItem<NodeObject> databaseNode = getDatabaseNode();
+		if (databaseNode == null) {
+			return;
+		}
+
+		String dbname = databaseNode.getValue().name;
+		InMemoryDatabase database = DBManager.exists(dbname)
+				? DBManager.get(dbname)
+				: createInMemoryDB(databaseNode.getValue());
+		if (database == null) {
+			return;
+		}
+
+		new NodeQlBuilderWindow(this, databaseNode, database, stage).show();
+	}
+
+	private javafx.scene.Node createNodeQlIcon() {
+		Color accent = Color.web("#1696ff");
+		Line firstConnection = new Line(5, 5, 18, 12);
+		Line secondConnection = new Line(18, 12, 8, 21);
+		firstConnection.setStroke(accent);
+		secondConnection.setStroke(accent);
+		firstConnection.setStrokeWidth(1.8);
+		secondConnection.setStrokeWidth(1.8);
+
+		Circle firstNode = graphNode(5, 5, accent);
+		Circle secondNode = graphNode(18, 12, accent);
+		Circle thirdNode = graphNode(8, 21, accent);
+		return new Group(firstConnection, secondConnection, firstNode, secondNode, thirdNode);
+	}
+
+	private Circle graphNode(double centerX, double centerY, Color accent) {
+		Circle node = new Circle(centerX, centerY, 3.2, Color.TRANSPARENT);
+		node.setStroke(accent);
+		node.setStrokeWidth(1.8);
+		return node;
 	}
 
 	private static void showWarning(Stage stage, String details) {
@@ -2760,6 +2821,7 @@ public class GUI extends Application {
 
 			btnLLM.setDisable(active);
 			btnSQL.setDisable(active);
+			btnNodeQl.setDisable(active);
 			btnFTS.setDisable(active);
 			btnExport.setDisable(active);
 			btnExportDB.setDisable(active);

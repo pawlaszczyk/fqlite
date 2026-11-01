@@ -95,10 +95,90 @@ In the latest version, the FQLite is bundled with a Java Runtime Environment (JR
 ### NodeQL Implementation
 
 <p align="center">
-  <img width="80%" height="80%" src="img/nodeql_implemantation.png?raw=true" alt="NodeQL Node Windows Showcase"/>
+  <img width="95%" src="img/nodeql-current-editor.png?raw=true" alt="NodeQL editor with connected blocks, SQL preview and inline query results"/>
 </p>
 
-With NodeQL you can easily create full SQL Commands graphicly. Just use the Nodes and Snap them onto each other. It work's this simple.
+Version **5.1** updates the visual SQLite editor to follow the current
+[NodeQL](https://github.com/Kartoffelspalt/NodeQL) block shapes, colors and workflow.
+This is a JavaFX integration, not the standalone Flutter application.
+
+This fork's [5.1 release](https://github.com/Kartoffelspalt/fqlite-nodeql_integration/releases/tag/5.1)
+provides **source code only**, without prebuilt installers or a bundled JRE.
+Use JDK 21 and the [source launch instructions](#run-from-source) below.
+See the [release notes](docs/releases/5.1.md) for scope and verification.
+
+1. Open a SQLite database in FQLite and click the **NodeQL graph icon in the toolbar**.
+   There is no separate NodeQL entry in the top menu bar.
+2. Search the palette, snap statements below `EXECUTE QUERY` and insert oval
+   reporters into input slots. Use structured conditions, sorting, aliases,
+   SQLite functions, `DISTINCT` and `LIMIT`/`OFFSET` to compose your query.
+   Every table input offers existing tables and views through **▾**; type to
+   filter suggestions, or keep any custom SQL input. Suggested identifiers are
+   quoted automatically, including names containing spaces or quotes.
+   Column inputs provide the same suggestions for the selected table(s), including
+   aliases and qualified JOIN columns. In SELECT lists, type a comma to add another
+   suggested column; existing projections and custom SQL expressions are retained.
+   Or click **☑** to select multiple columns with checkboxes and apply them together.
+   Existing selections are prechecked, filtering keeps checked items, and Cancel
+   leaves the input unchanged. SELECT, COLUMN reporters, GROUP BY and function
+   argument lists support this picker; free SQL input is still available.
+3. Click **Run Query** or the yellow start block. SQL and results stay in the
+   NodeQL editor; **Expand results** opens a larger result view. Opening the SQL
+   Analyzer is optional.
+
+NodeQL workspaces are session-only: nodes are **not saved or restored with
+FQLite projects**. Undo is available inside the editor.
+
+The **Light/Dark switch** at the right of the toolbar uses FQLite's shared theme
+setting and button style. Switching in either window updates the main app, all
+open NodeQL builders and expanded results. There is no separate NodeQL theme
+preference; like the main app, the selection applies to the current session.
+
+Dragging nodes does not pan or recenter the workspace. Use the empty canvas with
+the right/middle mouse button to pan; zoom preserves the current view. Clicking
+the palette's `EXECUTE QUERY` card explicitly returns to the query chain.
+
+<details>
+  <summary>Light theme preview</summary>
+  <img width="95%" src="img/nodeql-light-editor.png?raw=true" alt="NodeQL for FQLite using the main application's light theme"/>
+</details>
+
+<details>
+  <summary>Column multi-selection preview</summary>
+  <img src="img/nodeql-column-multiselect.png?raw=true" alt="Searchable column checklist with id and title selected, Apply and Cancel"/>
+</details>
+
+See the [integration and usage guide](NODEQL_INTEGRATION_GUIDE.md),
+[verification notes](design-qa.md) and [5.1 changelog](CHANGELOG.md).
+The upstream FQLite PDF user manual is unchanged; this guide documents the
+NodeQL-specific workflow.
+
+### Run from source
+
+Use JDK 21 and the included Gradle wrapper. On macOS, `./run-fqlite.sh` locates
+a compatible JDK and starts the application. On other platforms, set
+`JAVA_HOME` to your JDK 21 installation and run:
+
+```sh
+./gradlew run
+```
+
+Compile and process resources without opening the GUI:
+
+```sh
+./gradlew compileJava processResources
+```
+
+Run the NodeQL integration smoke test on a graphical desktop:
+
+```sh
+./gradlew nodeQlSmokeTest
+```
+
+The test opens and closes a temporary editor, uses an in-memory sample database,
+and writes screenshots to `build/reports/nodeql/editor.png` and
+`build/reports/nodeql/editor-light.png`. It does not open
+or modify user databases or projects.
 
 # Installation
 ## macOS

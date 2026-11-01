@@ -9,7 +9,7 @@ plugins {
 
 
 group 'hswm.fqlite'
-version '5.0'
+version '5.1'
 
 def currentOs = org.gradle.internal.os.OperatingSystem.current()
 
@@ -23,6 +23,9 @@ repositories {
 }
 
 sourceSets {
+    test {
+        java.srcDirs = ['tests']
+    }
     main {
         java {
             srcDirs = ['src']
@@ -63,6 +66,16 @@ jar {
 compileJava.options.encoding = 'UTF-8'
 compileTestJava.options.encoding = 'UTF-8'
 javadoc.options.encoding = 'UTF-8'
+
+// Requires a graphical desktop. Uses only a temporary in-memory SQLite database.
+tasks.register('nodeQlSmokeTest', JavaExec) {
+    group = 'verification'
+    description = 'Verify NodeQL blocks, SQL compilation, undo and inline execution.'
+    dependsOn tasks.named('testClasses')
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'NodeQlSmokeTestLauncher'
+    systemProperty 'nodeql.screenshot', layout.buildDirectory.file('reports/nodeql/editor.png').get().asFile.absolutePath
+}
 
 dependencies {
     implementation(group: 'dev.langchain4j', name: 'langchain4j', version: '1.9.1')

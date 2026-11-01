@@ -57,11 +57,19 @@ public final class SqlCompiler {
             case SQL_SELECT -> "SELECT " + value(inputs, "columns", "*")
                     + "\nFROM " + value(inputs, "table", "table_name");
             case SQL_COLUMN -> value(inputs, "column", "*");
+            case SQL_TEXT -> "'" + value(inputs, "text", "").replace("'", "''") + "'";
+            case SQL_ALIAS -> value(inputs, "value", "id") + " AS \""
+                    + value(inputs, "alias", "alias").replace("\"", "\"\"") + "\"";
+            case SQL_FUNCTION -> value(inputs, "function", "datetime") + "(" + value(inputs, "args", "") + ")";
             case SQL_FROM -> "FROM " + value(inputs, "table", "table_name");
             case SQL_WHERE -> "WHERE " + value(inputs, "predicate", "1 = 1");
+            case SQL_AND -> "AND " + value(inputs, "predicate", "1 = 1");
+            case SQL_OR -> "OR " + value(inputs, "predicate", "1 = 1");
             case SQL_GROUP_BY -> "GROUP BY " + value(inputs, "expr", "id");
             case SQL_HAVING -> "HAVING " + value(inputs, "predicate", "COUNT(*) > 0");
             case SQL_ORDER_BY -> "ORDER BY " + value(inputs, "expr", "id DESC");
+            case SQL_LIMIT -> "LIMIT " + value(inputs, "count", "5")
+                    + (value(inputs, "offset", "").isEmpty() ? "" : " OFFSET " + value(inputs, "offset", ""));
 
             case SQL_JOIN -> join("JOIN", inputs);
             case SQL_INNER_JOIN -> join("INNER JOIN", inputs);

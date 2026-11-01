@@ -2,6 +2,8 @@ package fqlite.base;
 
 import fqlite.ui.FileInfo;
 import javafx.application.Platform;
+import javafx.beans.property.ReadOnlyBooleanProperty;
+import javafx.beans.property.ReadOnlyBooleanWrapper;
 import javafx.scene.Scene;
 import javafx.scene.paint.Color;
 import javafx.scene.text.Text;
@@ -12,6 +14,8 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.HashMap;
+import java.util.Map;
 
 /**
  * Central theme manager for FQLite.
@@ -30,7 +34,7 @@ import java.util.List;
  *   stage.setScene(scene);
  * </pre>
  *
- * The CSS is written to a temporary file once per theme change so that
+ * The CSS is written to a separate temporary file for each theme so that
  * JavaFX's stylesheet URL mechanism can pick it up.
  */
 public final class ThemeManager {
@@ -40,8 +44,8 @@ public final class ThemeManager {
 
 
     // ── Singleton state ──────────────────────────────────────────────────
-    private static boolean dark = true;   // default: dark theme
-    private static File    activeStyleFile;
+    private static final ReadOnlyBooleanWrapper dark = new ReadOnlyBooleanWrapper(true);
+    private static final Map<Boolean, File> styleFiles = new HashMap<>();
 
     /** All scenes that should receive theme updates. */
     private static final List<Scene> scenes = new ArrayList<>();
@@ -51,21 +55,20 @@ public final class ThemeManager {
     // ── Public API ───────────────────────────────────────────────────────
 
     /** Returns {@code true} when the current theme is Dark. */
-    public static boolean isDark() { return dark; }
+    public static boolean isDark() { return dark.get(); }
+
+    /** Shared, read-only theme state for toggle buttons and custom-painted controls. */
+    public static ReadOnlyBooleanProperty darkProperty() { return dark.getReadOnlyProperty(); }
 
     /**
      * Switch to dark ({@code true}) or light ({@code false}) theme and
      * immediately repaint every registered scene.
      */
     public static void setDark(boolean useDark) {
-        dark = useDark;
-        applyToAll();
-        for (TextFlow tf : flows){
-            applyToTextFlow(tf);
-        }
-        for (FileInfo fi : fileinfos){
-            fi.setTheme(isDark());
-        }
+        onFxThread(() -> {
+            dark.set(useDark);
+            applyToAll();
+        });
     }
 
     /**
@@ -75,7 +78,7 @@ public final class ThemeManager {
      */
     public static void register(Scene scene) {
         if (scene == null) return;
-        Platform.runLater(() -> {
+        onFxThread(() -> {
             if (!scenes.contains(scene)) scenes.add(scene);
             applyTo(scene);
         });
@@ -86,7 +89,7 @@ public final class ThemeManager {
      */
     public static void unregister(Scene scene) {
         if (scene == null) return;
-        Platform.runLater(() -> scenes.remove(scene));
+        onFxThread(() -> scenes.remove(scene));
     }
 
     /**
@@ -94,11 +97,18 @@ public final class ThemeManager {
      * Called automatically by {@link #setDark}; can also be called manually.
      */
     public static void applyToAll() {
-        // Rebuild the CSS file once, then hand it to every scene
-        String cssUri = buildCssFile();
-        Platform.runLater(() -> {
+        onFxThread(() -> {
+            // Rebuild the CSS file once, then hand it to every scene.
+            String cssUri = buildCssFile();
             for (Scene s : List.copyOf(scenes)) applyTo(s, cssUri);
+            flows.forEach(ThemeManager::applyToTextFlow);
+            fileinfos.forEach(fi -> fi.setTheme(isDark()));
         });
+    }
+
+    private static void onFxThread(Runnable action) {
+        if (Platform.isFxApplicationThread()) action.run();
+        else Platform.runLater(action);
     }
 
     // ── Internal helpers ─────────────────────────────────────────────────
@@ -111,7 +121,7 @@ public final class ThemeManager {
     private static void applyTo(Scene scene, String cssUri) {
         if (scene == null || scene.getRoot() == null) return;
 
-        ThemeColors c = dark ? DARK : LIGHT;
+        ThemeColors c = isDark() ? DARK : LIGHT;
 
         // Inline JavaFX skin variables (picked up by all controls)
         scene.getRoot().setStyle(
@@ -121,12 +131,20 @@ public final class ThemeManager {
                 "-fx-background: "             + c.bgRoot()    + ";" +
                 "-fx-control-inner-background: "+ c.bgControl() + ";" +
                 "-fx-text-base-color: "        + c.textMain()  + ";" +
-                "-fx-text-background-color: "  + c.textMain()  + ";"
+                "-fx-text-background-color: "  + c.textMain()  + ";" +
+                // Shared palette for custom editors without duplicating app settings.
+                "-fqlite-toolbar: " + c.bgToolbar() + ";" +
+                "-fqlite-border: " + c.border() + ";" +
+                "-fqlite-muted: " + c.textMuted() + ";" +
+                "-fqlite-hover: " + c.bgHover() + ";" +
+                "-fqlite-selected: " + c.bgSelected() + ";" +
+                "-fqlite-selected-text: " + c.textTabSel() + ";" +
+                "-fqlite-code-text: " + c.textArea() + ";"
         );
 
         // Remove old stylesheet URL (if any)
         scene.getStylesheets().removeIf(url ->
-                activeStyleFile != null && url.equals(activeStyleFile.toURI().toString()));
+                styleFiles.values().stream().anyMatch(file -> url.equals(file.toURI().toString())));
 
         if (cssUri != null) scene.getStylesheets().add(cssUri);
 
@@ -141,17 +159,19 @@ public final class ThemeManager {
 
     }
 
-    /** Writes the CSS to a temp file and returns its URI string. */
+    /** Keep stable, distinct URLs: never rewrite a stylesheet JavaFX may have cached. */
     private static String buildCssFile() {
-        ThemeColors c = dark ? DARK : LIGHT;
+        ThemeColors c = isDark() ? DARK : LIGHT;
         String css = buildCss(c);
         try {
-            if (activeStyleFile == null) {
-                activeStyleFile = File.createTempFile("fqlite_theme_", ".css");
-                activeStyleFile.deleteOnExit();
+            File styleFile = styleFiles.get(isDark());
+            if (styleFile == null) {
+                styleFile = File.createTempFile("fqlite_theme_", ".css");
+                styleFile.deleteOnExit();
+                Files.writeString(styleFile.toPath(), css);
+                styleFiles.put(isDark(), styleFile);
             }
-            Files.writeString(activeStyleFile.toPath(), css);
-            return activeStyleFile.toURI().toString();
+            return styleFile.toURI().toString();
         } catch (IOException e) {
             System.err.println("ThemeManager: could not write CSS file – " + e.getMessage());
             return null;
@@ -191,12 +211,12 @@ public final class ThemeManager {
 
     /** @return the toggle button label for the current theme */
     public static String toggleLabel() {
-        return dark ? DARK.toggleLabel() : LIGHT.toggleLabel();
+        return isDark() ? DARK.toggleLabel() : LIGHT.toggleLabel();
     }
 
     /** @return the toggle button style string for the current theme */
     public static String toggleBtnStyle() {
-        ThemeColors c = dark ? DARK : LIGHT;
+        ThemeColors c = isDark() ? DARK : LIGHT;
         return "-fx-background-color: " + c.toggleBg()   + ";"
                + "-fx-text-fill: "         + c.toggleText() + ";"
                + "-fx-border-color: "      + c.border()     + ";"
@@ -227,7 +247,7 @@ public final class ThemeManager {
      */
     public static void applyToTextFlow(TextFlow textFlow) {
         if (textFlow == null) return;
-        ThemeColors c = dark ? DARK : LIGHT;
+        ThemeColors c = isDark() ? DARK : LIGHT;
         Color fill = Color.web(c.textMain());
         textFlow.getChildren().stream()
                 .filter(node -> node instanceof Text)
@@ -257,7 +277,7 @@ public final class ThemeManager {
 
     private static String buildCss(ThemeColors c) {
         // Pick light-only extras when in light mode, otherwise use dark-neutral values
-        boolean lt = !dark;
+        boolean lt = !isDark();
         String btnBg       = lt ? L_BTN_BG        : c.bgSelected();
         String btnBgHover  = lt ? L_BTN_BG_HOVER  : c.bgHover();
         String btnBgPress  = lt ? L_BTN_BG_PRESS  : c.divider();
