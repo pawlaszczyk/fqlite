@@ -411,7 +411,27 @@ public class RecoveryTask implements Runnable {
 
 
 
-				DataRow row = ct.readRecord(celloff, buffer, pagenumber, visit, Integer.MAX_VALUE, withoutROWID,Global.REGULAR_DB_FILE,-1,null);
+				/*
+				 * Anti-forensics: a manipulated cell pointer (0, inside the page header / pointer
+				 * array, or at the very end of the page) must not abort the whole page - previously
+				 * the resulting exception skipped all following cells AND the carving of the page.
+				 * Invalid pointers are skipped; the unreferenced cells are found by carving (STEP 3).
+				 */
+				int pointerArrayEnd = (type == 5 ? 12 : 8) + 2 * cp;
+				if (celloff < pointerArrayEnd || celloff > pagesize - 4) {
+					AppLog.info("Possible manipulation: invalid cell pointer " + celloff + " (cell " + i
+							+ ") on page " + pagenumber + " - skipped.");
+					continue;
+				}
+
+				DataRow row;
+				try {
+					row = ct.readRecord(celloff, buffer, pagenumber, visit, Integer.MAX_VALUE, withoutROWID,Global.REGULAR_DB_FILE,-1,null);
+				} catch (RuntimeException ex) {
+					AppLog.info("Possible manipulation: cell at offset " + celloff + " on page " + pagenumber
+							+ " could not be read (" + ex.getClass().getSimpleName() + ") - skipped.");
+					continue;
+				}
 
 
 				// add new line to output
