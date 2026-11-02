@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">
+  <defs>
+    <linearGradient id="h" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#B5B5B5"/>
+      <stop offset="1" stop-color="#7A7A7A"/>
+    </linearGradient>
+  </defs>
+  <rect x="0.75" y="0.75" width="14.5" height="14.5" rx="1" fill="#FFFFFF"/>
+  <path d="M0.75 3.8 V1.75 A1 1 0 0 1 1.75 0.75 H14.25 A1 1 0 0 1 15.25 1.75 V3.8 Z" fill="url(#h)"/>
+  <path d="M5.6 3.8 V15.25 M10.4 3.8 V15.25 M0.75 7.6 H15.25 M0.75 11.4 H15.25" stroke="#C8C8C8" stroke-width="1"/>
+  <rect x="0.75" y="0.75" width="14.5" height="14.5" rx="1" fill="none" stroke="#5A5A5A" stroke-width="1.2"/>
+  <defs>
+    <linearGradient id="k" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#E4E4E4"/>
+      <stop offset="1" stop-color="#A6A6A6"/>
+    </linearGradient>
+  </defs>
+  <g stroke-linecap="round" stroke-linejoin="round">
+    <path d="M10.6 11.7 L6.2 15.1 M7.6 14 L8.6 15.3" stroke="#7A7A7A" stroke-width="2.6" fill="none"/>
+    <path d="M10.6 11.7 L6.2 15.1 M7.6 14 L8.6 15.3" stroke="#D6D6D6" stroke-width="1.2" fill="none"/>
+    <circle cx="12.2" cy="10.2" r="2.9" fill="url(#k)" stroke="#7A7A7A" stroke-width="0.9"/>
+    <circle cx="12.7" cy="9.7" r="0.85" fill="#5A5A5A"/>
+  </g>
+  <circle cx="3.4" cy="12.6" r="2.7" fill="#E02020" stroke="#FFFFFF" stroke-width="0.8"/>
+</svg>

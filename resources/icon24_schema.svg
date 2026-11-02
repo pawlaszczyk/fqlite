@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">
+  <defs>
+    <linearGradient id="h" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#A9CBF2"/>
+      <stop offset="1" stop-color="#5E93D8"/>
+    </linearGradient>
+  </defs>
+  <path d="M8.3 4.5 V3.4000000000000004 A0.8 0.8 0 0 1 9.100000000000001 2.6 H14.9 A0.8 0.8 0 0 1 15.700000000000001 3.4000000000000004 V4.5 Z" fill="url(#h)"/>
+  <rect x="8.3" y="2.6" width="7.4" height="6.2" rx="0.8" fill="none" stroke="#2B5C9E" stroke-width="0.85"/>
+  <path d="M8.3 4.5 H15.700000000000001" stroke="#2B5C9E" stroke-width="0.6"/>
+  <path d="M0.8 16.3 V15.200000000000001 A0.8 0.8 0 0 1 1.6 14.4 H7.0 A0.8 0.8 0 0 1 7.8 15.200000000000001 V16.3 Z" fill="url(#h)"/>
+  <rect x="0.8" y="14.4" width="7" height="6" rx="0.8" fill="none" stroke="#2B5C9E" stroke-width="0.85"/>
+  <path d="M0.8 16.3 H7.8" stroke="#2B5C9E" stroke-width="0.6"/>
+  <path d="M16.2 16.3 V15.200000000000001 A0.8 0.8 0 0 1 17.0 14.4 H22.4 A0.8 0.8 0 0 1 23.2 15.200000000000001 V16.3 Z" fill="url(#h)"/>
+  <rect x="16.2" y="14.4" width="7" height="6" rx="0.8" fill="none" stroke="#2B5C9E" stroke-width="0.85"/>
+  <path d="M16.2 16.3 H23.2" stroke="#2B5C9E" stroke-width="0.6"/>
+  <path d="M12 8.8 V10 M10.6 11.6 H4.3 V14.4 M13.4 11.6 H19.7 V14.4" fill="none" stroke="#2B5C9E" stroke-width="1"/>
+  <path d="M12 10 L13.5 11.6 L12 13.2 L10.5 11.6 Z" fill="url(#h)" stroke="#2B5C9E" stroke-width="0.9" stroke-linejoin="round"/>
+</svg>

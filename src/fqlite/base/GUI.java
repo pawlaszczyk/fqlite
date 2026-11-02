@@ -1,5 +1,7 @@
 package fqlite.base;
 
+import fqlite.util.SVGLoader;
+
 import java.awt.AWTException;
 import java.awt.SystemTray;
 import java.awt.Taskbar;
@@ -62,7 +64,6 @@ import javafx.collections.transformation.SortedList;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
 import javafx.scene.Scene;
-import javafx.scene.Group;
 import javafx.scene.control.Alert.AlertType;
 import javafx.scene.control.TableColumn.CellDataFeatures;
 import javafx.scene.image.Image;
@@ -75,8 +76,6 @@ import javafx.scene.input.KeyCombination;
 import javafx.scene.input.MouseButton;
 import javafx.scene.input.TransferMode;
 import javafx.scene.paint.Color;
-import javafx.scene.shape.Circle;
-import javafx.scene.shape.Line;
 import javafx.stage.FileChooser;
 import javafx.stage.Modality;
 import javafx.stage.Screen;
@@ -164,7 +163,27 @@ public class GUI extends Application {
 	);
 
 
-	private static int icon_size_in_pixels = 30;
+	private static int icon_size_in_pixels = 21;
+
+	/**
+	 * Loads a toolbar/tree icon. The vector version (/name.svg) is preferred;
+	 * if it is missing or cannot be rendered, the bitmap (/name.png) is used.
+	 */
+	public static ImageView loadIcon(String name, double size) {
+		ImageView view;
+		try {
+			view = SVGLoader.loadSvg("/" + name + ".svg", size, size);
+		} catch (Exception ex) {
+			AppLog.info("Could not load " + name + ".svg, falling back to PNG: " + ex);
+			view = new ImageView(Objects.requireNonNull(GUI.class.getResource("/" + name + ".png")).toExternalForm());
+			view.setFitWidth(size);
+			view.setFitHeight(size);
+			view.setPreserveRatio(true);
+		}
+		view.setSmooth(true);
+		view.setCache(true);
+		return view;
+	}
 
 	private GUI.Theme currentTheme = GUI.Theme.DARK;
 	/**
@@ -260,6 +279,9 @@ public class GUI extends Application {
 
 		}
 
+		// Erzwingt besseres Font- und Linien-Rendering auf manchen Systemen
+		System.setProperty("prism.lcdtext", "false");
+		System.setProperty("prism.text", "t2k");
 
 		ImageIcon img = new ImageIcon(Objects.requireNonNull(GUI.class.getResource("/logo.png")));
 
@@ -323,10 +345,7 @@ public class GUI extends Application {
 
 		stage.setTitle("FQLite Carving Tool");
 
-		String s = Objects.requireNonNull(GUI.class.getResource("/icon24_root.png")).toExternalForm();
-		ImageView iv = new ImageView(s);
-		iv.setFitHeight(icon_size_in_pixels-4);
-		iv.setFitWidth(icon_size_in_pixels-4);
+		ImageView iv = loadIcon("icon24_root", icon_size_in_pixels - 4);
 		root.setGraphic(iv);
 		root.setExpanded(true);
 
@@ -407,14 +426,11 @@ public class GUI extends Application {
 
 		splitPane = new SplitPane();
 
-		s = Objects.requireNonNull(GUI.class.getResource("/icon24_dragdrop.png")).toExternalForm();
 		Label starthere = new Label();
 		starthere.setMaxSize(100, 100);
 		starthere.setTooltip(new Tooltip("Drag your files here"));
 
-		iv = new ImageView(s);
-		iv.setFitWidth(96);
-		iv.setFitHeight(96);
+		iv = loadIcon("icon24_dragdrop", 96);
 		starthere.setGraphic(iv);
 		//starthere.setOnAction(e->open_db(null));
 		rootPane.setAlignment(Pos.CENTER);
@@ -433,52 +449,29 @@ public class GUI extends Application {
 		ToolBar toolBar = new ToolBar();
 
 		//openDB_gray.png
-		s = Objects.requireNonNull(GUI.class.getResource("/icon24_openn.png")).toExternalForm();
 		Button btnOeffne = new Button();
-		iv = new ImageView(s);
-		iv.smoothProperty().setValue(true);
-		iv.setCache(true);
-		iv.preserveRatioProperty().setValue(true);
-		iv.setFitHeight(icon_size_in_pixels);
-		iv.setFitWidth(icon_size_in_pixels);
+		iv = loadIcon("icon24_openn", icon_size_in_pixels);
 		btnOeffne.setGraphic(iv);
 		btnOeffne.setOnAction(e -> open_db(null));
 		btnOeffne.setTooltip(new Tooltip("Open database file"));
 		toolBar.getItems().add(btnOeffne);
 
-		s = Objects.requireNonNull(GUI.class.getResource("/icon24_closee.png")).toExternalForm();
 		Button btnClose = new Button();
-		iv = new ImageView(s);
-		iv.smoothProperty().setValue(true);
-		iv.setCache(true);
-		iv.preserveRatioProperty().setValue(true);
-		iv.setFitHeight(icon_size_in_pixels);
-		iv.setFitWidth(icon_size_in_pixels);
+		iv = loadIcon("icon24_closee", icon_size_in_pixels);
 		btnClose.setGraphic(iv);
 		btnClose.setTooltip(new Tooltip("Close All"));
 		toolBar.getItems().add(btnClose);
 		btnClose.setOnAction(e -> closeAll());
 
-		s = Objects.requireNonNull(GUI.class.getResource("/icon24_helpp.png")).toExternalForm();
 		Button about = new Button();
-		iv = new ImageView(s);
-		iv.setFitHeight(icon_size_in_pixels);
-		iv.setFitWidth(icon_size_in_pixels);
-		iv.smoothProperty().setValue(true);
-		iv.setCache(true);
+		iv = loadIcon("icon24_helpp", icon_size_in_pixels);
 		about.setGraphic(iv);
 		about.setOnAction(e -> showHelp());
 
 
 		//properties.png
-		s = Objects.requireNonNull(GUI.class.getResource("/icon24_settingss.png")).toExternalForm();
 		Button btnProp = new Button();
-		iv = new ImageView(s);
-		iv.smoothProperty().setValue(true);
-		iv.setCache(true);
-		iv.preserveRatioProperty().setValue(true);
-		iv.setFitHeight(icon_size_in_pixels);
-		iv.setFitWidth(icon_size_in_pixels);
+		iv = loadIcon("icon24_settingss", icon_size_in_pixels);
 		btnProp.setGraphic(iv);
 		btnProp.setTooltip(new Tooltip("Open setting window"));
 		toolBar.getItems().add(btnProp);
@@ -489,14 +482,8 @@ public class GUI extends Application {
 		toolBar.getItems().add(about);
 
 		// exit3_gray.png
-		s = Objects.requireNonNull(GUI.class.getResource("/icon24_exitt.png")).toExternalForm();
 		Button btnexit = new Button();
-		iv = new ImageView(s);
-		iv.smoothProperty().setValue(true);
-		iv.setCache(true);
-		iv.preserveRatioProperty().setValue(true);
-		iv.setFitHeight(icon_size_in_pixels);
-		iv.setFitWidth(icon_size_in_pixels);
+		iv = loadIcon("icon24_exitt", icon_size_in_pixels);
 		btnexit.setGraphic(iv);
 		btnexit.setTooltip(new Tooltip("Exit FQLite"));
 		btnexit.setOnAction(e -> {
@@ -508,28 +495,16 @@ public class GUI extends Application {
 
 		toolBar.getItems().add(new Separator());
 
-		s = Objects.requireNonNull(GUI.class.getResource("/icon24_hexx.png")).toExternalForm();
 		hexViewBtn = new Button();
-		iv = new ImageView(s);
-		iv.smoothProperty().setValue(true);
-		iv.setCache(true);
-		iv.preserveRatioProperty().setValue(true);
-		iv.setFitHeight(icon_size_in_pixels);
-		iv.setFitWidth(icon_size_in_pixels);
+		iv = loadIcon("icon24_hexx", icon_size_in_pixels);
 		hexViewBtn.setGraphic(iv);
 		hexViewBtn.setDisable(true);
 		hexViewBtn.setTooltip(new Tooltip("Show database in HexView"));
 		hexViewBtn.setOnAction(e -> openHexViewer());
 		toolBar.getItems().add(hexViewBtn);
 
-		s = Objects.requireNonNull(GUI.class.getResource("/icon24_schema.png")).toExternalForm();
 		btnSchema = new Button();
-		iv = new ImageView(s);
-		iv.smoothProperty().setValue(true);
-		iv.setCache(true);
-		iv.preserveRatioProperty().setValue(true);
-		iv.setFitHeight(icon_size_in_pixels);
-		iv.setFitWidth(icon_size_in_pixels);
+		iv = loadIcon("icon24_schema", icon_size_in_pixels);
 		btnSchema.setGraphic(iv);
 		btnSchema.setOnAction(e -> doAnalyzeSchema());
 		btnSchema.setDisable(true);
@@ -537,14 +512,8 @@ public class GUI extends Application {
 		toolBar.getItems().add(btnSchema);
 
 
-		s = Objects.requireNonNull(GUI.class.getResource("/icon24_searchh.png")).toExternalForm();
 		btnFTS = new Button();
-		iv = new ImageView(s);
-		iv.smoothProperty().setValue(true);
-		iv.setCache(true);
-		iv.preserveRatioProperty().setValue(true);
-		iv.setFitHeight(icon_size_in_pixels);
-		iv.setFitWidth(icon_size_in_pixels);
+		iv = loadIcon("icon24_searchh", icon_size_in_pixels);
 		btnFTS.setGraphic(iv);
 		btnFTS.setDisable(true);
 		btnFTS.setTooltip(new Tooltip("Start Free Text Search on database"));
@@ -554,14 +523,8 @@ public class GUI extends Application {
 		});
 
 
-		s = Objects.requireNonNull(GUI.class.getResource("/icon24_analyzer.png")).toExternalForm();
 		btnSQL = new Button();
-		iv = new ImageView(s);
-		iv.smoothProperty().setValue(true);
-		iv.setCache(true);
-		iv.preserveRatioProperty().setValue(true);
-		iv.setFitHeight(icon_size_in_pixels);
-		iv.setFitWidth(icon_size_in_pixels);
+		iv = loadIcon("icon24_analyzer", icon_size_in_pixels);
 		btnSQL.setGraphic(iv);
 		btnSQL.setDisable(true);
 		btnSQL.setTooltip(new Tooltip("Open SQL-Analyzer"));
@@ -569,20 +532,14 @@ public class GUI extends Application {
 		btnSQL.setOnAction(e -> showSqlWindow(null, getDatabaseNode()));
 
 		btnNodeQl = new Button();
-		btnNodeQl.setGraphic(createNodeQlIcon());
+		btnNodeQl.setGraphic(loadIcon("icon24_nodeql", icon_size_in_pixels));
 		btnNodeQl.setDisable(true);
 		btnNodeQl.setTooltip(new Tooltip("Open NodeQL Builder"));
 		btnNodeQl.setOnAction(e -> showNodeQlBuilder());
 		toolBar.getItems().add(btnNodeQl);
 
-		s = Objects.requireNonNull(GUI.class.getResource("/icon24_reasoning.png")).toExternalForm();
 		btnLLM = new Button();
-		iv = new ImageView(s);
-		iv.smoothProperty().setValue(true);
-		iv.setCache(true);
-		iv.preserveRatioProperty().setValue(true);
-		iv.setFitHeight(icon_size_in_pixels);
-		iv.setFitWidth(icon_size_in_pixels);
+		iv = loadIcon("icon24_reasoning", icon_size_in_pixels);
 		btnLLM.setGraphic(iv);
 		btnLLM.setDisable(true);
 		btnLLM.setTooltip(new Tooltip("Open SQL-Agent"));
@@ -590,14 +547,8 @@ public class GUI extends Application {
 		btnLLM.setOnAction(e -> showLLMWindow());
 
 
-		s = Objects.requireNonNull(GUI.class.getResource("/icon24_location.png")).toExternalForm();
 		btnLocation = new Button();
-		iv = new ImageView(s);
-		iv.smoothProperty().setValue(true);
-		iv.setCache(true);
-		iv.preserveRatioProperty().setValue(true);
-		iv.setFitHeight(icon_size_in_pixels);
-		iv.setFitWidth(icon_size_in_pixels);
+		iv = loadIcon("icon24_location", icon_size_in_pixels);
 		btnLocation.setGraphic(iv);
 		btnLocation.setDisable(true);
 		btnLocation.setTooltip(new Tooltip("Call the Lighthouse Plugin for cell tower analysis"));
@@ -606,14 +557,8 @@ public class GUI extends Application {
 
 		toolBar.getItems().add(new Separator());
 
-		s = Objects.requireNonNull(GUI.class.getResource("/icon24_csvv.png")).toExternalForm();
 		btnExport = new Button();
-		iv = new ImageView(s);
-		iv.smoothProperty().setValue(true);
-		iv.setCache(true);
-		iv.preserveRatioProperty().setValue(true);
-		iv.setFitHeight(icon_size_in_pixels);
-		iv.setFitWidth(icon_size_in_pixels);
+		iv = loadIcon("icon24_csvv", icon_size_in_pixels);
 		btnExport.setGraphic(iv);
 		btnExport.setOnAction(e -> doExport());
 		btnExport.setDisable(true);
@@ -621,14 +566,8 @@ public class GUI extends Application {
 		toolBar.getItems().add(btnExport);
 
 
-		s = Objects.requireNonNull(GUI.class.getResource("/icon24_htmll.png")).toExternalForm();
 		btnHTML = new Button();
-		iv = new ImageView(s);
-		iv.smoothProperty().setValue(true);
-		iv.setCache(true);
-		iv.preserveRatioProperty().setValue(true);
-		iv.setFitHeight(icon_size_in_pixels);
-		iv.setFitWidth(icon_size_in_pixels);
+		iv = loadIcon("icon24_htmll", icon_size_in_pixels);
 		btnHTML.setGraphic(iv);
 		btnHTML.setOnAction(e -> doExportHTML());
 		btnHTML.setDisable(true);
@@ -636,28 +575,16 @@ public class GUI extends Application {
 		toolBar.getItems().add(btnHTML);
 
 
-		s = Objects.requireNonNull(GUI.class.getResource("/icon24_case.png")).toExternalForm();
 		btnCASE = new Button();
-		iv = new ImageView(s);
-		iv.smoothProperty().setValue(true);
-		iv.setCache(true);
-		iv.preserveRatioProperty().setValue(true);
-		iv.setFitHeight(icon_size_in_pixels);
-		iv.setFitWidth(icon_size_in_pixels);
+		iv = loadIcon("icon24_case", icon_size_in_pixels);
 		btnCASE.setGraphic(iv);
 		btnCASE.setOnAction(e -> doExportCASE());
 		btnCASE.setDisable(true);
 		btnCASE.setTooltip(new Tooltip("Export database to CASE Report"));
 		toolBar.getItems().add(btnCASE);
 
-		s = Objects.requireNonNull(GUI.class.getResource("/icon24_export.png")).toExternalForm();
 		btnExportDB = new Button();
-		iv = new ImageView(s);
-		iv.smoothProperty().setValue(true);
-		iv.setCache(true);
-		iv.preserveRatioProperty().setValue(true);
-		iv.setFitHeight(icon_size_in_pixels);
-		iv.setFitWidth(icon_size_in_pixels);
+		iv = loadIcon("icon24_export", icon_size_in_pixels);
 		btnExportDB.setGraphic(iv);
 		btnExportDB.setDisable(true);
 		btnExportDB.setOnAction(e -> doExportDB());
@@ -1240,28 +1167,6 @@ public class GUI extends Application {
 		new NodeQlBuilderWindow(this, databaseNode, database, stage).show();
 	}
 
-	private javafx.scene.Node createNodeQlIcon() {
-		Color accent = Color.web("#1696ff");
-		Line firstConnection = new Line(5, 5, 18, 12);
-		Line secondConnection = new Line(18, 12, 8, 21);
-		firstConnection.setStroke(accent);
-		secondConnection.setStroke(accent);
-		firstConnection.setStrokeWidth(1.8);
-		secondConnection.setStrokeWidth(1.8);
-
-		Circle firstNode = graphNode(5, 5, accent);
-		Circle secondNode = graphNode(18, 12, accent);
-		Circle thirdNode = graphNode(8, 21, accent);
-		return new Group(firstConnection, secondConnection, firstNode, secondNode, thirdNode);
-	}
-
-	private Circle graphNode(double centerX, double centerY, Color accent) {
-		Circle node = new Circle(centerX, centerY, 3.2, Color.TRANSPARENT);
-		node.setStroke(accent);
-		node.setStrokeWidth(1.8);
-		return node;
-	}
-
 	private static void showWarning(Stage stage, String details) {
 		Alert alert = new Alert(AlertType.INFORMATION);
 		alert.setTitle("user infomation");
@@ -1575,18 +1480,6 @@ public class GUI extends Application {
 				}
 			}
 
-			//Object fn = appProps.get("font_name");
-			//if (null != fn) {
-			//	Global.font_name = (String) fn;
-			//}
-
-			//Object fs = appProps.get("font_size");
-			//if (null != fs) {
-			//	Global.font_size = (String) fs;
-			//}
-
-			//System.out.println("-fx-font-size: " + fs + "pt; -fx-font-family: \"" + fn + "\"; ");
-			//topContainer.setStyle("-fx-font-size: " + fs + "pt; -fx-font-family: \"" + fn + "\"; ");
 		} catch (Exception e) {
 			System.out.println(" Couldn't find settings.conf file. Create a new one.");
 			FileOutputStream firsttime;
@@ -2066,16 +1959,17 @@ public class GUI extends Application {
 		dmtn.setExpanded(true);
 
 
-		String s = switch (o.tabletype) {
-			case 0 -> Objects.requireNonNull(GUI.class.getResource("/table_icon_empty.png")).toExternalForm(); // /.png
-			case 1 -> Objects.requireNonNull(GUI.class.getResource("/table-key-icon-reddot.png")).toExternalForm();
-			case 99 -> Objects.requireNonNull(GUI.class.getResource("/gray_database24.png")).toExternalForm();
-			case 100 -> Objects.requireNonNull(GUI.class.getResource("/journal-icon.png")).toExternalForm();
-			case 101 -> Objects.requireNonNull(GUI.class.getResource("/wal-icon.png")).toExternalForm();
+		String icon = switch (o.tabletype) {
+			case 0 -> "table_icon_empty";
+			case 1 -> "table-key-icon-reddot";
+			case 99 -> "gray_database24";
+			case 100 -> "journal-icon";
+			case 101 -> "wal-icon";
 			default -> null;
 		};
 
-		ImageView iv = new ImageView(s);
+		ImageView iv = (icon == null) ? new ImageView()
+				: loadIcon(icon, o.tabletype == 99 ? 24 : 16);
 		dmtn.setGraphic(iv);
 
 
@@ -3623,14 +3517,14 @@ public class GUI extends Application {
 			node.getValue().hasData = true;
 
 			Platform.runLater(() -> {
-				String s = "";
+				String icon = null;
 				if (node.getValue().tabletype == 0) // normal table with rows
-					s = Objects.requireNonNull(GUI.class.getResource("/table-icon.png")).toExternalForm();
+					icon = "table-icon";
 				if (node.getValue().tabletype == 1) // index table with rows
-					s = Objects.requireNonNull(GUI.class.getResource("/table-key-icon.png")).toExternalForm();
-				if (null == s)
+					icon = "table-key-icon";
+				if (null == icon)
 					return;
-				ImageView iv = new ImageView(s);
+				ImageView iv = loadIcon(icon, 16);
 
 				node.setGraphic(null);
 				node.setGraphic(iv);

@@ -85,6 +85,7 @@ dependencies {
     implementation("de.kherud:llama:4.2.0")
     implementation("io.github.willena:sqlite-jdbc:3.51.1.0")
     implementation group: 'org.antlr', name: 'antlr4', version: '4.8'
+    implementation group: 'org.apache.xmlgraphics', name: 'batik-transcoder', version:'1.19'
 }
 
 
