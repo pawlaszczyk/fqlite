@@ -1141,7 +1141,26 @@ public class Auxiliary {
             }
         }
 
-        record.add(1, "[" + pll + "|" + hh.length() / 2 + "]");
+        /*
+         * Anti-forensics: header length + content length of all columns must equal the payload
+         * length of the cell. A mismatch means the cell metadata was manipulated: either the
+         * payload length (values still correct) or the serial types (e.g. a TEXT length changed -
+         * the columns are then read with wrong boundaries, "No|ahKön" instead of "Noah|König").
+         * The original boundaries cannot be reconstructed unambiguously, so mark the record.
+         */
+        String pllInfo = "[" + pll + "|" + hh.length() / 2 + "]";
+        long contentLen = 0;
+        for (SqliteElement en : columns)
+            if (en != null) contentLen += Math.max(en.getlength(), 0);
+        int headerTotal = phl + 1;     // the header-length value counts the whole header incl. itself
+        if (headerTotal + contentLen != pll) {
+            pllInfo += " \u26A0 header\u2260payload";
+            AppLog.info("Possible manipulation: record at offset " + (offset > -1 ? offset : cellstart)
+                    + " (page " + pagenumber_db + "): header " + headerTotal + " + content " + contentLen
+                    + " bytes != payload length " + pll + " - cell metadata manipulated (payload length or serial"
+                    + " types); if the serial types were changed, the column boundaries are unreliable.");
+        }
+        record.add(1, pllInfo);
         hexdump.add(1,null);
         record.add(2, "" + rowid);
         hexdump.add(2,null);
