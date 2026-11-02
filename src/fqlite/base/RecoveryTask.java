@@ -128,7 +128,7 @@ public class RecoveryTask implements Runnable {
 				buffer.position(0);
 				int checksum = buffer.getInt();
 				/* was page dropped? */
-				if (checksum == 0)
+				if (checksum == 0 || job.freelistTrunks.contains(pagenumber))
 				{
 					/* no overflow page -> carve for data records - we do our best! ;-)*/
 					carve(content,null);

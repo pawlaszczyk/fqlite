@@ -565,13 +565,16 @@ public class WALReader{
 			if (type == 5)
 				buffer.position(12 + 2 * i);
 			else {
-				if (buffer.position() + 8 + 2 * i < buffer.limit())
+				// bounds check against the cell pointer slot itself - the old check used
+				// buffer.position(), which readRecord() leaves at the end of the previous
+				// cell, so every cell after the first one of a page was skipped
+				if (8 + 2 * i + 2 <= buffer.limit())
 					buffer.position(8 + 2 * i);
 				else
 					continue;
 			}
 			
-			if (buffer.position() + 2 < buffer.limit())
+			if (buffer.position() + 2 <= buffer.limit())
 			   buffer.get(pointer);
 			else
 			   continue;
@@ -1031,7 +1034,11 @@ public class WALReader{
 
 			String filename = "results" + name + date + ".csv";
 			
-			String[] lines = output.toArray(new String[0]);
+			// output holds one List<String> per record - toArray(new String[0]) threw an
+			// ArrayStoreException in CLI/headless mode
+			String[] lines = output.stream()
+					.map(l -> String.join(Global.CSV_SEPARATOR, l))
+					.toArray(String[]::new);
 			job.writeResultsToFile(filename,lines);
 
 		}

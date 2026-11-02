@@ -224,6 +224,9 @@ public class Job {
 	public SortedSet<Integer> mastertable = new ConcurrentSkipListSet<Integer>();
 	public List<Integer> freelistpages = new ArrayList<Integer>();
 
+	/** free list trunk pages (carved like dropped pages, see RecoveryTask) */
+	public final Set<Integer> freelistTrunks = java.util.concurrent.ConcurrentHashMap.newKeySet();
+
 	/** table leaf pages that no b-tree references (manipulated pointers), see scan() */
 	public final Set<Integer> orphanPages = java.util.concurrent.ConcurrentHashMap.newKeySet();
 
@@ -1508,6 +1511,8 @@ public class Job {
 			/* A list can extend over several memory pages. */
 			boolean morelistpages = false;
 
+			runningTasks.set(0);
+
 			int freepagesum = 0;
 
 			do {
@@ -1515,6 +1520,21 @@ public class Job {
 				ByteBuffer fplist = ByteBuffer.allocate(ps);
 
 				db.read(fplist, start);
+
+				/*
+				 * The trunk page itself is a freed page as well: only its first 8 + 4*n bytes are
+				 * overwritten by the trunk header, the rest still holds the old records (e.g. after
+				 * B-tree rebalancing or DROP TABLE). Previously only the leaf pages were carved.
+				 */
+				int trunkPage = (int) (start / ps) + 1;
+				if (trunkPage > 1 && !freelistpages.contains(trunkPage)) {
+					freelistpages.add(trunkPage);
+					freelistTrunks.add(trunkPage);
+					RecoveryTask trunkTask = new RecoveryTask(new Auxiliary(this), this, start, trunkPage, ps, true);
+					runningTasks.incrementAndGet();
+					tasklist.add(trunkTask);
+					executor.execute(trunkTask);
+				}
 
 				// next (possible) freepage list offset or 0xh00000000 + number of entries
 				// example : 00 00 15 3C | 00 00 02 2B
@@ -1568,7 +1588,8 @@ public class Job {
 
 				info(" Number of Entries in freepage list " + fpnumber);  //2704
 
-				runningTasks.set(0);
+				// (counter is reset once before the trunk loop - resetting it here while tasks of a
+				//  previous trunk are still running drove it negative and the wait loop never ended)
 
 				/* iterate through free page list and read free page offsets */
 				for (int zz = 1; zz <= entries; zz++) {
@@ -1633,6 +1654,9 @@ public class Job {
 
 		// attribute records of orphaned pages to the right table (structurally identical tables)
 		reassignOrphanPages();
+
+		// drop stale copies of live records found on freed pages (b-tree rebalancing)
+		removeStaleCopiesOfLiveRecords();
 
 		if (gui != null) {
 
@@ -3622,6 +3646,51 @@ public class Job {
 			if (t.tblname.equals(name) && t.getColumntypes().equals(cur.getColumntypes()))
 				return t;
 		return null;
+	}
+
+	/**
+	 * B-tree rebalancing (e.g. after a range DELETE) moves live cells to other pages; the
+	 * freed pages still contain the old, byte-identical copies. Reporting them as deleted or
+	 * freelist records is a false positive (Lee et al. 2025, "Type **"). A deleted/freelist
+	 * record is dropped if a live record of the same table has identical column values (and,
+	 * if both are known, the same rowid). Copies with different content (older versions of an
+	 * updated row) are kept - they are evidence.
+	 */
+	private void removeStaleCopiesOfLiveRecords() {
+		int removed = 0;
+		for (String table : resultlist.keySet()) {
+			ObservableList<ObservableList<String>> rows = resultlist.get(table);
+			ObservableList<ObservableList<byte[]>> hex = hexdumplist.get(table);
+			if (rows == null || rows.size() < 2)
+				continue;
+			Map<List<String>, Set<String>> live = new HashMap<>();
+			for (ObservableList<String> r : rows)
+				if (r.size() > 5 && Global.REGULAR_RECORD.equals(r.get(3)))
+					live.computeIfAbsent(new ArrayList<>(r.subList(5, r.size())), k -> new HashSet<>()).add(r.get(2));
+			if (live.isEmpty())
+				continue;
+			for (int i = rows.size() - 1; i >= 0; i--) {
+				ObservableList<String> r = rows.get(i);
+				if (r.size() <= 5)
+					continue;
+				String st = r.get(3);
+				if (!Global.FREELIST_ENTRY.equals(st) && !Global.DELETED_RECORD_IN_PAGE.equals(st))
+					continue;
+				Set<String> liveRowids = live.get(r.subList(5, r.size()));
+				if (liveRowids == null)
+					continue;
+				String rowid = r.get(2);
+				boolean rowidUnknown = rowid == null || rowid.isEmpty() || "-1".equals(rowid);
+				if (rowidUnknown || liveRowids.contains(rowid)) {
+					rows.remove(i);
+					if (hex != null && i < hex.size())
+						hex.remove(i);
+					removed++;
+				}
+			}
+		}
+		if (removed > 0)
+			info(removed + " deleted/freelist record(s) are identical copies of live records (b-tree rebalancing) - not reported.");
 	}
 
 	private long pageOf(List<String> row) {
