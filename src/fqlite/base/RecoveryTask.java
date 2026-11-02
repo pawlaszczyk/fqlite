@@ -33,6 +33,7 @@ public class RecoveryTask implements Runnable {
 	private final Job job;
 	private final Auxiliary ct;
 	private boolean freeList;
+	private boolean orphan = false;
 
 	/**
 	 * Constructor method.
@@ -67,6 +68,10 @@ public class RecoveryTask implements Runnable {
 
 		boolean withoutROWID = false;
 		int fbstart = -1;
+		/* page not assigned by any b-tree and not part of the free list -> orphaned page */
+		orphan = !freeList && pagenumber > 1 && job.pages[pagenumber] == null;
+		if (orphan)
+			job.orphanPages.add(pagenumber);
 
 		try {
 
@@ -421,6 +426,14 @@ public class RecoveryTask implements Runnable {
 					 */
 					if (freeList && record.size() > 3 && Global.REGULAR_RECORD.equals(record.get(3)))
 						record.set(3, Global.FREELIST_ENTRY);
+
+					/*
+					 * Orphaned table leaf page (not reachable via any b-tree, see Job.scan()): the
+					 * cells are intact live records - the "unknown page" path of readRecord() would
+					 * label them as freelist entries.
+					 */
+					if (orphan && record.size() > 3 && Global.FREELIST_ENTRY.equals(record.get(3)))
+						record.set(3, Global.REGULAR_RECORD);
 
 
 					int p;

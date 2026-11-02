@@ -224,6 +224,12 @@ public class Job {
 	public SortedSet<Integer> mastertable = new ConcurrentSkipListSet<Integer>();
 	public List<Integer> freelistpages = new ArrayList<Integer>();
 
+	/** table leaf pages that no b-tree references (manipulated pointers), see scan() */
+	public final Set<Integer> orphanPages = java.util.concurrent.ConcurrentHashMap.newKeySet();
+
+	/** rowid ranges (lo, hi] of child slots whose pointer was rejected in exploreBTree(): [table, lo, hi] */
+	private final List<Object[]> danglingSlots = java.util.Collections.synchronizedList(new ArrayList<>());
+
 	public List<WALFrame> checkpointlist = new ArrayList<WALFrame>();
 
 	// for analyzing
@@ -1624,6 +1630,9 @@ public class Job {
 
 		// full db-scan (including all database pages)
 		scan(numberofpages, ps);
+
+		// attribute records of orphaned pages to the right table (structurally identical tables)
+		reassignOrphanPages();
 
 		if (gui != null) {
 
@@ -3127,6 +3136,22 @@ public class Job {
 			}
 			else if (null == pages[cc])
 			{
+				/*
+				 * Anti-forensics: a table leaf page that no b-tree references (manipulated root or
+				 * child pointers) used to be skipped completely, so its live records vanished.
+				 * Scan such orphaned table leaf pages as well; the records are attributed to a table
+				 * by schema matching (Auxiliary.matchTable).
+				 */
+				if (!freelistpages.contains(cc)) {
+					ByteBuffer pg = readDBPageWithOffset((cc - 1L) * ps, 1);
+					if (pg != null && pg.limit() > 0 && pg.get(0) == 13) {
+						AppLog.info("Possible manipulation: table leaf page " + cc + " is not referenced by any b-tree - scanning it as orphaned page.");
+						RecoveryTask task = new RecoveryTask(worker[cc % Global.numberofThreads].util,this, (cc - 1L) * ps, cc, ps, false);
+						worker[cc % Global.numberofThreads].addTask(task);
+						runningTasks.incrementAndGet();
+						continue;
+					}
+				}
 				AppLog.debug("page " + cc + " is no regular leaf page component. Maybe a indices or overflow or dropped component page.");
 			}
 			else
@@ -3513,6 +3538,184 @@ public class Job {
 	 * @param td this reference holds a Descriptor for the page type.
 	 * @throws IOException
 	 */
+	/**
+	 * Records of an orphaned table leaf page are attributed by schema matching (first table
+	 * with the same column types). If several tables share the same structure, that guess can
+	 * be wrong. Use the rowids as tie-breaker: an orphaned page belongs to the table that does
+	 * NOT already contain its rowids on regularly referenced pages.
+	 */
+	private void reassignOrphanPages() {
+		if (orphanPages.isEmpty())
+			return;
+		for (int pg : orphanPages) {
+			if (pg <= 0 || pg >= pages.length || !(pages[pg] instanceof TableDescriptor))
+				continue;
+			TableDescriptor cur = (TableDescriptor) pages[pg];
+			ObservableList<ObservableList<String>> curRows = resultlist.get(cur.tblname);
+			if (curRows == null)
+				continue;
+			Set<String> pageRowids = new HashSet<>();
+			for (ObservableList<String> r : curRows)
+				if (pageOf(r) == pg && r.size() > 3 && Global.REGULAR_RECORD.equals(r.get(3)))
+					pageRowids.add(r.get(2));
+			if (pageRowids.isEmpty())
+				continue;
+
+			// (1) strongest evidence: an interior page of table T has a rejected child slot whose
+			//     key range (lo, hi] fits this page's rowids (exact upper key preferred)
+			TableDescriptor bySlot = tableBySlot(cur, pageRowids);
+			if (bySlot != null) {
+				if (bySlot != cur) {
+					moveRowsOfPage(pg, cur.tblname, bySlot.tblname);
+					pages[pg] = bySlot;
+					info("Possible manipulation: orphaned page " + pg + " re-attributed from table "
+							+ cur.tblname + " to " + bySlot.tblname + " (dangling child slot of its b-tree).");
+				}
+				continue;
+			}
+
+			// (2) fallback: rowids already present in the current table on regular pages
+			if (rowidOverlap(cur, pg, pageRowids) == 0)
+				continue;
+			for (TableDescriptor cand : headers) {
+				if (cand == cur || !cand.getColumntypes().equals(cur.getColumntypes()))
+					continue;
+				if (resultlist.get(cand.tblname) == null || rowidOverlap(cand, pg, pageRowids) != 0)
+					continue;
+				moveRowsOfPage(pg, cur.tblname, cand.tblname);
+				pages[pg] = cand;
+				info("Possible manipulation: orphaned page " + pg + " re-attributed from table "
+						+ cur.tblname + " to " + cand.tblname + " (rowid ranges).");
+				break;
+			}
+		}
+	}
+
+	/** table whose rejected child slot (lo, hi] contains all rowids of the page; null if none or ambiguous */
+	private TableDescriptor tableBySlot(TableDescriptor cur, Set<String> rowids) {
+		long min = Long.MAX_VALUE, max = Long.MIN_VALUE;
+		for (String r : rowids) {
+			try {
+				long v = Long.parseLong(r.trim());
+				min = Math.min(min, v);
+				max = Math.max(max, v);
+			} catch (RuntimeException e) {
+				return null;
+			}
+		}
+		Set<String> exact = new HashSet<>(), contained = new HashSet<>();
+		synchronized (danglingSlots) {
+			for (Object[] slot : danglingSlots) {
+				long lo = (Long) slot[1], hi = (Long) slot[2];
+				if (min > lo && max <= hi) {
+					contained.add((String) slot[0]);
+					if (max == hi)
+						exact.add((String) slot[0]);
+				}
+			}
+		}
+		Set<String> pick = exact.size() == 1 ? exact : (exact.isEmpty() && contained.size() == 1 ? contained : null);
+		if (pick == null)
+			return null;
+		String name = pick.iterator().next();
+		for (TableDescriptor t : headers)
+			if (t.tblname.equals(name) && t.getColumntypes().equals(cur.getColumntypes()))
+				return t;
+		return null;
+	}
+
+	private long pageOf(List<String> row) {
+		try {
+			return Long.parseLong(row.get(4).trim()) / ps + 1;
+		} catch (RuntimeException e) {
+			return -1;
+		}
+	}
+
+	private int rowidOverlap(TableDescriptor td, int pg, Set<String> rowids) {
+		ObservableList<ObservableList<String>> rows = resultlist.get(td.tblname);
+		if (rows == null)
+			return 0;
+		int n = 0;
+		for (ObservableList<String> r : rows) {
+			long p = pageOf(r);
+			if (p == pg || orphanPages.contains((int) p) || r.size() < 4
+					|| !Global.REGULAR_RECORD.equals(r.get(3)))
+				continue;
+			if (rowids.contains(r.get(2)))
+				n++;
+		}
+		return n;
+	}
+
+	private void moveRowsOfPage(int pg, String from, String to) {
+		ObservableList<ObservableList<String>> src = resultlist.get(from);
+		ObservableList<ObservableList<byte[]>> srcHex = hexdumplist.get(from);
+		ObservableList<ObservableList<String>> dst = resultlist.get(to);
+		ObservableList<ObservableList<byte[]>> dstHex = hexdumplist.get(to);
+		for (int i = src.size() - 1; i >= 0; i--) {
+			ObservableList<String> r = src.get(i);
+			if (pageOf(r) != pg || r.size() < 4 || !Global.REGULAR_RECORD.equals(r.get(3)))
+				continue;
+			src.remove(i);
+			r.set(0, to);
+			dst.add(r);
+			if (srcHex != null && dstHex != null && i < srcHex.size())
+				dstHex.add(srcHex.remove(i));
+		}
+	}
+
+	/** reads a SQLite varint at an absolute position of the buffer */
+	private static long varintAt(ByteBuffer b, int pos) {
+		long v = 0;
+		for (int k = 0; k < 9 && pos < b.limit(); k++) {
+			int c = b.get(pos++) & 0xFF;
+			if (k == 8) return (v << 8) | c;
+			v = (v << 7) | (c & 0x7F);
+			if (c < 0x80) return v;
+		}
+		return v;
+	}
+
+	/** rowid of a table leaf cell [payload length varint][rowid varint] */
+	private static long leafRowidAt(ByteBuffer b, int celloff) {
+		int pos = celloff;
+		for (int k = 0; k < 9 && pos < b.limit(); k++)        // skip payload length
+			if ((b.get(pos++) & 0x80) == 0) break;
+		return varintAt(b, pos);
+	}
+
+	/**
+	 * true if the smallest and largest key of table b-tree page {@code child} lie in (lo, hi].
+	 * Invalid page numbers are rejected; pages that cannot be checked (other page types,
+	 * unreadable) are accepted.
+	 */
+	private boolean childWithinKeyRange(int child, long lo, long hi, BigByteBuffer filebuffer) {
+		try {
+			if (child <= 1 || child > numberofpages)
+				return false;                  // invalid page number - certainly not a valid child
+			ByteBuffer c = readPageWithNumberFromBuffer(child - 1, ps, filebuffer);
+			if (c == null)
+				return true;
+			int t = c.get(0);
+			if (t != 13 && t != 5)
+				return true;
+			int n = Short.toUnsignedInt(c.getShort(3));
+			if (n == 0)
+				return true;
+			int hdr = (t == 13) ? 8 : 12;
+			int first = Short.toUnsignedInt(c.getShort(hdr));
+			int last  = Short.toUnsignedInt(c.getShort(hdr + 2 * (n - 1)));
+			if (first <= 0 || last <= 0 || first >= c.limit() || last >= c.limit())
+				return true;
+			long kmin = (t == 13) ? leafRowidAt(c, first) : varintAt(c, first + 4);
+			long kmax = (t == 13) ? leafRowidAt(c, last)  : varintAt(c, last + 4);
+			return kmin > lo && kmax <= hi;
+		} catch (RuntimeException ex) {
+			return true;
+		}
+	}
+
 	private void exploreBTree(int root, AbstractDescriptor td, BigByteBuffer filebuffer) throws IOException {
 		exploreBTree(root, td, filebuffer, new HashSet<>());
 	}
@@ -3524,26 +3727,38 @@ public class Job {
 			return;
 		}
 
-		if (root < pages.length && root >= 0)
-			pages[root] = td;
-		else
+		if (root >= pages.length || root <= 0)
 			return;
 
 		// pagesize * (rootindex - 1) -> go to the start of this page
-		long offset = ps * (root - 1);
+		long offset = (long) ps * (root - 1);
 
-		if(offset <= 0)
-			return;
-
-		if (root <  0)
-		{
+		if (offset <= 0) {                     // page 1 (sqlite_master)
+			pages[root] = td;
 			return;
 		}
-
 
 		// read type byte
 		filebuffer.position(offset);
 		byte typ = filebuffer.get();
+
+		/*
+		 * Anti-forensics: a (manipulated) root or child pointer may point to a page of the wrong
+		 * kind, e.g. a table root pointing to an index page or to an overflow page. Assigning such
+		 * a page to the table produced garbage rows (index entries shown as table rows). Only
+		 * table b-tree pages (5, 13) belong to a table, only index b-tree pages (2, 10) to an index.
+		 */
+		boolean isTable = !(td instanceof IndexDescriptor);
+		// typ 0: page of a dropped table / cleared page (freelist trunk, zeroed header) - keep the
+		// assignment, the page is carved with this table's schema later (RecoveryTask, type 0)
+		boolean typeOk  = typ == 0 || (isTable ? (typ == 5 || typ == 13) : (typ == 2 || typ == 10));
+		if (!typeOk) {
+			AppLog.info("Possible manipulation: page " + root + " (page type " + typ + ") is referenced by "
+					+ (isTable ? "table " : "index ") + td.getName() + " but is no "
+					+ (isTable ? "table" : "index") + " b-tree page - ignored.");
+			return;
+		}
+		pages[root] = td;
 
 
 		/* not supported yet */
@@ -3608,59 +3823,50 @@ public class Job {
 
 			AppLog.debug("page number " + root + " is a interior data page ");
 
-			int rightChildptr = filebuffer.getInt(offset + 8);
-
-			/* recursive */
-			exploreBTree(rightChildptr, td, filebuffer, visited);
-
-
-			/* now we have to read the cell pointer list with offsets for the other pages */
-			/* read the complete internal page into buffer */
 			if (root <= 0)
 				return;
 			ByteBuffer buffer = readPageWithNumberFromBuffer(root - 1, ps, filebuffer);
-
 			if (buffer == null)
 				return;
 
-			byte[] numberofcells = new byte[2];
-			buffer.position(3);
+			int rightChildptr = buffer.getInt(8);
+			int e = Short.toUnsignedInt(buffer.getShort(3));
 
-			buffer.get(numberofcells);
-			ByteBuffer noc = ByteBuffer.wrap(numberofcells);
-			int e = Auxiliary.TwoByteBuffertoInt(noc);
-
-
-			byte[] cpn = new byte[2];
-			buffer.position(5);
-
-			buffer.get(cpn);
-
-			/* go on with the cell pointer array */
+			/*
+			 * Anti-forensics: every interior cell is [left child (4)][key (varint)], keys ascending.
+			 * The rowids of a child must lie in (previous key, key]; the right-most child holds the
+			 * rowids > last key. A manipulated child pointer typically points to a page of another
+			 * table (or another part of the tree) whose rowids violate these bounds. Such a child
+			 * is not attached here - it is scanned later as orphaned page (see scan()) and
+			 * attributed by schema and rowid ranges.
+			 */
+			long prevKey = Long.MIN_VALUE;
 			for (int i = 0; i < e; i++) {
-
-				// address of the next cell pointer
-				byte[] pointer = new byte[2];
-				buffer.position(12 + 2 * i);
-				if (buffer.capacity() <= buffer.position()+2)
+				int ptrpos = 12 + 2 * i;
+				if (ptrpos + 2 > buffer.limit())
+					break;
+				int celloff = Short.toUnsignedInt(buffer.getShort(ptrpos));
+				if (celloff <= 0 || celloff + 5 > buffer.limit() || celloff > ps)
 					continue;
-				buffer.get(pointer);
-				ByteBuffer celladdr = ByteBuffer.wrap(pointer);
-				int celloff = Auxiliary.TwoByteBuffertoInt(celladdr);
-
-				AppLog.debug(" celloff " + celloff);
-				// read page number of next node in the btree
-				byte[] pnext = new byte[4];
-				if (celloff >= buffer.capacity() || celloff < 0)
-					continue;
-				if (celloff > ps)
-					continue;
-				buffer.position(celloff);
-				buffer.get(pnext);
-				int p = ByteBuffer.wrap(pnext).getInt();
-				// unfolding the next level of the tree
+				int p = buffer.getInt(celloff);
+				long key = varintAt(buffer, celloff + 4);
 				AppLog.debug(" child page " + p);
-				exploreBTree(p, td, filebuffer, visited);
+				if (childWithinKeyRange(p, prevKey, key, filebuffer))
+					exploreBTree(p, td, filebuffer, visited);
+				else {
+					danglingSlots.add(new Object[]{td.getName(), prevKey, key});
+					AppLog.info("Possible manipulation: child page " + p + " of interior page " + root
+							+ " (table " + td.getName() + ") holds rowids outside (" + prevKey + ", " + key + "] - not attached.");
+				}
+				prevKey = key;
+			}
+
+			if (childWithinKeyRange(rightChildptr, prevKey, Long.MAX_VALUE, filebuffer))
+				exploreBTree(rightChildptr, td, filebuffer, visited);
+			else {
+				danglingSlots.add(new Object[]{td.getName(), prevKey, Long.MAX_VALUE});
+				AppLog.info("Possible manipulation: right child page " + rightChildptr + " of interior page " + root
+						+ " (table " + td.getName() + ") holds rowids <= " + prevKey + " - not attached.");
 			}
 
 		}
