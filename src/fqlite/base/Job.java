@@ -1497,6 +1497,12 @@ public class Job {
 		 * STEP 1: We start the recovery process by scanning the free list first
 		 */
 
+		if (head > 0 && (head == 1 || head > numberofpages)) {
+			info("Possible manipulation: first freelist trunk page " + head + " is outside the database ("
+					+ numberofpages + " pages) - free list ignored");
+			head = 0;
+		}
+
 		if (head > 0) {
 			AppLog.debug("first:: " + start + " 0hx " + Long.toHexString(start));
 
@@ -1514,6 +1520,7 @@ public class Job {
 			runningTasks.set(0);
 
 			int freepagesum = 0;
+			allreadyvisit.add((int) head);
 
 			do {
 				/* reserve space for the first/next page of the free list */
@@ -1527,6 +1534,19 @@ public class Job {
 				 * B-tree rebalancing or DROP TABLE). Previously only the leaf pages were carved.
 				 */
 				int trunkPage = (int) (start / ps) + 1;
+
+				/*
+				 * Sanity check of the trunk header: a real trunk page holds at most (ps-8)/4 leaf
+				 * numbers. A larger count means the pointer leads to a page that is no trunk at all
+				 * (e.g. a live table page) - do not treat its content as free.
+				 */
+				int trunkEntries = fplist.getInt(4);
+				if (trunkEntries < 0 || trunkEntries > (ps - 8) / 4) {
+					info("Possible manipulation: page " + trunkPage + " is referenced as freelist trunk but its header is invalid ("
+							+ trunkEntries + " leaf pages) - free list traversal stopped");
+					break;
+				}
+
 				if (trunkPage > 1 && !freelistpages.contains(trunkPage)) {
 					freelistpages.add(trunkPage);
 					freelistTrunks.add(trunkPage);
@@ -1559,12 +1579,18 @@ public class Job {
 					ByteBuffer of = ByteBuffer.wrap(nextlistoffset);
 					int nfp = of.getInt();
 					start = (nfp - 1L) * ps;
-					if (!allreadyvisit.contains(nfp))
-						allreadyvisit.add(nfp);
-					else {
-						info("Antiforensiscs found: cyclic freepage list entry");
-					}
 					morelistpages = true;
+					if (nfp <= 1 || nfp > numberofpages) {
+						// a trunk pointer outside the file can only result from corruption/manipulation
+						info("Possible manipulation: freelist trunk page " + trunkPage + " points to invalid page " + nfp
+								+ " (database has " + numberofpages + " pages) - free list traversal stopped");
+						morelistpages = false;
+					} else if (!allreadyvisit.add(nfp)) {
+						// without this stop a cyclic trunk chain (e.g. trunk -> itself) loops forever
+						info("Possible manipulation: cyclic freelist trunk chain (page " + trunkPage + " -> " + nfp
+								+ ") - free list traversal stopped");
+						morelistpages = false;
+					}
 
 				}
 				else
@@ -1603,6 +1629,13 @@ public class Job {
 
 					if (n == 0) {
 						continue;
+					}
+					if (n == 1 || n > numberofpages || n < 0) {
+						info("Possible manipulation: freelist trunk page " + trunkPage + " lists invalid leaf page " + n);
+						continue;
+					}
+					if (freelistpages.contains(n)) {
+						continue;		// already scheduled (e.g. listed twice by a manipulated trunk)
 					}
 					// determine offset for free page
 					long offset = (n - 1L) * ps;
