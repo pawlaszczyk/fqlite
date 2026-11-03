@@ -365,6 +365,14 @@ public class Auxiliary {
      * @return a {@link CarvingResult} or {@code null} if the record is invalid
      * @throws IOException on buffer read errors
      */
+    /** marker in the "[pll|hl]" column: the record could only be recovered partially */
+    public static final String FLAG_TRUNCATED = "\u26A0 truncated";
+    /** marker in the "[pll|hl]" column: an overflow page of the record was reused (now a freelist trunk) */
+    public static final String FLAG_OVERFLOW_OVERWRITTEN = "\u26A0 overflow overwritten";
+
+    /** pages (0-based) read by the last call of readOverflowIterativ */
+    private final List<Integer> lastOverflowPages = new ArrayList<>();
+
     public CarvingResult readDeletedRecord(AbstractDescriptor ad, Job job, ByteBuffer buffer, BitSet bs,
                                            Match m, Match next, int pagenumber,
                                            String fallback) throws IOException {
@@ -373,6 +381,7 @@ public class Auxiliary {
         int round = 1;
 
         do{
+            String damage = null;     // set when the recovered content is incomplete / overwritten
 
             if(round > 10)
             {
@@ -452,6 +461,7 @@ public class Auxiliary {
                 if (overflowSeekPos < 0 || overflowSeekPos + 4 > buffer.limit()) {
                     AppLog.debug("readDeletedRecord: overflow seek position " + overflowSeekPos + " out of buffer limit=" + buffer.limit() + ", treating as no-overflow.");
                     pll = so;
+                    damage = FLAG_TRUNCATED;       // only the local part of a spilled record
                     // fall through to the no-overflow branch below by adjusting so
                     // We set bf=buffer and skip the getInt entirely
                     ByteBuffer bf = buffer;
@@ -467,7 +477,7 @@ public class Auxiliary {
                     buffer.position(Math.min(last + so - phl - 1, buffer.limit()));
                     bs.set(m.end, buffer.position(), true);
                     long cursor = ((pagenumber - 1L) * job.ps) + buffer.position();
-                    record.add(0, "[" + pll + "|" + header.length() / 2 + "]");
+                    record.add(0, "[" + pll + "|" + header.length() / 2 + "] " + damage);
                     record.add(1, "" + rowid);
                     hexdump.add(0, null);
                     hexdump.add(1, null);
@@ -487,6 +497,14 @@ public class Auxiliary {
                 ByteBuffer bf;
                 if (overflow > 0 && overflow < job.numberofpages && plausibleOverflow((long) pll - so)) {
                     byte[] extended = readOverflowIterativ(overflow - 1, false, pll - so);
+                    for (int op : lastOverflowPages) {
+                        // a freelist trunk page starts with [next trunk][count][leaf numbers...]:
+                        // those bytes of the former overflow page are overwritten
+                        if (job.freelistTrunks.contains(op + 1)) {
+                            damage = FLAG_OVERFLOW_OVERWRITTEN;
+                            AppLog.debug("readDeletedRecord: overflow page " + (op + 1) + " is now a freelist trunk page - content partly overwritten");
+                        }
+                    }
                     byte[] originalbuffer = copyBufferToArray(buffer);
                     byte[] c = new byte[pll + job.ps];
                     buffer.position(last);
@@ -504,16 +522,20 @@ public class Auxiliary {
                 } else {
                     pll = so;
                     bf = buffer;
+                    damage = FLAG_TRUNCATED;       // overflow chain not followable: local part only
                 }
 
                 if (bf == null) return null;
-                bf.position(0);
+                // the merged copy c starts at the record body; without overflow we read the page
+                // buffer itself, there the body starts at 'last' (position(0) = page header bytes)
+                bf.position(bf == buffer ? last : 0);
 
                 int blobcolidx = 0;
                 for (SqliteElement en : columns) {
                     if (en == null) continue;
                     if ((bf.position() + en.getlength()) > bf.limit()) {
                         AppLog.debug("readDeletedRecord: overflow bf underflow at pos=" + bf.position() + " needed=" + en.getlength() + " limit=" + bf.limit());
+                        damage = FLAG_TRUNCATED;
                         break;
                     }
                     byte[] value = new byte[en.getlength()];
@@ -595,6 +617,7 @@ public class Auxiliary {
                                 blobcolidx = appendColumn(record, hexdump, truncated, value, blobcolidx, false, 0);
                             }
                             partial = true;
+                            damage = FLAG_TRUNCATED;      // rest of the record overwritten by the next cell
                             continue;
                         }
 
@@ -612,7 +635,7 @@ public class Auxiliary {
             long cursor = ((pagenumber - 1L) * job.ps) + buffer.position();
             AppLog.debug("Visited: " + m.end + " to " + buffer.position());
 
-            record.add(0, "[" + pll + "|" + header.length() / 2 + "]");
+            record.add(0, "[" + pll + "|" + header.length() / 2 + "]" + (damage != null ? " " + damage : ""));
             record.add(1, "" + rowid);
             hexdump.add(0, null);
             hexdump.add(1, null);
@@ -1649,6 +1672,7 @@ public class Auxiliary {
      * following arbitrary (possibly reused or garbage) next-pointers through the whole file.
      */
     private byte[] readOverflowIterativ(int pagenumber, boolean fromWAL, int maxBytes) {
+        lastOverflowPages.clear();
         List<ByteBuffer> parts   = new LinkedList<>();
         long             collected = 0;
         Set<Integer>     visited = new HashSet<>();
@@ -1679,6 +1703,8 @@ public class Auxiliary {
                 overflowpage = job.readPageWithNumber(next, job.ps);
             }
             visited.add(next);
+            if (!fromWAL)
+                lastOverflowPages.add(next);
 
             if (overflowpage == null) break;
 

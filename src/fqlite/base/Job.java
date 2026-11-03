@@ -1690,6 +1690,7 @@ public class Job {
 
 		// drop stale copies of live records found on freed pages (b-tree rebalancing)
 		removeStaleCopiesOfLiveRecords();
+		removeTruncatedDuplicates();
 
 		if (gui != null) {
 
@@ -3724,6 +3725,57 @@ public class Job {
 		}
 		if (removed > 0)
 			info(removed + " deleted/freelist record(s) are identical copies of live records (b-tree rebalancing) - not reported.");
+	}
+
+	/**
+	 * A deleted record is often found twice: completely (e.g. with its overflow chain) and as a
+	 * truncated copy (only the in-page part, cut by the next cell). The truncated copy adds no
+	 * information - it is dropped if another record of the same table contains it, i.e. every
+	 * non-empty value of the copy equals or is a prefix of the corresponding value. Truncated
+	 * records without any recovered value are dropped as well.
+	 */
+	private void removeTruncatedDuplicates() {
+		int removed = 0;
+		for (String table : resultlist.keySet()) {
+			ObservableList<ObservableList<String>> rows = resultlist.get(table);
+			ObservableList<ObservableList<byte[]>> hex = hexdumplist.get(table);
+			if (rows == null || rows.size() < 2)
+				continue;
+			for (int i = rows.size() - 1; i >= 0; i--) {
+				ObservableList<String> r = rows.get(i);
+				if (r.size() <= 5 || r.get(1) == null || !r.get(1).contains(Auxiliary.FLAG_TRUNCATED))
+					continue;
+				// a truncated record without any recovered value carries no information at all
+				boolean covered = r.subList(5, r.size()).stream().allMatch(v -> v == null || v.isEmpty());
+				for (int j = 0; j < rows.size() && !covered; j++) {
+					if (j == i)
+						continue;
+					ObservableList<String> o = rows.get(j);
+					if (o.size() != r.size() || (o.get(1) != null && o.get(1).contains(Auxiliary.FLAG_TRUNCATED)))
+						continue;
+					int same = 0;
+					boolean ok = true;
+					for (int k = 5; k < r.size() && ok; k++) {
+						String a = r.get(k), b = o.get(k);
+						if (a == null || a.isEmpty())
+							continue;
+						if (b != null && b.startsWith(a))
+							same++;
+						else
+							ok = false;
+					}
+					covered = ok && same >= 2;
+				}
+				if (covered) {
+					rows.remove(i);
+					if (hex != null && i < hex.size())
+						hex.remove(i);
+					removed++;
+				}
+			}
+		}
+		if (removed > 0)
+			info(removed + " truncated record(s) are empty or partial copies of completely recovered records - not reported.");
 	}
 
 	private long pageOf(List<String> row) {
