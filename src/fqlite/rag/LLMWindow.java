@@ -477,6 +477,14 @@ public class LLMWindow extends Application {
     }
 
     private String resolveSql(String userinput) {
+        // The intent classification and all fixed templates below (co-location, calls/SMS,
+        // country filter, roamers, Wechsler) are written for the ETSI-CDR schema of the
+        // Lighthouse importer (response_records, request_metadata, views). On any other
+        // database they produce "no such table: response_records" - there only the
+        // free-form generator with the database's own schema applies.
+        if (!pipline.isEtsiMode())
+            return pipline.generateSQL(userinput);
+
         RAGPipeline.QueryIntent intent = pipline.classifyIntent(userinput, queryDataDateRange());
 
         // Deterministic safety net, checked FIRST: the small local model
