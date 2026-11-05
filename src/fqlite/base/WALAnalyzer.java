@@ -56,8 +56,8 @@ public class WALAnalyzer {
         Path dbPath  = Path.of(reader.job.path);
         Path walPath = Path.of(reader.path);
 
-        if (!Files.exists(dbPath))  { System.err.println("Database file not found: " + dbPath);  System.exit(1); }
-        if (!Files.exists(walPath)) { System.err.println("WAL file not found:      " + walPath); System.exit(1); }
+        if (!Files.exists(dbPath))  throw new IOException("Database file not found: " + dbPath);
+        if (!Files.exists(walPath)) throw new IOException("WAL file not found: " + walPath);
 
         sep(); System.out.println("  DB : " + dbPath.toAbsolutePath());
         System.out.println("  WAL: " + walPath.toAbsolutePath()); sep();

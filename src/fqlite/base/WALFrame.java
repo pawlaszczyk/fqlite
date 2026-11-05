@@ -7,6 +7,8 @@ public class WALFrame
 	public long salt1;
     public long salt2;
 	public boolean committed = false;
+	/** "DB size after commit" from the frame header (0 = no commit frame) */
+	public int commitSize = 0;
 	
 	@Override
 	public String toString()

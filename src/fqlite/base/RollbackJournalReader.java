@@ -552,6 +552,7 @@ public class RollbackJournalReader{
 			/* Maybe the whole page was dropped because of a drop component command? */
 			/* start carving on the complete page */
 			c = new Carver(job, buffer, content, visit, ps);
+		c.recordCellLayout = false;   // page offsets refer to the db, not to this file
 
 
 		/* try to get component schema for the current page, if possible */
@@ -797,6 +798,7 @@ public class RollbackJournalReader{
 			/* Maybe the whole page was dropped because of a drop component command? */
 			/* start carving on the complete page */
 			c = new Carver(job, buffer, content, visit, pagenumber_maindb);
+		c.recordCellLayout = false;   // page offsets refer to the db, not to this file
 
 		// Matcher mat = null;
 		// boolean match = false;

@@ -60,9 +60,13 @@ public class Carver{
 	 *
 	 */
 
+	/** record the value layout (offset:length) of carved records - only meaningful for pages of the db file */
+	public boolean recordCellLayout = true;
+
 	public int carve(int fromidx, int toidx, SerialTypeMatcher mat, int headertype, AbstractDescriptor tbd) 
 	{
 		Auxiliary c = new Auxiliary(job);
+		c.recordCellLayout = recordCellLayout;
 	
 		switch (headertype) 
 		{

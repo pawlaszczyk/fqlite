@@ -78,5 +78,9 @@ public class Global {
 	public final static String col_walframe = "_WALFRAME";
 	public final static String col_salt1 = "_SALT1";
 	public final static String col_salt2 = "_SALT2";
+	/** export: file the recovered row was read from (NIST SFT-CA-13) */
+	public final static String col_source = "_SOURCE";
+	/** export: "offset:length" of every value of a recovered row (NIST SFT-AO-06) */
+	public final static String col_cells = "_CELLS";
 
 }

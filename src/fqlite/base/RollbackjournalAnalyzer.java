@@ -82,8 +82,8 @@ public class RollbackjournalAnalyzer {
         Path dbPath      = Path.of(reader.job.path);
         Path journalPath = Path.of(reader.path);
 
-        if (!Files.exists(dbPath))      { System.err.println("Database file not found: " + dbPath);      System.exit(1); }
-        if (!Files.exists(journalPath)) { System.err.println("Journal file not found:  " + journalPath); System.exit(1); }
+        if (!Files.exists(dbPath))      throw new IOException("Database file not found: " + dbPath);
+        if (!Files.exists(journalPath)) throw new IOException("Journal file not found: " + journalPath);
 
         sep(); System.out.println("  SQLite Rollback Journal Analyzer  (JDBC-free, pure binary)");
         sep(); System.out.println("  DB     : " + dbPath.toAbsolutePath());

@@ -51,6 +51,8 @@ public class WALReader{
 	 * 
 	 */
 	TreeMap<Long,LinkedList<WALFrame>> checkpoints = new TreeMap<Long,LinkedList<WALFrame>>();
+	/* all frames in file order (transaction timeline and version analysis) */
+	public final List<WALFrame> framelist = new ArrayList<>();
 
 	Map<Long, WALAnalyzer.SchemaEntry> pageOwner;
 	List<WALAnalyzer.FrameInfo> frames;
@@ -369,7 +371,7 @@ public class WALReader{
 			pagenumber_wal = numberofpages;
 
 			
-			WALFrame frame = updateCheckpoint(pagenumber_maindb, framenumber,fsalt1, fsalt2, commit != 0);
+			WALFrame frame = updateCheckpoint(pagenumber_maindb, framenumber,fsalt1, fsalt2, commit);
 			analyzePage(frame);
 
 			
@@ -377,7 +379,8 @@ public class WALReader{
 			
 		
 			/*  More pages to analyse? */
-			if(framestart+24+ps < size)
+			/* the next frame exists if it ends at or before the end of the file (before: the last frame was never read) */
+			if(framestart+24+ps <= size)
 			{
 				
 				next = true;
@@ -393,6 +396,7 @@ public class WALReader{
 		
 		AppLog.info("Lines after WAL-file recovery: " + output.size());
 		AppLog.info("Number of pages in WAL-file" + numberofpages);
+		markWALVersions();
 		long end = System.currentTimeMillis();
 		System.out.println("WAL Import duration in ms: " + (end-start));
 		
@@ -402,9 +406,115 @@ public class WALReader{
 	
 	
 	
-	private WALFrame updateCheckpoint(int pagenumber, int framenumber,long salt1, long salt2, boolean committed){
+	/**
+	 * NIST SFT-AO-05: a row found in several WAL frames is an UPDATE if a later frame
+	 * holds a different version of it; it is a DELETE if a later frame of the same page
+	 * no longer contains it. Frames are ordered by WAL generation (salt-1) and frame number.
+	 * The finding is appended to the "[pll|hl]" column, the status is not changed.
+	 */
+	private void markWALVersions() {
+		int upd = 0, del = 0;
+		Map<Integer, List<long[]>> framesOfPage = new HashMap<>();
+		for (WALFrame f : framelist)
+			framesOfPage.computeIfAbsent(f.pagenumber, x -> new ArrayList<>()).add(new long[]{f.salt1, f.framenumber});
+
+		for (String table : resultlist.keySet()) {
+			ObservableList<ObservableList<String>> rows = resultlist.get(table);
+			if (rows == null || rows.size() < 2)
+				continue;
+			Map<String, List<ObservableList<String>>> byRowid = new HashMap<>();
+			for (ObservableList<String> r : rows) {
+				if (r.size() <= 10 || !Global.REGULAR_RECORD.equals(r.get(3)) || !positiveNumber(r.get(2)))
+					continue;
+				byRowid.computeIfAbsent(r.get(2).trim(), x -> new ArrayList<>()).add(r);
+			}
+			for (List<ObservableList<String>> versions : byRowid.values()) {
+				versions.sort(Comparator.comparingLong((ObservableList<String> r) -> number(r.get(8)))
+						.thenComparingLong(r -> number(r.get(7))));
+				for (int i = 0; i + 1 < versions.size(); i++) {
+					ObservableList<String> older = versions.get(i), newer = versions.get(i + 1);
+					if (!older.subList(10, older.size()).equals(newer.subList(10, newer.size()))) {
+						older.set(1, older.get(1) + " " + Auxiliary.FLAG_WAL_SUPERSEDED + newer.get(7));
+						upd++;
+					}
+				}
+				ObservableList<String> last = versions.get(versions.size() - 1);
+				long salt = number(last.get(8)), frame = number(last.get(7));
+				List<long[]> pageFrames = framesOfPage.get((int) number(last.get(6)));
+				if (pageFrames == null)
+					continue;
+				for (long[] f : pageFrames) {
+					if (f[0] > salt || (f[0] == salt && f[1] > frame)) {
+						last.set(1, last.get(1) + " " + Auxiliary.FLAG_WAL_DELETED + f[1]);
+						del++;
+						break;
+					}
+				}
+			}
+		}
+		/* rows of the database file compared with the WAL: the db file holds the state of the last
+		 * checkpoint, the WAL the newer versions (NIST SFT-AO-05 for data of the main file) */
+		int dbUpd = 0, dbDel = 0;
+		Map<Integer, Long> firstFrameOfPage = new HashMap<>();
+		for (WALFrame f : framelist)
+			if (f.salt1 == hsalt1 && f.salt2 == hsalt2)
+				firstFrameOfPage.merge(f.pagenumber, (long) f.framenumber, Math::min);
+		if (job != null && job.resultlist != null && job.ps > 0) {
+			for (String table : resultlist.keySet()) {
+				ObservableList<ObservableList<String>> walrows = resultlist.get(table);
+				ObservableList<ObservableList<String>> dbrows = job.resultlist.get(table);
+				if (walrows == null || dbrows == null)
+					continue;
+				// earliest WAL version of every rowid of the current generation
+				Map<String, ObservableList<String>> firstVersion = new HashMap<>();
+				for (ObservableList<String> w : walrows) {
+					if (w.size() <= 10 || !Global.REGULAR_RECORD.equals(w.get(3)) || !positiveNumber(w.get(2)))
+						continue;
+					if (number(w.get(8)) != hsalt1)
+						continue;
+					ObservableList<String> o = firstVersion.get(w.get(2).trim());
+					if (o == null || number(w.get(7)) < number(o.get(7)))
+						firstVersion.put(w.get(2).trim(), w);
+				}
+				for (ObservableList<String> r : dbrows) {
+					if (r.size() <= 5 || !Global.REGULAR_RECORD.equals(r.get(3)) || !positiveNumber(r.get(2)))
+						continue;
+					ObservableList<String> w = firstVersion.get(r.get(2).trim());
+					if (w != null) {
+						if (!r.subList(5, r.size()).equals(w.subList(10, w.size()))) {
+							r.set(1, r.get(1) + " " + Auxiliary.FLAG_WAL_SUPERSEDED + w.get(7));
+							dbUpd++;
+						}
+						continue;
+					}
+					long off = number(r.get(4));
+					if (off < 0)
+						continue;
+					Long frame = firstFrameOfPage.get((int) (off / job.ps) + 1);
+					if (frame != null) {        // the page was rewritten in the WAL without this row
+						r.set(1, r.get(1) + " " + Auxiliary.FLAG_WAL_DELETED + frame);
+						dbDel++;
+					}
+				}
+			}
+		}
+		AppLog.info("WAL version analysis: " + upd + " row version(s) superseded by an UPDATE, " + del + " row(s) deleted in a later frame; "
+				+ "db file: " + dbUpd + " row(s) updated and " + dbDel + " row(s) deleted in the WAL");
+	}
+
+	private static boolean positiveNumber(String s) {
+		try { return s != null && Long.parseLong(s.trim()) > 0; } catch (NumberFormatException e) { return false; }
+	}
+
+	private static long number(String s) {
+		try { return Long.parseLong(s.trim()); } catch (NumberFormatException | NullPointerException e) { return -1; }
+	}
+
+	private WALFrame updateCheckpoint(int pagenumber, int framenumber,long salt1, long salt2, int commitSize){
 		
-		WALFrame f = new WALFrame(pagenumber, framenumber , salt1, salt2,  committed);
+		WALFrame f = new WALFrame(pagenumber, framenumber , salt1, salt2,  commitSize != 0);
+		f.commitSize = commitSize;
+		framelist.add(f);
 		//checkpointlist.add(f);
 
 		
@@ -837,6 +947,7 @@ public class WALReader{
 			/* Maybe the whole page was dropped because of a drop component command? */
 			/* start carving on the complete page */
 			c = new Carver(job, buffer, content, visit, ps);
+		c.recordCellLayout = false;   // page offsets refer to the db, not to this file
 
 		/* try to get component schema for the current page, if possible */
 		TableDescriptor tdesc = null;
@@ -1111,6 +1222,7 @@ public class WALReader{
 			/* Maybe the whole page was dropped because of a drop component command? */
 			/* start carving on the complete page */
 			c = new Carver(job, buffer, content, visit, pagenumber_maindb);
+		c.recordCellLayout = false;   // page offsets refer to the db, not to this file
 
 		/* try to get component schema for the current page, if possible */
 		TableDescriptor tdesc = null;

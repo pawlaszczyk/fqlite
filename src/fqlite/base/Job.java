@@ -159,6 +159,9 @@ public class Job {
 	/* header fields */
 	String headerstring;
 	String PRAGMA_journal_mode = "OFF";
+
+	/** value layout of recovered records ("offset:length ..."), key = filetype + ":" + record offset (NIST SFT-AO-06) */
+	public final ConcurrentHashMap<String, String> cellLayout = new ConcurrentHashMap<>();
 	byte ffwversion;
 	byte ffrversion;
 	byte reservedspace;
@@ -315,12 +318,13 @@ public class Job {
 
 			switch(ffwversion)
 			{
-				case 0: PRAGMA_journal_mode = "OFF";
+				/* bytes 18/19 only distinguish legacy (rollback journal) from WAL; DELETE, TRUNCATE,
+				 * PERSIST, MEMORY and OFF are not recorded in the database header */
+				case 0: PRAGMA_journal_mode = "invalid value 0 (header manipulated?)";
 					break;
-				case 1: if(readRollbackJournal)
-					PRAGMA_journal_mode = "Rollback Journal PERSIST";
-				else
-					PRAGMA_journal_mode = "Rollback Journal OFF (no file)";
+				case 1: PRAGMA_journal_mode = readRollbackJournal
+						? "legacy (rollback journal, -journal file present; DELETE/TRUNCATE/PERSIST/MEMORY not distinguishable from the header)"
+						: "legacy (rollback journal; DELETE/TRUNCATE/PERSIST/MEMORY/OFF not distinguishable from the header)";
 					break;
 				case 2: PRAGMA_journal_mode = "WAL";
 					break;
@@ -638,6 +642,7 @@ public class Job {
 	{
 		walpanel.initHeaderTable(getWALHeaderProperties());
 		walpanel.initCheckpointTable(getCheckpointProperties());
+		walpanel.initTransactionTable(getWALTransactions());
 	}
 
 
@@ -1691,6 +1696,7 @@ public class Job {
 		// drop stale copies of live records found on freed pages (b-tree rebalancing)
 		removeStaleCopiesOfLiveRecords();
 		removeTruncatedDuplicates();
+		markUpdatedRecords();
 
 		if (gui != null) {
 
@@ -2013,6 +2019,7 @@ public class Job {
 			if(exp == ExportType.SQLITEDB || exp == ExportType.ROLLBACKJOURNAL || exp == ExportType.WALARCHIVE)
 			{
 				dbname = objectname;
+				final int filetag = fileTag(exp);
 
 				ConcurrentHashMap<String,ObservableList<ObservableList<String>>> exportlist = switch (exp) {
 					case ROLLBACKJOURNAL -> this.rol.resultlist;
@@ -2055,7 +2062,7 @@ public class Job {
 
 					/* as long as there are lines inside, go on */
 					for (ObservableList<String> strings : table) {
-						String out = prepareOutput(strings, dbname, file.getParent()) + "\n";
+						String out = prepareOutput(strings, dbname, file.getParent(), filetag) + "\n";
 						writer.write(out);
 					}
 
@@ -2091,13 +2098,15 @@ public class Job {
 				}
 
 				Iterator<ObservableList<String>> iter = table.iterator();
+				final int filetag = parenttype == FileType.WriteAheadLog ? Global.WAL_ARCHIVE_FILE
+						: parenttype == FileType.RollbackJournalLog ? Global.ROLLBACK_JOURNAL_FILE : Global.REGULAR_DB_FILE;
 
 				if(Global.EXPORTTABLEHEADER)
 					writer.write(prepareHeader(objectname,exp == ExportType.WALARCHIVE) + "\n");
 
 				/* as long as there are lines inside, go on */
 				while(iter.hasNext()){
-					String out = prepareOutput(iter.next(),dbname,file.getParent()) + "\n";
+					String out = prepareOutput(iter.next(),dbname,file.getParent(), filetag) + "\n";
 					writer.write(out);
 				}
 
@@ -2128,7 +2137,7 @@ public class Job {
 
 		String[] head = getColumnNamesForTable(tablename);
 		if ((head != null && head.length > 0)) {
-			String line = "";
+			String line = Global.col_source + token + Global.col_cells + token;
 			if (isWAL) {
 				line += Global.col_tblname + token + Global.col_pll + token + Global.col_rowid + token + Global.col_status + token + Global.col_offset + token + Global.col_commit + token + Global.col_dbpage + token + Global.col_walframe + token + Global.col_salt1 + token + Global.col_salt2 + token;
 			}
@@ -2310,6 +2319,8 @@ public class Job {
 
 			Enumeration<String> tbls = exportlist.keys();
 			List<String> rendered = new ArrayList<>();
+			final int filetag = fileTag(exp);
+			final String sourceName = sourceFileName(filetag);
 
 			writer.write(createHtmlHeader());
 
@@ -2359,9 +2370,16 @@ public class Job {
 					// Spaltenüberschriften mit Sortierung
 					writer.write("<thead>\n");
 					writer.write("<tr class='header-row'>\n");
+					String[] extra = {Global.col_source, Global.col_cells};
+					for (int colIndex = 0; colIndex < extra.length; colIndex++) {
+						writer.write("<th onclick=\"sortTable('" + escapeHtml(jsEscape(tblname)) + "', " + colIndex + ")\">");
+						writer.write(escapeHtml(extra[colIndex]));
+						writer.write(" <span class='sort-indicator'></span>");
+						writer.write("</th>\n");
+					}
 					for (int colIndex = 0; colIndex < h.length; colIndex++) {
 						String header = h[colIndex];
-						writer.write("<th onclick=\"sortTable('" + escapeHtml(jsEscape(tblname)) + "', " + colIndex + ")\">");
+						writer.write("<th onclick=\"sortTable('" + escapeHtml(jsEscape(tblname)) + "', " + (colIndex + 2) + ")\">");
 						writer.write(escapeHtml(header));
 						writer.write(" <span class='sort-indicator'></span>");
 						writer.write("</th>\n");
@@ -2369,7 +2387,7 @@ public class Job {
 					writer.write("</tr>\n");
 
 					writer.write("<tr class='filter-row'>\n");
-					for (int colIndex = 0; colIndex < h.length; colIndex++) {
+					for (int colIndex = 0; colIndex < h.length + 2; colIndex++) {
 						writer.write("<th>");
 						writer.write("<input type='text' class='column-filter' ");
 						writer.write("data-column='" + colIndex + "' ");
@@ -2390,6 +2408,8 @@ public class Job {
 					ObservableList<String> row = table.get(i);
 					String offset = row.get(5);
 					writer.write("<tr>\n");
+					writer.write("<td>" + escapeHtml(sourceName) + "</td>\n");
+					writer.write("<td>" + escapeHtml(cellsOf(filetag, row)) + "</td>\n");
 					int cl = 0;
 					for (String cell : row) {
 						if (cell == null) cell = "";
@@ -2914,7 +2934,7 @@ public class Job {
 				.replace("'", "&#39;");
 	}
 
-	private String prepareOutput(ObservableList<String> list, String dbname, String exportfolder) throws IOException{
+	private String prepareOutput(ObservableList<String> list, String dbname, String exportfolder, int filetag) throws IOException{
 
 
 		String token = Global.CSV_SEPARATOR;
@@ -2933,6 +2953,9 @@ public class Job {
 		/* skip schema definition lines of table sqlite_master */
 		if(line[0].startsWith("sqlite_master"))
 			return null;
+
+		/* source file and value layout first - independent of the number of columns of the row */
+		output += sourceFileName(filetag) + token + cellsOf(filetag, list) + token;
 
 		// iterate over all cells in one particular table row
 		for (String c: line){
@@ -3776,6 +3799,221 @@ public class Job {
 		}
 		if (removed > 0)
 			info(removed + " truncated record(s) are empty or partial copies of completely recovered records - not reported.");
+	}
+
+	/**
+	 * NIST SFT-AO-04: a deleted record whose rowid belongs to a live record of the same table,
+	 * that shares at least one value with it and differs in at least one other value, is an
+	 * older version left behind by an UPDATE. The finding is appended to the "[pll|hl]" column.
+	 * (Rows of a dropped and re-created table share the rowid but no values - not flagged.)
+	 */
+	private void markUpdatedRecords() {
+		int marked = 0;
+		for (String table : resultlist.keySet()) {
+			ObservableList<ObservableList<String>> rows = resultlist.get(table);
+			if (rows == null || rows.size() < 2)
+				continue;
+			Map<String, List<ObservableList<String>>> live = new HashMap<>();
+			for (ObservableList<String> r : rows)
+				if (r.size() > 5 && Global.REGULAR_RECORD.equals(r.get(3)) && positiveRowid(r.get(2)))
+					live.computeIfAbsent(r.get(2).trim(), k -> new ArrayList<>()).add(r);
+			if (live.isEmpty())
+				continue;
+			for (ObservableList<String> r : rows) {
+				if (r.size() <= 5)
+					continue;
+				String st = r.get(3), pll = r.get(1);
+				if (!Global.DELETED_RECORD_IN_PAGE.equals(st) && !Global.FREELIST_ENTRY.equals(st))
+					continue;
+				if (pll == null || pll.contains(Auxiliary.FLAG_UPDATED) || r.get(2) == null)
+					continue;
+				List<ObservableList<String>> candidates = live.get(r.get(2).trim());
+				if (candidates == null)
+					continue;
+				for (ObservableList<String> l : candidates) {
+					if (isOlderVersion(r, l)) {
+						r.set(1, pll + " " + Auxiliary.FLAG_UPDATED);
+						marked++;
+						break;
+					}
+				}
+			}
+		}
+		marked += markUpdatedWithoutRowid();
+		if (marked > 0)
+			info(marked + " deleted record(s) are older versions of live records (UPDATE) - flagged.");
+	}
+
+	/**
+	 * Carved records often lose their rowid (the freeblock header overwrites the cell start).
+	 * Such a record is an older version of a live record if exactly one live record of the
+	 * table shares a distinctive value with it and has the same value in all but one of its
+	 * (at least three) non-empty columns.
+	 */
+	private int markUpdatedWithoutRowid() {
+		int marked = 0;
+		for (String table : resultlist.keySet()) {
+			ObservableList<ObservableList<String>> rows = resultlist.get(table);
+			if (rows == null || rows.size() < 2)
+				continue;
+			// index: column -> value -> live rows (only distinctive values are used)
+			Map<Integer, Map<String, List<ObservableList<String>>>> index = new HashMap<>();
+			for (ObservableList<String> r : rows) {
+				if (r.size() <= 5 || !Global.REGULAR_RECORD.equals(r.get(3)))
+					continue;
+				for (int k = 5; k < r.size(); k++) {
+					String v = r.get(k);
+					if (v == null || v.isEmpty() || v.equals("NULL"))
+						continue;
+					index.computeIfAbsent(k, x -> new HashMap<>()).computeIfAbsent(v, x -> new ArrayList<>()).add(r);
+				}
+			}
+			if (index.isEmpty())
+				continue;
+			for (ObservableList<String> r : rows) {
+				if (r.size() <= 5 || positiveRowid(r.get(2)))
+					continue;                         // rows with a rowid are handled by markUpdatedRecords()
+				String st = r.get(3), pll = r.get(1);
+				if (!Global.DELETED_RECORD_IN_PAGE.equals(st) && !Global.FREELIST_ENTRY.equals(st))
+					continue;
+				if (pll == null || pll.contains(Auxiliary.FLAG_UPDATED) || pll.contains(Auxiliary.FLAG_TRUNCATED)
+						|| pll.contains("header\u2260payload"))
+					continue;                         // incomplete or misparsed records are not compared
+				int nonEmpty = 0;
+				Map<ObservableList<String>, Integer> hits = new java.util.IdentityHashMap<>();
+				for (int k = 5; k < r.size(); k++) {
+					String v = r.get(k);
+					if (v == null || v.isEmpty() || v.equals("NULL"))
+						continue;
+					nonEmpty++;
+					Map<String, List<ObservableList<String>>> col = index.get(k);
+					List<ObservableList<String>> same = col == null ? null : col.get(v);
+					if (same == null || same.size() > 50)
+						continue;                     // value not distinctive
+					for (ObservableList<String> l : same)
+						hits.merge(l, 1, Integer::sum);
+				}
+				if (nonEmpty < 3)
+					continue;
+				ObservableList<String> match = null;
+				int matches = 0;
+				// candidates share at least one distinctive value; all but one of the values must be equal
+				for (Map.Entry<ObservableList<String>, Integer> e : hits.entrySet()) {
+					if (differsInOneColumn(r, e.getKey())) {
+						match = e.getKey();
+						matches++;
+					}
+				}
+				if (matches == 1 && match != null) {
+					r.set(1, pll + " " + Auxiliary.FLAG_UPDATED + " of rowid " + match.get(2));
+					marked++;
+				}
+			}
+		}
+		return marked;
+	}
+
+	private static boolean differsInOneColumn(List<String> deleted, List<String> live) {
+		int diff = 0, col = -1;
+		for (int k = 5; k < Math.min(deleted.size(), live.size()); k++) {
+			String a = deleted.get(k), b = live.get(k);
+			if (a == null || a.isEmpty() || a.equals("NULL"))
+				continue;
+			if (!a.equals(b)) {
+				diff++;
+				col = k;
+			}
+		}
+		if (diff != 1)
+			return false;
+		// only the INTEGER PRIMARY KEY (= rowid) differs: a copy of the same row with a lost id, not an UPDATE
+		String rowid = live.get(2) == null ? "" : live.get(2).trim();
+		return !rowid.equals(live.get(col) == null ? null : live.get(col).trim());
+	}
+
+	private static boolean positiveRowid(String s) {
+		try { return s != null && Long.parseLong(s.trim()) > 0; } catch (NumberFormatException e) { return false; }
+	}
+
+	private static boolean isOlderVersion(List<String> deleted, List<String> live) {
+		String rowid = deleted.get(2).trim();
+		int same = 0, diff = 0;
+		int n = Math.min(deleted.size(), live.size());
+		for (int k = 5; k < n; k++) {
+			String a = deleted.get(k), b = live.get(k);
+			if (a == null || a.isEmpty() || b == null)
+				continue;
+			if (a.equals(rowid) && b.equals(rowid))
+				continue;            // INTEGER PRIMARY KEY column = alias of the rowid
+			if (a.equals(b)) same++; else diff++;
+		}
+		return same >= 1 && diff >= 1;
+	}
+
+	/** NIST SFT-AO-08: WAL frames grouped into transactions, in chronological order. Row 0 = column names. */
+	public String[][] getWALTransactions() {
+		List<String[]> out = new ArrayList<>();
+		out.add(new String[]{"Tx", "Generation (salt-1)", "Salt-2", "Frames", "Pages (table)", "DB size after commit", "State"});
+		if (wal == null)
+			return out.toArray(new String[0][]);
+		int tx = 0;
+		for (Long salt1 : wal.checkpoints.keySet()) {     // ascending: salt-1 is incremented on every WAL reset
+			List<WALFrame> frames = new ArrayList<>(wal.checkpoints.get(salt1));
+			frames.sort((a, b) -> Integer.compare(a.framenumber, b.framenumber));
+			boolean current = salt1 == wal.hsalt1;
+			List<WALFrame> open = new ArrayList<>();
+			for (int i = 0; i < frames.size(); i++) {
+				WALFrame f = frames.get(i);
+				open.add(f);
+				boolean lastFrame = i == frames.size() - 1;
+				if (f.commitSize <= 0 && !lastFrame)
+					continue;
+				String state;
+				if (!current)
+					state = "earlier WAL generation (stale frames)";
+				else
+					state = f.commitSize > 0 ? "committed" : "not committed (no commit frame)";
+				StringBuilder pg = new StringBuilder();
+				java.util.LinkedHashSet<Integer> seen = new java.util.LinkedHashSet<>();
+				for (WALFrame o : open)
+					seen.add(o.pagenumber);
+				for (Integer n : seen) {
+					if (pg.length() > 0)
+						pg.append(", ");
+					pg.append(n);
+					if (pages != null && n >= 0 && n < pages.length && pages[n] != null)
+						pg.append(" (").append(pages[n].getName()).append(")");
+				}
+				out.add(new String[]{String.valueOf(++tx), String.valueOf(salt1), String.valueOf(f.salt2),
+						open.get(0).framenumber + "-" + f.framenumber, pg.toString(),
+						f.commitSize > 0 ? String.valueOf(f.commitSize) : "", state});
+				open.clear();
+			}
+		}
+		return out.toArray(new String[0][]);
+	}
+
+	private int fileTag(ExportType exp) {
+		if (exp == ExportType.WALARCHIVE) return Global.WAL_ARCHIVE_FILE;
+		if (exp == ExportType.ROLLBACKJOURNAL) return Global.ROLLBACK_JOURNAL_FILE;
+		return Global.REGULAR_DB_FILE;
+	}
+
+	/** name of the file a row was read from (NIST SFT-CA-13) */
+	private String sourceFileName(int filetag) {
+		String p = filetag == Global.WAL_ARCHIVE_FILE ? walpath
+				 : filetag == Global.ROLLBACK_JOURNAL_FILE ? rollbackjournalpath : path;
+		if (p == null)
+			return "";
+		Path fn = Paths.get(p).getFileName();
+		return fn == null ? p : fn.toString();
+	}
+
+	/** "offset:length" of every value of a recovered row, as recorded during the recovery (NIST SFT-AO-06) */
+	private String cellsOf(int filetag, List<String> row) {
+		if (row == null || row.size() <= 5 || row.get(5) == null)
+			return "";
+		return cellLayout.getOrDefault(filetag + ":" + row.get(5).trim(), "");
 	}
 
 	private long pageOf(List<String> row) {

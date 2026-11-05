@@ -102,6 +102,31 @@ public class WALPropertyPanel extends StackPane {
 		
 	}
 	
+	/**
+	 * NIST SFT-AO-08: sequence of transactions in the WAL. data[0] holds the column names.
+	 */
+	@SuppressWarnings({ "rawtypes", "unchecked" })
+	public void initTransactionTable(String[][] data) {
+		if (data == null || data.length == 0)
+			return;
+		TableView table = new TableView<>();
+		for (int i = 0; i < data[0].length; i++) {
+			final int j = i;
+			TableColumn col = new javafx.scene.control.TableColumn(data[0][i]);
+			col.setCellValueFactory(new Callback<CellDataFeatures<ObservableList,String>,ObservableValue<String>>(){
+				public ObservableValue<String> call(CellDataFeatures<ObservableList, String> param) {
+					return new SimpleStringProperty(param.getValue().get(j).toString());
+				}
+			});
+			table.getColumns().add(col);
+		}
+		fillTable(table, data);
+		StackPane fields = new StackPane();
+		fields.getChildren().add(table);
+		Tab txtab = new Tab("Transactions", fields);
+		tabpane.getTabs().add(txtab);
+	}
+
 	static int cl = 0;
 
 	String[] bgcolors = new String[]{"-fx-background-color: orange;","-fx-background-color: yellow;","-fx-background-color: lightblue;","-fx-background-color: green;"};

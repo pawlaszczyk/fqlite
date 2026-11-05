@@ -370,6 +370,33 @@ public class Auxiliary {
     /** marker in the "[pll|hl]" column: an overflow page of the record was reused (now a freelist trunk) */
     public static final String FLAG_OVERFLOW_OVERWRITTEN = "\u26A0 overflow overwritten";
 
+    /** marker in the "[pll|hl]" column: deleted record is an older version of a live record (UPDATE) */
+    public static final String FLAG_UPDATED = "\u21BB old version (UPDATE)";
+    /** marker for WAL rows: a later frame holds a different version of the row (UPDATE); followed by the frame number */
+    public static final String FLAG_WAL_SUPERSEDED = "\u21BB updated in WAL frame ";
+    /** marker for WAL rows: a later frame of the same page no longer contains the row (DELETE); followed by the frame number */
+    public static final String FLAG_WAL_DELETED = "\u2717 deleted in WAL frame ";
+
+    /** record the file offset and length of every value (job.cellLayout); disabled for carving in WAL/journal pages */
+    public boolean recordCellLayout = true;
+
+    /** table descriptor by name (for pages that are not part of the db file's page map) */
+    private AbstractDescriptor descriptorByName(String name) {
+        if (name == null || job == null || job.headers == null)
+            return null;
+        for (TableDescriptor t : job.headers)
+            if (name.equals(t.tblname))
+                return t;
+        return null;
+    }
+
+    /** stores the value layout of a recovered record: key = filetype + ":" + record offset */
+    private void storeCellLayout(int filetag, String recordOffset, List<String> cells) {
+        if (cells == null || recordOffset == null || cells.isEmpty() || job == null)
+            return;
+        job.cellLayout.put(filetag + ":" + recordOffset, String.join(" ", cells));
+    }
+
     /** pages (0-based) read by the last call of readOverflowIterativ */
     private final List<Integer> lastOverflowPages = new ArrayList<>();
 
@@ -382,6 +409,8 @@ public class Auxiliary {
 
         do{
             String damage = null;     // set when the recovered content is incomplete / overwritten
+            List<String> cells = recordCellLayout ? new ArrayList<>() : null;   // offset:length per value
+            final long pageBase = (pagenumber - 1L) * job.ps;
 
             if(round > 10)
             {
@@ -449,8 +478,10 @@ public class Auxiliary {
 
             record.add((pagenumber - 1) * job.ps + m.begin + "");
             hexdump.add(null);
+            final String recOffStr = record.getLast();
 
             if (so < pll) {
+                cells = null;        // spilled record: the values are split over overflow pages
                 /* Spilled payload — read overflow */
                 int phl = header.length() / 2;
                 int last = buffer.position();
@@ -561,6 +592,7 @@ public class Auxiliary {
                             record.add(rowid + "");
                             byte[] bytes = ByteBuffer.allocate(4).putInt(rowid).array();
                             hexdump.add(bytes);
+                            if (cells != null) cells.add("rowid");
                             continue;
                         }
 
@@ -568,6 +600,7 @@ public class Auxiliary {
                         if ((buffer.position() + en.getlength()) > buffer.limit()) {
                             return null;
                         }
+                        if (cells != null) cells.add((pageBase + buffer.position()) + ":" + value.length);
                         buffer.get(value);
                         //hexdump.add(value);
                         blobcolidx = appendColumn(record, hexdump, en, value, blobcolidx, false, 0);
@@ -597,6 +630,7 @@ public class Auxiliary {
                             record.add(rowid + "");
                             byte[] bytes = ByteBuffer.allocate(4).putLong(rowid).array();
                             hexdump.add(bytes);
+                            if (cells != null) cells.add("rowid");
                             cc++;
                             continue;
                         }
@@ -612,6 +646,7 @@ public class Auxiliary {
                                 (en.type == SerialTypes.BLOB || en.type == SerialTypes.STRING)) {
                                 SqliteElement truncated = en.clone(en, newlength);
                                 byte[] value = new byte[truncated.getlength()];
+                                if (cells != null) cells.add((pageBase + buffer.position()) + ":" + value.length + "(truncated)");
                                 buffer.get(value);
                                 //hexdump.add(value);
                                 blobcolidx = appendColumn(record, hexdump, truncated, value, blobcolidx, false, 0);
@@ -622,6 +657,7 @@ public class Auxiliary {
                         }
 
                         byte[] value = new byte[en.getlength()];
+                        if (cells != null) cells.add((pageBase + buffer.position()) + ":" + value.length);
                         buffer.get(value);
                         //hexdump.add(value);
                         blobcolidx = appendColumn(record, hexdump, en, value, blobcolidx, false, 0);
@@ -650,6 +686,7 @@ public class Auxiliary {
             }
             else {
                 // successful recovery -> number of columns does match to the number of fields
+                storeCellLayout(Global.REGULAR_DB_FILE, recOffStr, cells);
                 return new CarvingResult(buffer.position(), cursor, new StringBuffer(), record, hexdump);
             }
         }
@@ -923,6 +960,14 @@ public class Auxiliary {
                 }
 
             }
+            /* page not known to the db file (e.g. allocated in the WAL/journal beyond its end): use the owner table */
+            if (td == null) {
+                td = descriptorByName(tblname);
+                if (td != null) {
+                    rowid_col = td.rowid_col;
+                    isVT = td.sql != null && td.sql.toUpperCase().contains("CREATE VIRTUAL");
+                }
+            }
 
             record.add(Global.REGULAR_RECORD.intern());
             hexdump.add(null);
@@ -947,6 +992,14 @@ public class Auxiliary {
                     isVT  = td.sql.toUpperCase().contains("CREATE VIRTUAL");
                 }
 
+            }
+            /* page not known to the db file (e.g. allocated in the WAL/journal beyond its end): use the owner table */
+            if (td == null) {
+                td = descriptorByName(tblname);
+                if (td != null) {
+                    rowid_col = td.rowid_col;
+                    isVT = td.sql != null && td.sql.toUpperCase().contains("CREATE VIRTUAL");
+                }
             }
 
             record.add(Global.REGULAR_RECORD.intern());
@@ -992,8 +1045,8 @@ public class Auxiliary {
         if (!withoutROWID) {
             if (unknown) {
                 rowid = readUnsignedVarInt(buffer);
-            } else if (pagenumber_db < job.pages.length
-                       && (job.pages[pagenumber_db] == null || job.pages[pagenumber_db].ROWID)) {
+            } else if (td != null ? td.ROWID
+                       : (pagenumber_db >= job.pages.length || job.pages[pagenumber_db] == null || job.pages[pagenumber_db].ROWID)) {
                 rowid = readUnsignedVarInt(buffer);
             }
         }
@@ -1128,16 +1181,26 @@ public class Auxiliary {
         } else {
             /* No overflow */
             int blobcolidx = 0;
+            // value layout of recovered data (WAL, journal, freelist pages); live records of the db are not recorded
+            final int filetag = filetype == Global.WAL_ARCHIVE_FILE ? Global.WAL_ARCHIVE_FILE
+                              : filetype == Global.ROLLBACK_JOURNAL_FILE ? Global.ROLLBACK_JOURNAL_FILE : Global.REGULAR_DB_FILE;
+            final boolean layout = filetag != Global.REGULAR_DB_FILE || unknown;
+            final String recOffStr = record.isEmpty() ? null : record.get(record.size() - 1);
+            long cellBase = 0;
+            try { cellBase = Long.parseLong(recOffStr) - cellstart; } catch (NumberFormatException | NullPointerException ignore) { }
+            final List<String> cells = layout ? new ArrayList<>() : null;
             for (SqliteElement en : columns) {
                 if (en == null) {
                     record.add("NULL".intern());
                     hexdump.add(null);
+                    if (cells != null) cells.add("-");
                     continue;
                 }
                 if (rowid_col == co && !withoutROWID) {
                     record.add(rowid + "");
                     byte[] bytes = ByteBuffer.allocate(8).putInt(rowid).array();
                     hexdump.add(bytes);
+                    if (cells != null) cells.add("rowid");
                     co++;
                     continue;
                 }
@@ -1151,6 +1214,7 @@ public class Auxiliary {
                 maxlength -= en.getlength();
                 if (value == null) break;
 
+                if (cells != null) cells.add((cellBase + buffer.position()) + ":" + value.length);
                 try {
                     buffer.get(value);
                 } catch (BufferUnderflowException err) {
@@ -1162,6 +1226,7 @@ public class Auxiliary {
                 co++;
                 if (maxlength <= 0) break;
             }
+            storeCellLayout(filetag, recOffStr, cells);
         }
 
         /*
