@@ -50,6 +50,7 @@ public class FormatDetector {
         if (isHEIC(data)) return Format.HEIC;
         if (isPDF(data))  return Format.PDF;
         if (isGZIP(data)) return Format.GZIP;
+        if (fqlite.blob.TypedStream.isTypedStream(data)) return Format.TYPEDSTREAM;
         if (isBPList(data))        return Format.BPLIST;
         if (isXml(data))           return Format.XML;
         if (isJson(data))          return Format.JSON;
@@ -778,6 +779,7 @@ public class FormatDetector {
             case THRIFT_COMPACT        -> "Thrift Compact";
             case FLATBUFFERS           -> "FlatBuffers";
             case JAVA_SERIAL           -> "Java Serialization";
+            case TYPEDSTREAM           -> "Apple typedstream (NSArchiver)";
             case PROTOBUF              -> "Google Protobuf";
             case BASE64_BPLIST         -> "Base64 → Apple BPList";
             case BASE64_XML            -> "Base64 → XML";
@@ -797,7 +799,7 @@ public class FormatDetector {
     public enum Format {
         PNG, GIF, BMP, JPEG, TIFF, HEIC, PDF, GZIP, AVRO,
         BPLIST, XML, JSON,
-        BSON, MSGPACK, THRIFT_BINARY, THRIFT_COMPACT, FLATBUFFERS, JAVA_SERIAL,
+        BSON, MSGPACK, THRIFT_BINARY, THRIFT_COMPACT, FLATBUFFERS, JAVA_SERIAL, TYPEDSTREAM,
         PROTOBUF,
         BASE64_BPLIST, BASE64_XML, BASE64_JSON,
         BASE64_BSON, BASE64_MSGPACK,

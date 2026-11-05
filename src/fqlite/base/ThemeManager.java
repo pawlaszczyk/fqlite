@@ -126,7 +126,7 @@ public final class ThemeManager {
         // Inline JavaFX skin variables (picked up by all controls)
         scene.getRoot().setStyle(
                 "-fx-font-family: 'Segoe UI', 'Helvetica Neue', sans-serif;" +
-                "-fx-font-size: 13px;" +
+                "-fx-font-size: " + Limits.UI_FONT_SIZE + "px;" +
                 "-fx-base: "                   + c.bgPane()    + ";" +
                 "-fx-background: "             + c.bgRoot()    + ";" +
                 "-fx-control-inner-background: "+ c.bgControl() + ";" +

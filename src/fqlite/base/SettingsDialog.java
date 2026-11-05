@@ -202,7 +202,7 @@ public class SettingsDialog extends Application {
         locationContent.setPadding(new Insets(10, 8, 10, 8));
 
         // ── Offline-Karten (MBTiles) ──────────────────────────────────────────
-        Label headingMBT = new Label("Offline-Karten (MBTiles)");
+        Label headingMBT = new Label("Offline maps (MBTiles)");
         headingMBT.setFont(Font.font("Verdana", FontWeight.BOLD, 12));
 
         VBox mbtBox = new VBox();
@@ -219,19 +219,19 @@ public class SettingsDialog extends Application {
 
         TextField mbtField = new TextField(currentMbPath);
         mbtField.setPrefWidth(210);
-        mbtField.setPromptText("Pfad zur .mbtiles-Datei");
+        mbtField.setPromptText("Path to the .mbtiles file");
         mbtField.setTooltip(new Tooltip(
-                "Offline-Kartendaten im MBTiles-Format.\n" +
-                "Download z.B. von maptiler.com oder openfreemap.org.\n" +
-                "Wenn gesetzt, werden Kartenkacheln zuerst aus dieser\n" +
-                "Datei geladen (kein Internetzugriff nötig)."));
-        Button mbtBrowseBtn = new Button("Durchsuchen…");
+                "Offline map data in MBTiles format.\n" +
+                "Download e.g. from maptiler.com or openfreemap.org.\n" +
+                "If set, map tiles are loaded from this file first\n" +
+                "(no internet access required)."));
+        Button mbtBrowseBtn = new Button("Browse…");
         mbtBrowseBtn.setOnAction(e -> {
             javafx.stage.FileChooser fc = new javafx.stage.FileChooser();
-            fc.setTitle("MBTiles-Datei öffnen");
+            fc.setTitle("Open MBTiles file");
             fc.getExtensionFilters().addAll(
                     new javafx.stage.FileChooser.ExtensionFilter("MBTiles", "*.mbtiles"),
-                    new javafx.stage.FileChooser.ExtensionFilter("Alle Dateien", "*.*"));
+                    new javafx.stage.FileChooser.ExtensionFilter("All files", "*.*"));
             if (!mbtField.getText().isBlank()) {
                 java.io.File cur = new java.io.File(mbtField.getText()).getParentFile();
                 if (cur != null && cur.exists()) fc.setInitialDirectory(cur);
@@ -239,11 +239,11 @@ public class SettingsDialog extends Application {
             java.io.File chosen = fc.showOpenDialog(stage);
             if (chosen != null) mbtField.setText(chosen.getAbsolutePath());
         });
-        Button mbtClearBtn = new Button("Entfernen");
+        Button mbtClearBtn = new Button("Remove");
         mbtClearBtn.setStyle("-fx-font-size: 10;");
         mbtClearBtn.setOnAction(e -> mbtField.setText(""));
 
-        HBox mbtPathRow   = new HBox(8, new Label("Datei:"), mbtField, mbtBrowseBtn);
+        HBox mbtPathRow   = new HBox(8, new Label("File:"), mbtField, mbtBrowseBtn);
         mbtPathRow.setAlignment(Pos.CENTER_LEFT);
         HBox mbtButtonRow = new HBox(8, mbtClearBtn);
         mbtButtonRow.setAlignment(Pos.CENTER_LEFT);
@@ -267,19 +267,19 @@ public class SettingsDialog extends Application {
                 CellTowerResolver.getInstance().getCsvPath() != null
                         ? CellTowerResolver.getInstance().getCsvPath().toString() : "");
         cellCsvField.setPrefWidth(210);
-        cellCsvField.setPromptText("Pfad zur OpenCelliD-CSV (z.B. 262.csv)");
+        cellCsvField.setPromptText("Path to the OpenCelliD CSV (e.g. 262.csv)");
         cellCsvField.setTooltip(new Tooltip(
-                "Länderspezifische OpenCelliD-CSV-Datei.\n" +
+                "Country-specific OpenCelliD CSV file.\n" +
                 "Download: opencellid.org/downloads.php\n" +
-                "Für Deutschland: 262.csv  (~18 MB, 244 000 Masten)\n" +
-                "Unterstützt auch .csv.gz (komprimiert)."));
-        Button cellBrowseBtn = new Button("Durchsuchen…");
+                "For Germany: 262.csv  (~18 MB, 244,000 cell towers)\n" +
+                "Compressed .csv.gz files are supported as well."));
+        Button cellBrowseBtn = new Button("Browse…");
         cellBrowseBtn.setOnAction(e -> {
             javafx.stage.FileChooser fc = new javafx.stage.FileChooser();
-            fc.setTitle("OpenCelliD CSV-Datei öffnen");
+            fc.setTitle("Open OpenCelliD CSV file");
             fc.getExtensionFilters().addAll(
-                    new javafx.stage.FileChooser.ExtensionFilter("CSV-Dateien", "*.csv", "*.csv.gz"),
-                    new javafx.stage.FileChooser.ExtensionFilter("Alle Dateien", "*.*"));
+                    new javafx.stage.FileChooser.ExtensionFilter("CSV files", "*.csv", "*.csv.gz"),
+                    new javafx.stage.FileChooser.ExtensionFilter("All files", "*.*"));
             if (!cellCsvField.getText().isBlank()) {
                 java.io.File cur = new java.io.File(cellCsvField.getText()).getParentFile();
                 if (cur != null && cur.exists()) fc.setInitialDirectory(cur);
@@ -287,43 +287,43 @@ public class SettingsDialog extends Application {
             java.io.File chosen = fc.showOpenDialog(stage);
             if (chosen != null) cellCsvField.setText(chosen.getAbsolutePath());
         });
-        HBox cellCsvRow = new HBox(8, new Label("CSV-Datei:"), cellCsvField, cellBrowseBtn);
+        HBox cellCsvRow = new HBox(8, new Label("CSV file:"), cellCsvField, cellBrowseBtn);
         cellCsvRow.setAlignment(Pos.CENTER_LEFT);
 
         int     cachedCount = CellTowerResolver.getInstance().getCachedTowerCount();
         boolean csvLoaded   = CellTowerResolver.getInstance().isCsvLoaded();
         Label cellStatusLabel = new Label(
                 csvLoaded
-                        ? "\u2705 " + String.format("%,d", cachedCount) + " Masten geladen"
+                        ? "\u2705 " + String.format("%,d", cachedCount) + " cell towers loaded"
                         : CellTowerResolver.getInstance().isCsvConfigured()
-                        ? "\u23F3 CSV konfiguriert, noch nicht geladen"
-                        : "\u26AA Keine CSV konfiguriert");
+                        ? "\u23F3 CSV configured, not loaded yet"
+                        : "\u26AA No CSV configured");
         cellStatusLabel.setStyle("-fx-font-size: 10; -fx-font-family: monospace;");
 
-        Button btnClearCache = new Button("Index leeren");
+        Button btnClearCache = new Button("Clear index");
         btnClearCache.setStyle("-fx-font-size: 10;");
         btnClearCache.setTooltip(new Tooltip(
-                "Entfernt den geladenen Index aus dem RAM.\n" +
-                "Die CSV-Datei bleibt erhalten."));
+                "Removes the loaded index from memory.\n" +
+                "The CSV file is kept."));
         btnClearCache.setOnAction(e -> {
             CellTowerResolver.getInstance().clearCache();
-            cellStatusLabel.setText("\u26AA Index geleert");
+            cellStatusLabel.setText("\u26AA Index cleared");
         });
 
-        Button btnPreload = new Button("Jetzt laden");
+        Button btnPreload = new Button("Load now");
         btnPreload.setStyle("-fx-font-size: 10;");
-        btnPreload.setTooltip(new Tooltip("CSV sofort in den Speicher laden."));
+        btnPreload.setTooltip(new Tooltip("Load the CSV into memory now."));
         btnPreload.setOnAction(e -> {
             String p = cellCsvField.getText().trim();
             if (!p.isBlank()) {
                 CellTowerResolver.getInstance().setCsvPath(java.nio.file.Path.of(p));
                 CellTowerResolver.getInstance().loadAsync();
-                cellStatusLabel.setText("\u23F3 Wird geladen\u2026");
+                cellStatusLabel.setText("\u23F3 Loading\u2026");
             }
         });
 
         Label cellInfoLabel = new Label(
-                "Download: opencellid.org/downloads.php  (kostenlos nach Registrierung)");
+                "Download: opencellid.org/downloads.php  (free after registration)");
         cellInfoLabel.setStyle("-fx-font-size: 10; -fx-text-fill: #0078d4;");
 
         HBox cellButtonRow = new HBox(8, btnPreload, btnClearCache, cellStatusLabel);
@@ -331,7 +331,7 @@ public class SettingsDialog extends Application {
         cellBox.getChildren().addAll(cellCsvRow, cellButtonRow, cellInfoLabel);
 
         // ── beaconDB ──────────────────────────────────────────────────────────
-        Label headingBDB = new Label("beaconDB (Online-Fallback)");
+        Label headingBDB = new Label("beaconDB (online fallback)");
         headingBDB.setFont(Font.font("Verdana", FontWeight.BOLD, 12));
 
         VBox beaconBox = new VBox();
@@ -339,54 +339,54 @@ public class SettingsDialog extends Application {
         beaconBox.setSpacing(6);
         beaconBox.setStyle(cssLayout);
 
-        CheckBox beaconEnabledBox = new CheckBox("Online-Abfrage via beaconDB aktivieren");
+        CheckBox beaconEnabledBox = new CheckBox("Enable online lookup via beaconDB");
         beaconEnabledBox.setSelected(BeaconDbClient.getInstance().isEnabled());
         beaconEnabledBox.setTooltip(new Tooltip(
-                "Wenn aktiviert, wird beaconDB online abgefragt wenn\n" +
-                "weder die lokale OpenCelliD-CSV noch der GPS-Fallback\n" +
-                "einen Funkmasten finden konnten.\n\n" +
-                "Erfordert Internetverbindung. Kein API-Key nötig.\n" +
-                "Es wird ein identifizierender User-Agent gesendet."));
+                "If enabled, beaconDB is queried online when neither\n" +
+                "the local OpenCelliD CSV nor the GPS fallback\n" +
+                "could locate a cell tower.\n\n" +
+                "Requires an internet connection. No API key needed.\n" +
+                "An identifying user agent is sent."));
 
         int   cachedBeacon = BeaconDbClient.getInstance().getCacheSize();
         Label beaconCacheLabel = new Label(cachedBeacon > 0
-                ? "\uD83D\uDCBE " + cachedBeacon + " Einträge im Cache"
-                : "\uD83D\uDCBE Kein Cache vorhanden");
+                ? "\uD83D\uDCBE " + cachedBeacon + " entries in the cache"
+                : "\uD83D\uDCBE No cache");
         beaconCacheLabel.setStyle("-fx-font-size: 10; -fx-font-family: monospace;");
 
-        Button btnClearBeaconCache = new Button("Cache leeren");
+        Button btnClearBeaconCache = new Button("Clear cache");
         btnClearBeaconCache.setStyle("-fx-font-size: 10;");
         btnClearBeaconCache.setTooltip(new Tooltip(
-                "Löscht RAM- und Disk-Cache (~/.fqlite/beacondb/).\n" +
-                "Beim nächsten Einblenden werden alle Masten neu abgefragt."));
+                "Deletes the memory and disk cache (~/.fqlite/beacondb/).\n" +
+                "All cell towers are queried again the next time they are shown."));
         btnClearBeaconCache.setOnAction(e -> {
             BeaconDbClient.getInstance().clearCache();
-            beaconCacheLabel.setText("\uD83D\uDCBE Cache geleert");
+            beaconCacheLabel.setText("\uD83D\uDCBE Cache cleared");
         });
 
         HBox beaconCacheRow = new HBox(8, btnClearBeaconCache, beaconCacheLabel);
         beaconCacheRow.setAlignment(Pos.CENTER_LEFT);
 
         Label beaconInfoLabel = new Label(
-                "Endpunkt: api.beacondb.net/v1/geolocate  (kein API-Key)");
+                "Endpoint: api.beacondb.net/v1/geolocate  (no API key)");
         beaconInfoLabel.setStyle("-fx-font-size: 10; -fx-font-family: monospace;");
 
         Label beaconPrivacyLabel = new Label(
-                "Datenschutz: MCC/MNC/LAC/ECI werden an den Server übermittelt.");
+                "Privacy: MCC/MNC/LAC/ECI are sent to the server.");
         beaconPrivacyLabel.setStyle("-fx-font-size: 10; -fx-text-fill: #888;");
 
         Label beaconStatusLabel = new Label(
-                BeaconDbClient.getInstance().isEnabled() ? "\u2705 Aktiviert" : "\u26AA Deaktiviert");
+                BeaconDbClient.getInstance().isEnabled() ? "\u2705 Enabled" : "\u26AA Disabled");
         beaconStatusLabel.setStyle("-fx-font-size: 10; -fx-font-family: monospace;");
         beaconEnabledBox.selectedProperty().addListener((o, a, on) ->
-                beaconStatusLabel.setText(on ? "\u2705 Aktiviert" : "\u26AA Deaktiviert"));
+                beaconStatusLabel.setText(on ? "\u2705 Enabled" : "\u26AA Disabled"));
 
         beaconBox.getChildren().addAll(
                 beaconEnabledBox, beaconCacheRow,
                 beaconInfoLabel, beaconPrivacyLabel, beaconStatusLabel);
 
         // ── Lokale TAC-Datenbank ─────────────────────────────────────────────
-        Label headingTacDb = new Label("Lokale TAC-Datenbank");
+        Label headingTacDb = new Label("Local TAC database");
         headingTacDb.setFont(Font.font("Verdana", FontWeight.BOLD, 12));
 
         VBox tacDbBox = new VBox();
@@ -398,21 +398,21 @@ public class SettingsDialog extends Application {
                 fqlite.timemap.TacLocalDatabase.getInstance().getFilePath() != null
                         ? fqlite.timemap.TacLocalDatabase.getInstance().getFilePath().toString() : "");
         tacDbField.setPrefWidth(210);
-        tacDbField.setPromptText("Pfad zur TAC-Datenbank (Brand/TAC/SPECS, TSV)");
+        tacDbField.setPromptText("Path to the TAC database (Brand/TAC/SPECS, TSV)");
         tacDbField.setTooltip(new Tooltip(
-                "Tab-getrennte Datei mit Spalten Brand, TAC, SPECS\n" +
-                "(z.B. data/tac_db.txt im Projektordner).\n" +
-                "Wird bei der Auswertung \"IMEI → Gerätetyp\" der\n" +
-                "Online-API immer vorgezogen, sofern ein Treffer\n" +
-                "vorliegt — es ist dann kein API-Key/Internet nötig.\n" +
-                "Unterstützt auch .gz (komprimiert)."));
-        Button tacDbBrowseBtn = new Button("Durchsuchen…");
+                "Tab-separated file with the columns Brand, TAC, SPECS\n" +
+                "(e.g. data/tac_db.txt in the project folder).\n" +
+                "For the analysis \"IMEI → device type\" it is always\n" +
+                "preferred to the online API if it contains a match -\n" +
+                "no API key or internet access is needed then.\n" +
+                "Compressed .gz files are supported as well."));
+        Button tacDbBrowseBtn = new Button("Browse…");
         tacDbBrowseBtn.setOnAction(e -> {
             javafx.stage.FileChooser fc = new javafx.stage.FileChooser();
-            fc.setTitle("TAC-Datenbank-Datei öffnen");
+            fc.setTitle("Open TAC database file");
             fc.getExtensionFilters().addAll(
-                    new javafx.stage.FileChooser.ExtensionFilter("TAC-Datenbank", "*.txt", "*.tsv", "*.csv", "*.gz"),
-                    new javafx.stage.FileChooser.ExtensionFilter("Alle Dateien", "*.*"));
+                    new javafx.stage.FileChooser.ExtensionFilter("TAC database", "*.txt", "*.tsv", "*.csv", "*.gz"),
+                    new javafx.stage.FileChooser.ExtensionFilter("All files", "*.*"));
             if (!tacDbField.getText().isBlank()) {
                 java.io.File cur = new java.io.File(tacDbField.getText()).getParentFile();
                 if (cur != null && cur.exists()) fc.setInitialDirectory(cur);
@@ -420,38 +420,38 @@ public class SettingsDialog extends Application {
             java.io.File chosen = fc.showOpenDialog(stage);
             if (chosen != null) tacDbField.setText(chosen.getAbsolutePath());
         });
-        HBox tacDbPathRow = new HBox(8, new Label("Datei:"), tacDbField, tacDbBrowseBtn);
+        HBox tacDbPathRow = new HBox(8, new Label("File:"), tacDbField, tacDbBrowseBtn);
         tacDbPathRow.setAlignment(Pos.CENTER_LEFT);
 
         int     cachedTac  = fqlite.timemap.TacLocalDatabase.getInstance().getEntryCount();
         boolean tacDbLoaded = fqlite.timemap.TacLocalDatabase.getInstance().isLoaded();
         Label tacDbStatusLabel = new Label(
                 tacDbLoaded
-                        ? "✅ " + String.format("%,d", cachedTac) + " TACs geladen"
+                        ? "✅ " + String.format("%,d", cachedTac) + " TACs loaded"
                         : fqlite.timemap.TacLocalDatabase.getInstance().isConfigured()
-                        ? "⏳ Datei konfiguriert, noch nicht geladen"
-                        : "⚪ Keine Datei konfiguriert");
+                        ? "⏳ File configured, not loaded yet"
+                        : "⚪ No file configured");
         tacDbStatusLabel.setStyle("-fx-font-size: 10; -fx-font-family: monospace;");
 
-        Button btnClearTacDbCache = new Button("Index leeren");
+        Button btnClearTacDbCache = new Button("Clear index");
         btnClearTacDbCache.setStyle("-fx-font-size: 10;");
         btnClearTacDbCache.setTooltip(new Tooltip(
-                "Entfernt den geladenen Index aus dem RAM.\n" +
-                "Die Datei bleibt erhalten."));
+                "Removes the loaded index from memory.\n" +
+                "The file is kept."));
         btnClearTacDbCache.setOnAction(e -> {
             fqlite.timemap.TacLocalDatabase.getInstance().clearCache();
-            tacDbStatusLabel.setText("⚪ Index geleert");
+            tacDbStatusLabel.setText("⚪ Index cleared");
         });
 
-        Button btnPreloadTacDb = new Button("Jetzt laden");
+        Button btnPreloadTacDb = new Button("Load now");
         btnPreloadTacDb.setStyle("-fx-font-size: 10;");
-        btnPreloadTacDb.setTooltip(new Tooltip("Datei sofort in den Speicher laden."));
+        btnPreloadTacDb.setTooltip(new Tooltip("Load the file into memory now."));
         btnPreloadTacDb.setOnAction(e -> {
             String p = tacDbField.getText().trim();
             if (!p.isBlank()) {
                 fqlite.timemap.TacLocalDatabase.getInstance().setFilePath(java.nio.file.Path.of(p));
                 fqlite.timemap.TacLocalDatabase.getInstance().loadAsync();
-                tacDbStatusLabel.setText("⏳ Wird geladen…");
+                tacDbStatusLabel.setText("⏳ Loading…");
             }
         });
 
@@ -460,7 +460,7 @@ public class SettingsDialog extends Application {
         tacDbBox.getChildren().addAll(tacDbPathRow, tacDbButtonRow);
 
         // ── IMEI/TAC-Gerätelookup (HiCellTek) ───────────────────────────────────
-        Label headingTac = new Label("IMEI/TAC-Gerätelookup (HiCellTek)");
+        Label headingTac = new Label("IMEI/TAC device lookup (HiCellTek)");
         headingTac.setFont(Font.font("Verdana", FontWeight.BOLD, 12));
 
         VBox tacBox = new VBox();
@@ -468,41 +468,41 @@ public class SettingsDialog extends Application {
         tacBox.setSpacing(6);
         tacBox.setStyle(cssLayout);
 
-        CheckBox tacEnabledBox = new CheckBox("Online-Abfrage für Gerätetyp (IMEI/TAC) aktivieren");
+        CheckBox tacEnabledBox = new CheckBox("Enable online lookup of the device type (IMEI/TAC)");
         tacEnabledBox.setSelected(fqlite.timemap.TacLookupService.isEnabled());
         tacEnabledBox.setTooltip(new Tooltip(
-                "Wenn aktiviert, wird bei der Auswertung \"IMEI → Gerätetyp\"\n" +
-                "zusätzlich zum lokalen Datensatzbefund die HiCellTek-API\n" +
-                "online abgefragt (Hersteller/Modell/Chipsatz anhand der TAC).\n\n" +
-                "Erfordert Internetverbindung und einen API-Key (siehe unten).\n" +
-                "Status: Code-Stub, Schnittstelle nicht verifiziert — siehe\n" +
-                "Javadoc von TacLookupService."));
+                "If enabled, the analysis \"IMEI → device type\" also\n" +
+                "queries the HiCellTek API online in addition to the local data\n" +
+                "(manufacturer/model/chipset by TAC).\n\n" +
+                "Requires an internet connection and an API key (see below).\n" +
+                "Status: code stub, interface not verified - see the\n" +
+                "Javadoc of TacLookupService."));
 
         PasswordField tacApiKeyField = new PasswordField();
         String currentTacKey = fqlite.timemap.TacLookupService.getApiKey();
         if (currentTacKey != null) tacApiKeyField.setText(currentTacKey);
         tacApiKeyField.setPrefWidth(210);
-        tacApiKeyField.setPromptText("HiCellTek API-Key");
+        tacApiKeyField.setPromptText("HiCellTek API key");
         tacApiKeyField.setTooltip(new Tooltip(
-                "API-Key von hicelltek.com. Alternativ kann er auch über\n" +
-                "die System-Property 'fqlite.hicelltek.apikey' gesetzt werden\n" +
-                "(diese hat Vorrang, falls hier nichts eingetragen ist)."));
-        HBox tacKeyRow = new HBox(8, new Label("API-Key:"), tacApiKeyField);
+                "API key from hicelltek.com. It can also be set with the\n" +
+                "system property 'fqlite.hicelltek.apikey'\n" +
+                "(used if nothing is entered here)."));
+        HBox tacKeyRow = new HBox(8, new Label("API key:"), tacApiKeyField);
         tacKeyRow.setAlignment(Pos.CENTER_LEFT);
 
         Label tacInfoLabel = new Label(
-                "Endpunkt: imei.hicelltek.com/api/v1/tac/lookup  (API-Key nötig)");
+                "Endpoint: imei.hicelltek.com/api/v1/tac/lookup  (API key required)");
         tacInfoLabel.setStyle("-fx-font-size: 10; -fx-font-family: monospace;");
 
         Label tacPrivacyLabel = new Label(
-                "Datenschutz: die 8-stellige TAC (kein vollständiges IMEI) wird übermittelt.");
+                "Privacy: the 8-digit TAC (not the full IMEI) is sent.");
         tacPrivacyLabel.setStyle("-fx-font-size: 10; -fx-text-fill: #888;");
 
         Label tacStatusLabel = new Label(
-                fqlite.timemap.TacLookupService.isEnabled() ? "✅ Aktiviert" : "⚪ Deaktiviert");
+                fqlite.timemap.TacLookupService.isEnabled() ? "✅ Enabled" : "⚪ Disabled");
         tacStatusLabel.setStyle("-fx-font-size: 10; -fx-font-family: monospace;");
         tacEnabledBox.selectedProperty().addListener((o, a, on) ->
-                tacStatusLabel.setText(on ? "✅ Aktiviert" : "⚪ Deaktiviert"));
+                tacStatusLabel.setText(on ? "✅ Enabled" : "⚪ Disabled"));
 
         tacBox.getChildren().addAll(
                 tacEnabledBox, tacKeyRow,
@@ -524,7 +524,44 @@ public class SettingsDialog extends Application {
         // =====================================================================
         // TabPane + ButtonBar
         // =====================================================================
-        TabPane tabPane = new TabPane(commonTab, locationTab);
+        // =====================================================================
+        // TAB 3 – Display & limits
+        // =====================================================================
+        javafx.scene.layout.GridPane lg = new javafx.scene.layout.GridPane();
+        lg.setHgap(10);
+        lg.setVgap(8);
+        lg.setPadding(new Insets(12));
+        java.util.List<Object[]> limitRows = new java.util.ArrayList<>();
+        Object[][] defs = {
+                { "Font size of the user interface (px)", Limits.UI_FONT_SIZE, 9, 28, "UI" },
+                { "Font size of hex dumps (px)", Limits.MONO_FONT_SIZE, 8, 28, "MONO" },
+                { "Bytes shown in the hex pane below a table", Limits.HEX_PREVIEW_BYTES, 16, 1 << 20, "HEX" },
+                { "Max. size of decompressed BLOB content (MiB)", Limits.BLOB_MAX_MB, 1, 1024, "BLOBMB" },
+                { "Max. nested layers decoded in a BLOB", Limits.BLOB_DECODE_DEPTH, 1, 16, "DEPTH" },
+                { "Rows sampled by \"Decode column into fields\"", Limits.FIELD_SCAN_ROWS, 10, 10_000_000, "SCAN" },
+                { "Max. fields per decoded value", Limits.FIELD_MAX_PATHS, 10, 100_000, "PATHS" },
+                { "Max. missing row numbers listed per table", Limits.GAPS_MAX_LISTED, 100, 100_000_000, "GAPS" },
+                { "Max. hits of a case search", Limits.CASE_MAX_HITS, 100, 100_000_000, "HITS" } };
+        int lr = 0;
+        for (Object[] d : defs) {
+            javafx.scene.control.Spinner<Integer> sp = new javafx.scene.control.Spinner<>((int) d[2], (int) d[3], (int) d[1]);
+            sp.setEditable(true);
+            sp.setPrefWidth(130);
+            lg.add(new Label((String) d[0]), 0, lr);
+            lg.add(sp, 1, lr++);
+            limitRows.add(new Object[] { d[4], sp });
+        }
+        Label limitHint = new Label("Font sizes apply to all open windows at once. The limits protect against very large or "
+                + "manipulated content (decompression bombs) and keep result lists manageable.");
+        limitHint.setWrapText(true);
+        limitHint.setStyle("-fx-opacity: 0.75; -fx-font-size: 11px;");
+        lg.add(limitHint, 0, lr, 2, 1);
+        ScrollPane limitScroll = new ScrollPane(lg);
+        limitScroll.setFitToWidth(true);
+        Tab limitTab = new Tab("Display & limits", limitScroll);
+        limitTab.setClosable(false);
+
+        TabPane tabPane = new TabPane(commonTab, locationTab, limitTab);
         tabPane.setTabMinWidth(80);
 
         ButtonBar buttonBar = new ButtonBar();
@@ -552,12 +589,39 @@ public class SettingsDialog extends Application {
                 if (r1.isSelected())      Global.EXPORT_MODE = Global.EXPORT_MODES.DONTEXPORT;
                 else if (r3.isSelected()) Global.EXPORT_MODE = Global.EXPORT_MODES.TOSEPARATEFILES;
 
+                for (Object[] r : limitRows) {
+                    @SuppressWarnings("unchecked")
+                    javafx.scene.control.Spinner<Integer> sp = (javafx.scene.control.Spinner<Integer>) r[1];
+                    int v;
+                    try {
+                        v = Integer.parseInt(sp.getEditor().getText().trim().replace(",", "").replace(".", ""));
+                    } catch (NumberFormatException ex) {
+                        v = sp.getValue();
+                    }
+                    switch ((String) r[0]) {
+                        case "UI" -> Limits.UI_FONT_SIZE = Math.max(9, Math.min(28, v));
+                        case "MONO" -> Limits.MONO_FONT_SIZE = Math.max(8, Math.min(28, v));
+                        case "HEX" -> Limits.HEX_PREVIEW_BYTES = Math.max(16, v);
+                        case "BLOBMB" -> Limits.BLOB_MAX_MB = Math.max(1, Math.min(1024, v));
+                        case "DEPTH" -> Limits.BLOB_DECODE_DEPTH = Math.max(1, Math.min(16, v));
+                        case "SCAN" -> Limits.FIELD_SCAN_ROWS = Math.max(10, v);
+                        case "PATHS" -> Limits.FIELD_MAX_PATHS = Math.max(10, v);
+                        case "GAPS" -> Limits.GAPS_MAX_LISTED = Math.max(100, v);
+                        case "HITS" -> Limits.CASE_MAX_HITS = Math.max(100, v);
+                        default -> { }
+                    }
+                }
+                ThemeManager.applyToAll();
+
                 File baseDir = new File(System.getProperty("user.home"), ".fqlite");
                 String path  = baseDir.getAbsolutePath() + File.separator + "fqlite.conf";
 
                 Properties appProps = new Properties();
                 try {
-                    appProps.load(new FileInputStream(path));
+                    if (new File(path).exists())
+                        appProps.load(new FileInputStream(path));
+                    else
+                        baseDir.mkdirs();
 
                     appProps.setProperty("EXPORTMODE", Global.EXPORT_MODE.name());
                     Global.EXPORTTABLEHEADER = exportTblHeader.isSelected();
@@ -627,6 +691,7 @@ public class SettingsDialog extends Application {
                         appProps.remove("TACLOOKUP_APIKEY");
                     }
 
+                    Limits.store(appProps);
                     appProps.store(new FileOutputStream(path), null);
 
                 } catch (Exception err) {

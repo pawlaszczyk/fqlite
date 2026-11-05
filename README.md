@@ -27,6 +27,14 @@ FQLite allows you to:
 * support for decoding of bplist, protobuf and BASE64 encoded cell values
 * automatic detection of different BLOB types like .png, .bmp, .gif, .jpeg, .tiff, .heic, .pdf
 * analyzing BLOB formats like Google protobuf, AVRO, Apple plist, Thrift,... 
+* transparent decompression of BLOBs: gzip, zlib, zstd, LZ4 and Apple LZFSE/LZVN (also nested, no native libraries)
+* decoding of Apple typedstream (e.g. iMessage `attributedBody`) and NSKeyedArchiver archives
+* fields of plist, protobuf, JSON and typedstream values can be shown as additional table columns
+* row history: every version of a row across database file, WAL, rollback journal and carved records; deleted rows and older versions are highlighted
+* missing row numbers (rowid gaps), deleted index entries and SHA-256 evidence hashes with export manifests
+* case mode: scan a folder for SQLite files, overview and search across all open databases, timeline of all date columns
+* triggers explained in plain English, including forensic notes
+* command palette (Ctrl+K / Cmd+K), adjustable limits and font sizes
 * integrated SQL-Analyser 
 * HTML-export functionality (since. 4.0)
 * Displaying database PRAGMA values
@@ -87,6 +95,59 @@ https://doi.org/10.1016/j.fsidi.2026.302100
 
 
 
+### Forensic Analysis and BLOB Decoding
+
+Many apps store their actual content in BLOBs that are compressed, serialized or both
+(iMessage `attributedBody`, NSKeyedArchiver plists, protobuf messages, zstd- or
+LZFSE-compressed payloads). FQLite now unpacks and decodes these values directly in the
+table view:
+
+* **Compressed BLOBs** (gzip, zlib, zstd, LZ4, LZFSE/LZVN) are unpacked automatically, also
+  several nested layers. The decoders are written in plain Java; a configurable size limit
+  protects against decompression bombs, and damaged streams are decoded up to the error.
+* **Apple typedstream** (NSArchiver) and **NSKeyedArchiver** archives are resolved to their
+  values (text, attribute runs, dictionaries, arrays, dates, numbers).
+* The format badge below the table, the cell tooltip and the BinViewer (double-click on a
+  BLOB) show the decoded content, e.g. `ZSTD → BPLIST (KEYED)`.
+* **Decode column into fields** (right-click on a column): FQLite samples the column, lists
+  all fields found in plist / NSKeyedArchiver / typedstream / protobuf / JSON values with
+  frequency and an example, and adds the selected fields as additional columns
+  (marked with ▸). These columns exist in the view only – the database is never changed.
+
+<p align="center">
+  <img width="95%" src="img/fqlite_decoded_columns.png?raw=true" alt="Table with decoded columns: text of an iMessage attributedBody, fields of a compressed NSKeyedArchiver payload, JSON and protobuf fields"/>
+</p>
+
+<details>
+  <summary>Decode column dialog</summary>
+  <img width="80%" src="img/fqlite_decode_dialog.png?raw=true" alt="Dialog listing the fields found in a column with frequency and example values"/>
+</details>
+
+**Triggers explained** (Analyze menu): every trigger of the open databases – including
+deleted triggers recovered from the schema – is described in plain English, together with
+forensic notes, e.g. that rows are deleted automatically, that old values are copied into a
+history table, or that changes are blocked. The list can be exported as CSV.
+
+<p align="center">
+  <img width="85%" src="img/fqlite_triggers.png?raw=true" alt="Triggers explained: trigger list with plain-English explanation and forensic notes"/>
+</p>
+
+Further additions:
+
+* **Forensic analysis** (Analyze menu): changed rows with their complete row history across
+  database file, WAL, rollback journal and carved records, missing row numbers, deleted index
+  entries and evidence hashes (SHA-256 of database, `-wal`, `-journal`, `-shm`; verified on
+  close). Every export writes a `.manifest.json` with the hashes of the evidence and the export.
+* **Case menu**: open a folder as a case, overview of all open databases, search across all of
+  them (live, recovered, WAL, journal) and a combined **timeline** of all date columns.
+* **Command palette**: press **Ctrl+K** (macOS: also Cmd+K) to search all menu commands and all
+  tables of the open databases.
+* **Settings → Display & limits**: font size of the user interface and of hex dumps, size of the
+  hex preview, BLOB decoding limits, sample size for field decoding and the maximum number of
+  listed missing rows and search hits.
+
+See the [changelog](CHANGELOG.md) for details.
+
 ### NodeQL Implementation
 
 <p align="center">
@@ -142,7 +203,7 @@ See the [integration and usage guide](NODEQL_INTEGRATION_GUIDE.md),
 [verification notes](design-qa.md) and [5.1 changelog](CHANGELOG.md).
 The upstream FQLite PDF user manual is unchanged; this guide documents the
 NodeQL-specific workflow.
-
+    
 # Installation
 ## macOS
 ### Installation via .dmg File

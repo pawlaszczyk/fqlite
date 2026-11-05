@@ -22,7 +22,7 @@ import java.util.Map;
 public class BinaryNode {
 
     // ── Owning format ────────────────────────────────────────────────────
-    public enum Format { BSON, MSGPACK, THRIFT_BINARY, THRIFT_COMPACT, FLATBUFFERS, JAVA_SERIAL }
+    public enum Format { BSON, MSGPACK, THRIFT_BINARY, THRIFT_COMPACT, FLATBUFFERS, JAVA_SERIAL, TYPEDSTREAM }
 
     // ── Node kind ────────────────────────────────────────────────────────
     public enum Kind {

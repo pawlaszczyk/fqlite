@@ -166,7 +166,7 @@ class CustomTooltip extends Tooltip {
 				setGraphic(iv);
 				return;
 			}
-			else if (blob.type == BLOBTYPE.TIFF || blob.type == BLOBTYPE.PDF || blob.type == BLOBTYPE.HEIC) {
+			else if (blob != null && (blob.type == BLOBTYPE.TIFF || blob.type == BLOBTYPE.PDF || blob.type == BLOBTYPE.HEIC)) {
 				setText("Type: " +  blob.type + "\n Double-Click to view.");
 				setWrapText(true);
 				return;
@@ -174,6 +174,16 @@ class CustomTooltip extends Tooltip {
 
 
 
+
+			// compressed content, typedstream, plist, protobuf ...: show what it decodes to
+			String decoded = blob == null ? null : decodedPreview((job == null ? "" : job.path) + ":" + shash, blob.binary);
+			if (decoded != null) {
+				setGraphic(null);
+				setText(decoded);
+				setWrapText(true);
+				setMaxWidth(560);
+				return;
+			}
 
 			//Add text as "tooltip" so that the user can read text without editing it.
 			setText("BLOB value");
@@ -193,4 +203,37 @@ class CustomTooltip extends Tooltip {
 		setText("[" + coltype + "]");
 	}
 
+
+	private static final java.util.Map<String, String> PREVIEWS = java.util.Collections.synchronizedMap(
+			new java.util.LinkedHashMap<String, String>(64, 0.75f, true) {
+				private static final long serialVersionUID = 1L;
+
+				@Override
+				protected boolean removeEldestEntry(java.util.Map.Entry<String, String> e) {
+					return size() > 500;
+				}
+			});
+
+	/** "zstd → bplist: {...}" or null if the BLOB is nothing that can be decoded */
+	static String decodedPreview(String key, byte[] b) {
+		if (b == null || b.length < 4)
+			return null;
+		String cached = PREVIEWS.get(key);
+		if (cached != null)
+			return cached.isEmpty() ? null : cached;
+		String r = "";
+		try {
+			fqlite.blob.BlobDecoder.Result dr = fqlite.blob.BlobDecoder.decode(b);
+			String sum = fqlite.blob.BlobDecoder.summary(dr);
+			if (!dr.chain().isEmpty() && sum != null) {
+				if (sum.length() > 600)
+					sum = sum.substring(0, 600) + "\u2026";
+				r = dr.chain() + (dr.error() != null ? " (damaged: " + dr.error() + ")" : "") + "\n" + sum;
+			}
+		} catch (RuntimeException | StackOverflowError e) {
+			r = "";
+		}
+		PREVIEWS.put(key, r);
+		return r.isEmpty() ? null : r;
+	}
 }

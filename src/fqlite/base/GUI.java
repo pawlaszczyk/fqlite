@@ -414,8 +414,13 @@ public class GUI extends Application {
 		mntmForensics.setOnAction(e -> showForensicsWindow());
 		MenuItem mntmTimeline = new MenuItem("Timeline...");
 		mntmTimeline.setOnAction(e -> new fqlite.ui.TimelineWindow(this).show());
-		mnAnalyze.getItems().addAll(mntmSQL, mntmHex, mntmSchema, new SeparatorMenuItem(), mntmForensics, mntmTimeline,
-				new SeparatorMenuItem(), mntmBinViewer);
+		MenuItem mntmTriggers = new MenuItem("Triggers explained...");
+		mntmTriggers.setOnAction(e -> fqlite.ui.TriggerWindow.show(this));
+		MenuItem mntmPalette = new MenuItem("Command palette...");
+		mntmPalette.setAccelerator(KeyCombination.keyCombination("Shortcut+K"));
+		mntmPalette.setOnAction(e -> fqlite.ui.CommandPalette.show(this));
+		mnAnalyze.getItems().addAll(mntmSQL, mntmHex, mntmSchema, mntmTriggers, new SeparatorMenuItem(), mntmForensics, mntmTimeline,
+				new SeparatorMenuItem(), mntmBinViewer, new SeparatorMenuItem(), mntmPalette);
 
 		Menu mnCase = new Menu("Case");
 		MenuItem mntmCaseOpen = new MenuItem("Open folder as case...");
@@ -671,6 +676,8 @@ public class GUI extends Application {
 		topContainer.getChildren().add(splitPane);
 		scene = new Scene(topContainer, Screen.getPrimary().getVisualBounds().getWidth() * 0.9, Screen.getPrimary().getVisualBounds().getHeight() * 0.9);
 		ThemeManager.register(scene);   // ← register main window
+		scene.getAccelerators().put(new KeyCodeCombination(KeyCode.K, KeyCombination.CONTROL_DOWN),
+				() -> fqlite.ui.CommandPalette.show(this));
 		ThemeManager.darkProperty().addListener(sharedThemeListener);
 		stage.addEventHandler(javafx.stage.WindowEvent.WINDOW_HIDDEN, event -> {
 			ThemeManager.darkProperty().removeListener(sharedThemeListener);
@@ -1397,6 +1404,8 @@ public class GUI extends Application {
 		 */
 		try {
 			appProps.load(new FileInputStream(path));
+			Limits.load(appProps);
+			ThemeManager.applyToAll();
 
 			Object value = appProps.get("EXPORTMODE");
 			if (null != value)
@@ -2127,11 +2136,14 @@ public class GUI extends Application {
 				String firstCellValue = rowData.getFirst();
 
 				int delta;
-				if (table.sqltypes != null) {
-					delta = table.getSelectionModel().getTableView().getColumns().size() - table.sqltypes.size();
-					if (pos.getColumn() >= delta) {
-						String type = table.sqltypes.get(pos.getColumn() - delta);
-						updateHexDump(Integer.parseInt(firstCellValue) - 1, colIndex, job, tablename, type, rowData);
+				int baseCol = fqlite.ui.DerivedColumns.baseIndex(table, colIndex);
+				if (baseCol < 0) {
+					showDerivedCell(pos.getTableColumn(), rowData);
+				} else if (table.sqltypes != null) {
+					delta = fqlite.ui.DerivedColumns.baseCount(table) - table.sqltypes.size();
+					if (baseCol >= delta) {
+						String type = table.sqltypes.get(baseCol - delta);
+						updateHexDump(Integer.parseInt(firstCellValue) - 1, baseCol, job, tablename, type, rowData);
 					} else
 						updateStandardColumns(pos, delta);
 				} else if (tablename.equals("sqlite_master")) {
@@ -2237,11 +2249,14 @@ public class GUI extends Application {
 					String firstCellValue = rowData.getFirst();
 
 					int delta;
-					if (table.sqltypes != null) {
-						delta = table.getSelectionModel().getTableView().getColumns().size() - table.sqltypes.size();
-						if (cpos.getColumn() >= delta) {
-							String type = table.sqltypes.get(cpos.getColumn() - delta);
-							updateHexDump(Integer.parseInt(firstCellValue) - 1, colIndex, job, tablename, type, rowData);
+					int baseCol = fqlite.ui.DerivedColumns.baseIndex(table, colIndex);
+					if (baseCol < 0) {
+						showDerivedCell(cpos.getTableColumn(), rowData);
+					} else if (table.sqltypes != null) {
+						delta = fqlite.ui.DerivedColumns.baseCount(table) - table.sqltypes.size();
+						if (baseCol >= delta) {
+							String type = table.sqltypes.get(baseCol - delta);
+							updateHexDump(Integer.parseInt(firstCellValue) - 1, baseCol, job, tablename, type, rowData);
 						} else
 							updateStandardColumns(cpos, delta);
 					} else if (tablename.equals("sqlite_master")) {
@@ -2266,7 +2281,14 @@ public class GUI extends Application {
 
 						String key = off.getValue() + "-" + blobcolidx;
 						BLOBElement e = job.bincache.get(key);
+						if (e == null)
+							return;
 						BLOBTYPE type = e.type;
+						if (fqlite.blob.Codecs.detect(e.binary) != null || fqlite.blob.TypedStream.isTypedStream(e.binary)
+								|| type == BLOBTYPE.PLIST) {
+							BinViewer.openBytes(e.binary, table.tablename + " " + col.getText() + " (offset " + off.getValue() + ")");
+							return;
+						}
 
 						/* note: there are only a few supported file formats at the moment */
 
@@ -2342,6 +2364,36 @@ public class GUI extends Application {
 		});
 
 		return future;
+	}
+
+	/** a cell of a decoded (derived) column: hex pane shows the source value, badge its format */
+	@SuppressWarnings("rawtypes")
+	private void showDerivedCell(TableColumn col, ObservableList<String> rowData) {
+		Object src = col == null ? null : col.getProperties().get("fqlite.source");
+		NodeObject no = null;
+		try {
+			no = getSelectedNode();
+		} catch (Exception e) {
+			// no selection
+		}
+		Job j = no == null ? null : no.job;
+		byte[] b = src instanceof TableColumn sc ? fqlite.ui.DerivedColumns.cellBytes(j, sc, rowData) : null;
+		Platform.runLater(() -> {
+			hexDumpArea.getChildren().clear();
+			if (b != null) {
+				currently_selected_hex = b;
+				int n = Math.min(b.length, Limits.HEX_PREVIEW_BYTES);
+				Text content = new Text(HexDump.dump(b, 0, n, 0) + (b.length > n ? (b.length - n) + " bytes more... " : ""));
+				content.setFont(Font.font("Monospaced", Limits.MONO_FONT_SIZE));
+				content.setFill(javafx.scene.paint.Color.web((currentTheme == Theme.DARK) ? DARK.textArea() : LIGHT.textArea()));
+				hexDumpArea.getChildren().add(content);
+				btnBinViewer.setDisable(false);
+			}
+			formatBadge.setText("DECODED");
+			formatBadge.setTooltip(new Tooltip("Column computed from \"" + (src instanceof TableColumn sc ? sc.getText() : "?")
+					+ "\" (view only). The hex pane shows the source value."));
+			formatBadge.setStyle("-fx-background-color: #2f5d8a; -fx-text-fill: #ffffff; -fx-background-radius: 4; -fx-padding: 3 10 3 10;");
+		});
 	}
 
 	public void updateStandardColumns(TablePosition pos, int delta) {
@@ -2485,6 +2537,10 @@ public class GUI extends Application {
 				contextMenu.getItems().add(new SeparatorMenuItem());
 			contextMenu.getItems().add(historyItem);
 		}
+		if (!selection.isEmpty() && selection.get(0).getTableColumn() != null
+				&& (fqlite.ui.DerivedColumns.isDerived(selection.get(0).getTableColumn())
+						|| fqlite.ui.DerivedColumns.baseIndex(mytable, selection.get(0).getColumn()) >= 5))
+			contextMenu.getItems().addAll(fqlite.ui.DerivedColumns.menuItems(stage, mytable, job, selection.get(0).getTableColumn()));
 
 		return contextMenu;
 	}
@@ -2607,6 +2663,28 @@ public class GUI extends Application {
 
 	public Stage getStage() {
 		return stage;
+	}
+
+	public MenuBar getMenuBar() {
+		return menuBar;
+	}
+
+	/** the root of the database tree (for the command palette) */
+	public TreeItem<NodeObject> getTreeRoot() {
+		return tree == null ? null : tree.getRoot();
+	}
+
+	/** selects a node of the database tree and brings the main window to the front */
+	public void selectTreeItem(TreeItem<NodeObject> item) {
+		if (tree == null || item == null)
+			return;
+		for (TreeItem<NodeObject> p = item.getParent(); p != null; p = p.getParent())
+			p.setExpanded(true);
+		tree.getSelectionModel().select(item);
+		int row = tree.getRow(item);
+		if (row >= 0)
+			tree.scrollTo(Math.max(0, row - 3));
+		stage.toFront();
 	}
 
 	private static final javafx.css.PseudoClass PC_OLD_VERSION = javafx.css.PseudoClass.getPseudoClass("fq-old-version");
@@ -4199,15 +4277,16 @@ public class GUI extends Application {
 				// only write the first bytes to area (performance)
 				javafx.scene.paint.Color hexTextColor = javafx.scene.paint.Color.web(
 						(currentTheme == Theme.DARK) ? DARK.textArea() : LIGHT.textArea());
-				if (value.length > 256) {
-					Text content = new Text(HexDump.dump(value, 0, 256, 0) + (value.length - 256) + " bytes more... ");
-					content.setFont(Font.font("Monospaced", 12));
+				int previewBytes = Limits.HEX_PREVIEW_BYTES;
+				if (value.length > previewBytes) {
+					Text content = new Text(HexDump.dump(value, 0, previewBytes, 0) + (value.length - previewBytes) + " bytes more... ");
+					content.setFont(Font.font("Monospaced", Limits.MONO_FONT_SIZE));
 					content.setFill(hexTextColor);
 					hexDumpArea.getChildren().clear();
 					hexDumpArea.getChildren().add(content);
 				} else {
 					Text content = new Text(HexDump.dump(value));
-					content.setFont(Font.font("Monospaced", 12));
+					content.setFont(Font.font("Monospaced", Limits.MONO_FONT_SIZE));
 					content.setFill(hexTextColor);
 					hexDumpArea.getChildren().clear();
 					hexDumpArea.getChildren().add(content);
@@ -4245,6 +4324,18 @@ public class GUI extends Application {
 
 					return;
 				}
+				// compressed content or an Apple typedstream (in any column type)
+				if (fqlite.blob.Codecs.detect(value) != null || fqlite.blob.TypedStream.isTypedStream(value)) {
+					fqlite.blob.BlobDecoder.Result dr = fqlite.blob.BlobDecoder.decode(value);
+					String chain = dr.chain().isEmpty() ? "?" : dr.chain();
+					formatBadge.setText(chain.toUpperCase().replace(" (NSKEYEDARCHIVER)", " (KEYED)") + (dr.error() != null ? " !" : ""));
+					formatBadge.setStyle("-fx-background-color: #2f5d8a; -fx-text-fill: #ffffff; -fx-background-radius: 4; -fx-padding: 3 10 3 10;");
+					formatBadge.setTooltip(new Tooltip(chain + (dr.error() != null ? "\n" + dr.error() : "")
+							+ (fqlite.blob.BlobDecoder.summary(dr) != null ? "\n\n" + fqlite.blob.BlobDecoder.summary(dr) : "")));
+					btnBinViewer.setDisable(false);
+					return;
+				}
+				formatBadge.setTooltip(null);
 				if (t.equals("BLOB")) {
 					currentFormat = FormatDetector.detect(value);
 					switch (currentFormat) {

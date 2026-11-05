@@ -955,7 +955,7 @@ public class BinViewer{
 
     private void loadFile(File file) {
         try {
-            fileBytes = Files.readAllBytes(file.toPath());
+            fileBytes = unwrap(Files.readAllBytes(file.toPath()));
         } catch (IOException ex) {
             showError("File Error", "Could not read file:\n" + ex.getMessage());
             return;
@@ -988,7 +988,7 @@ public class BinViewer{
 
         // Window title
         stage.setTitle("Binary Viewer – " + file.getName()
-                       + "  [" + FormatDetector.formatName(currentFormat) + "]");
+                       + "  [" + layerPrefix() + FormatDetector.formatName(currentFormat) + "]");
         updateFormatBadge();
 
         // Hex dump shows the *raw* file bytes
@@ -1005,6 +1005,7 @@ public class BinViewer{
                  THRIFT_BINARY,
                  THRIFT_COMPACT,
                  FLATBUFFERS,
+                 TYPEDSTREAM,
                  JAVA_SERIAL   -> loadBinary(file, inner);
             default            -> loadProtobuf(file);
         }
@@ -1020,7 +1021,7 @@ public class BinViewer{
             protoFields = protoParser.parse(parsedBytes);
             buildProtoTree(protoFields);
             treeView.setShowRoot(false);
-            String b64hint = wasBase64 ? "  [Base64-decoded]" : "";
+            String b64hint = (wasBase64 ? "  [Base64-decoded]" : "") + (layers.isEmpty() ? "" : "  [decompressed: " + layers + "]");
             setStatus("Protobuf" + b64hint + "  |  " + file.getName()
                       + "  |  " + parsedBytes.length + " bytes"
                       + "  |  " + protoFields.size() + " top-level field(s)");
@@ -1042,7 +1043,7 @@ public class BinViewer{
                 case ARRAY, SET -> bplistRoot.getArrayElements().size();
                 default         -> 1;
             };
-            String b64hint = wasBase64 ? "  [Base64-decoded]" : "";
+            String b64hint = (wasBase64 ? "  [Base64-decoded]" : "") + (layers.isEmpty() ? "" : "  [decompressed: " + layers + "]");
             setStatus("Apple BPList" + b64hint + "  |  " + file.getName()
                       + "  |  " + parsedBytes.length + " bytes"
                       + "  |  Root: " + bplistRoot.getType()
@@ -1085,7 +1086,7 @@ public class BinViewer{
             xmlRoot = xmlParser.parse(parsedBytes);
             buildXmlTree(xmlRoot);
             treeView.setShowRoot(true);
-            String b64hint = wasBase64 ? "  [Base64-decoded]" : "";
+            String b64hint = (wasBase64 ? "  [Base64-decoded]" : "") + (layers.isEmpty() ? "" : "  [decompressed: " + layers + "]");
             setStatus("XML" + b64hint + "  |  " + file.getName()
                       + "  |  " + parsedBytes.length + " bytes"
                       + "  |  Root: <" + xmlRoot.getName() + ">"
@@ -1104,7 +1105,7 @@ public class BinViewer{
             jsonRoot = jsonParser.parse(jsonText);
             buildJsonTree(jsonRoot);
             treeView.setShowRoot(true);
-            String b64hint = wasBase64 ? "  [Base64-decoded]" : "";
+            String b64hint = (wasBase64 ? "  [Base64-decoded]" : "") + (layers.isEmpty() ? "" : "  [decompressed: " + layers + "]");
             int topCount = switch (jsonRoot.getType()) {
                 case OBJECT -> jsonRoot.getObjectEntries().size();
                 case ARRAY  -> jsonRoot.getArrayElements().size();
@@ -1132,11 +1133,13 @@ public class BinViewer{
                 case THRIFT_COMPACT -> thriftParser.parseCompact(parsedBytes);
                 case FLATBUFFERS    -> flatBuffersParser.parse(parsedBytes);
                 case JAVA_SERIAL    -> javaSerialParser.parse(parsedBytes);
+                case TYPEDSTREAM    -> fqlite.viewer.parser.PlainTree.toNode(fqlite.blob.TypedStream.decode(parsedBytes),
+                                           "root", BinaryNode.Format.TYPEDSTREAM);
                 default -> throw new BinaryParseException(fmtName, "Unexpected format");
             };
             buildBinaryTree(binaryRoot);
             treeView.setShowRoot(true);
-            String b64hint = wasBase64 ? "  [Base64-decoded]" : "";
+            String b64hint = (wasBase64 ? "  [Base64-decoded]" : "") + (layers.isEmpty() ? "" : "  [decompressed: " + layers + "]");
             int topCount = binaryRoot.getChildren().size();
             setStatus(fmtName + b64hint + "  |  " + file.getName()
                       + "  |  " + parsedBytes.length + " bytes"
@@ -1814,6 +1817,7 @@ public class BinViewer{
             case THRIFT_COMPACT        -> new BadgeStyle("THRIFT-CMP",     "#6b1a4a");
             case FLATBUFFERS           -> new BadgeStyle("FLATBUF",        "#1a6b5a");
             case JAVA_SERIAL           -> new BadgeStyle("JAVA-SER",       "#6b3a6b");
+            case TYPEDSTREAM           -> new BadgeStyle("TYPEDSTREAM",    "#2f5d8a");
             case BASE64_BPLIST         -> new BadgeStyle("B64→BPLIST",     "#1a6b2a");
             case BASE64_XML            -> new BadgeStyle("B64→XML",        "#7a4a00");
             case BASE64_JSON           -> new BadgeStyle("B64→JSON",       "#5a1a6a");
@@ -1869,6 +1873,7 @@ public class BinViewer{
     }
 
     public void loadBytes(byte[] data, String displayName) {
+        data = unwrap(data);
         this.fileBytes    = data;
         this.currentFormat = FormatDetector.detect(data);
 
@@ -1889,7 +1894,7 @@ public class BinViewer{
         }
 
         stage.setTitle("BinViewer – " + displayName
-                       + "  [" + FormatDetector.formatName(currentFormat) + "]");
+                       + "  [" + layerPrefix() + FormatDetector.formatName(currentFormat) + "]");
         updateFormatBadge();
         hexDumpArea.setText(HexDump.dump(fileBytes));
 
@@ -1904,6 +1909,7 @@ public class BinViewer{
                  THRIFT_BINARY,
                  THRIFT_COMPACT,
                  FLATBUFFERS,
+                 TYPEDSTREAM,
                  JAVA_SERIAL   -> loadBinary(dummy, inner);
             default            -> loadProtobuf(dummy);
         }
@@ -1921,6 +1927,27 @@ public class BinViewer{
         Stage s = new Stage();
         BinViewer viewer = new BinViewer(s);
         viewer.loadBytes(data, displayName);
+    }
+
+    /** compression layers removed from the current content, e.g. "zstd → gzip" */
+    private String layers = "";
+
+    /** removes compression (gzip, zlib, zstd, LZ4, LZFSE/LZVN); the hex view then shows the content */
+    private byte[] unwrap(byte[] data) {
+        layers = "";
+        if (data == null)
+            return null;
+        fqlite.blob.Codecs.Unwrapped u = fqlite.blob.Codecs.unwrap(data);
+        if (!u.compressed())
+            return data;
+        layers = u.chain();
+        if (u.error() != null)
+            showError("Damaged compressed data", u.error() + "\nThe part decoded before the error is shown.");
+        return u.data();
+    }
+
+    private String layerPrefix() {
+        return layers.isEmpty() ? "" : layers + " \u2192 ";
     }
 
     private void closeWindow(){

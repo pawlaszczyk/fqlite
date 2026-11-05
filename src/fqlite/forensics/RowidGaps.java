@@ -76,7 +76,7 @@ public final class RowidGaps {
 				continue;
 			}
 			String note = "";
-			if (missing > MAX_MISSING_LISTED || (missing > 1000 && current.size() < missing / 100)) {
+			if (missing > fqlite.base.Limits.GAPS_MAX_LISTED || (missing > 1000 && current.size() < missing / 100)) {
 				note = "rowids not sequential (max " + upper + " for " + current.size() + " rows) - gaps not listed";
 				if (out != null)
 					out.add(new TableSummary(t, current.size(), max, sq, missing, 0, note));

@@ -393,7 +393,7 @@ public class CaseWindow {
 				List<CaseSearch.Hit> buf = new ArrayList<>();
 				int n;
 				try {
-					n = CaseSearch.search(dbs, q, m, r, 100_000, buf::add, stop::get);
+					n = CaseSearch.search(dbs, q, m, r, fqlite.base.Limits.CASE_MAX_HITS, buf::add, stop::get);
 				} catch (java.util.regex.PatternSyntaxException ex) {
 					Platform.runLater(() -> status.setText("invalid regular expression: " + ex.getDescription()));
 					return;
@@ -408,7 +408,7 @@ public class CaseWindow {
 					dbFilter.getItems().setAll(names);
 					long withHits = names.size() - 1;
 					status.setText(total + " hit(s) in " + withHits + " of " + dbs.size() + " database(s)" + (stop.get() ? " (stopped)" : "")
-							+ (total >= 100_000 ? " - limit of 100,000 reached" : ""));
+							+ (total >= fqlite.base.Limits.CASE_MAX_HITS ? " - limit of " + String.format("%,d", fqlite.base.Limits.CASE_MAX_HITS) + " reached (Settings)" : ""));
 				});
 			}, "case-search");
 			t.setDaemon(true);
