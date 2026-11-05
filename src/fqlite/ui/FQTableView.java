@@ -14,6 +14,8 @@ public class FQTableView<T> extends TableView<T>
 	public List<String> columns;
 	public List<String> columntypes;
 	public List<String> sqltypes;
+	/** where the rows come from: 0 = database file, 1 = WAL, 2 = rollback journal */
+	public int source = 0;
 	
     public FQTableView(String tablename, String dbname, Job job, List<String> columns, List<String> columntypes, List<String> sqltypes) {
 	   super();

@@ -1737,6 +1737,8 @@ public class GUI extends Application {
 		Path p = Paths.get(job.path);
 
 		FQTableView<Object> table = new FQTableView<>(tablename, p.getFileName().toString(), job, columns, columntypes, sqltypes);
+		table.source = walnode ? 1 : (rjnode ? 2 : 0);
+		installVersionHighlighting(table);
 
 		table.getSelectionModel().setCellSelectionEnabled(true);
 
@@ -2389,7 +2391,172 @@ public class GUI extends Application {
 
 		contextMenu.getItems().addAll(mntcopyline, mntcopycell , sepA, location);
 
+		// older version / deleted row: jump to the current (or newer) version of the row
+		MenuItem versionItem = versionMenuItem(mytable, selection);
+		if (versionItem != null)
+			contextMenu.getItems().addAll(new SeparatorMenuItem(), versionItem);
+
 		return contextMenu;
+	}
+
+	// ------------------------------------------------------------------ row versions (NIST SFT-AO-04/05)
+
+	private static final javafx.css.PseudoClass PC_OLD_VERSION = javafx.css.PseudoClass.getPseudoClass("fq-old-version");
+	private static final javafx.css.PseudoClass PC_DELETED = javafx.css.PseudoClass.getPseudoClass("fq-deleted");
+
+	/** translucent tints: readable on the light and on the dark theme */
+	private static final String VERSION_CSS = "data:text/css;base64," + Base64.getEncoder().encodeToString((
+			".table-row-cell:fq-old-version { -fx-background-color: -fx-table-cell-border-color, rgba(245,158,11,0.30); -fx-background-insets: 0, 0 0 1 0; }\n"
+			+ ".table-row-cell:fq-deleted { -fx-background-color: -fx-table-cell-border-color, rgba(220,38,38,0.20); -fx-background-insets: 0, 0 0 1 0; }\n")
+			.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+
+	/**
+	 * Version state of a table row [no, table, pll, rowid, status, offset, ...]:
+	 * 1 = older version (flag "\u21BB ..." in the _PLL column), 2 = deleted (status D/F or flag
+	 * "\u2717 deleted ..."), 0 = otherwise.
+	 */
+	static int versionState(List<?> row) {
+		if (row == null || row.size() < 5)
+			return 0;
+		String pll = String.valueOf(row.get(2));
+		String st = String.valueOf(row.get(4)).trim();
+		if (pll.contains("\u21BB"))
+			return 1;
+		if (pll.contains("\u2717") || st.equals(Global.DELETED_RECORD_IN_PAGE) || st.equals(Global.FREELIST_ENTRY))
+			return 2;
+		return 0;
+	}
+
+	/** colours rows with older versions (amber) and deleted records (red) */
+	private void installVersionHighlighting(FQTableView<Object> table) {
+		table.getStylesheets().add(VERSION_CSS);
+		table.setRowFactory(tv -> new TableRow<Object>() {
+			@Override
+			protected void updateItem(Object item, boolean empty) {
+				super.updateItem(item, empty);
+				refreshVersionState(this);
+			}
+
+			@Override
+			public void updateSelected(boolean selected) {
+				super.updateSelected(selected);
+				refreshVersionState(this);
+			}
+		});
+	}
+
+	private static void refreshVersionState(TableRow<?> row) {
+		int s = (row.isEmpty() || !(row.getItem() instanceof List<?> l)) ? 0 : versionState(l);
+		boolean sel = row.isSelected();           // keep the normal selection colour
+		row.pseudoClassStateChanged(PC_OLD_VERSION, s == 1 && !sel);
+		row.pseudoClassStateChanged(PC_DELETED, s == 2 && !sel);
+	}
+
+	private static long versionNumber(String s) {
+		try { return Long.parseLong(s.trim()); } catch (Exception e) { return -1; }
+	}
+
+	/**
+	 * Context menu entry for an older version or a deleted row:
+	 * <ul>
+	 * <li>"\u21BB old version (UPDATE)[ of rowid N]" (database file / rollback journal) -> live row N of the database table</li>
+	 * <li>"\u21BB updated in WAL frame n" (database file or WAL) -> version of the row in WAL frame n</li>
+	 * <li>"\u2717 deleted ..." -> disabled entry: no current version</li>
+	 * </ul>
+	 */
+	private MenuItem versionMenuItem(FQTableView table, ObservableList<TablePosition> selection) {
+		if (selection == null || selection.isEmpty())
+			return null;
+		int r = selection.get(0).getRow();
+		if (r < 0 || r >= table.getItems().size() || !(table.getItems().get(r) instanceof List<?> row) || row.size() < 5)
+			return null;
+		String pll = String.valueOf(row.get(2));
+		long rowid = versionNumber(String.valueOf(row.get(3)));
+		java.util.regex.Matcher m = java.util.regex.Pattern.compile("of rowid (\\d+)").matcher(pll);
+		if (m.find())
+			rowid = Long.parseLong(m.group(1));
+		java.util.regex.Matcher wal = java.util.regex.Pattern.compile("updated in WAL frame (\\d+)").matcher(pll);
+
+		if (wal.find()) {
+			long frame = Long.parseLong(wal.group(1));
+			MenuItem mi = new MenuItem("Go to newer version (WAL frame " + frame + (rowid > 0 ? ", rowid " + rowid : "") + ")");
+			final long id = rowid;
+			mi.setDisable(id <= 0);
+			mi.setOnAction(e -> goToVersion(table, 1, id, frame));
+			return mi;
+		}
+		if (pll.contains("old version (UPDATE)")) {
+			MenuItem mi = new MenuItem("Go to current version" + (rowid > 0 ? " (rowid " + rowid + ")" : ""));
+			final long id = rowid;
+			mi.setDisable(id <= 0);
+			mi.setOnAction(e -> goToVersion(table, 0, id, -1));
+			return mi;
+		}
+		if (pll.contains("\u2717")) {
+			MenuItem mi = new MenuItem("Row was deleted - no current version");
+			mi.setDisable(true);
+			return mi;
+		}
+		return null;
+	}
+
+	/**
+	 * Selects the version of a row in the database table (source 0, live record) or in the WAL
+	 * table (source 1, record of the given frame) of the same table name.
+	 */
+	private void goToVersion(FQTableView from, int source, long rowid, long frame) {
+		Job job = from.job;
+		TreeItem<NodeObject> parent = source == 1 ? job.walNode : job.getTreeItem();
+		TreeItem<NodeObject> node = null;
+		if (parent != null)
+			for (TreeItem<NodeObject> c : parent.getChildren())
+				if (c.getValue() != null && from.tablename.equals(c.getValue().name)) {
+					node = c;
+					break;
+				}
+		FQTableView target = null;
+		if (node != null && node.getValue().tablePane != null) {
+			for (javafx.scene.Node n : node.getValue().tablePane.getChildren())
+				if (n instanceof FQTableView<?> t) {
+					target = t;
+					break;
+				}
+		}
+		int index = -1;
+		if (target != null) {
+			ObservableList<?> items = target.getItems();
+			for (int i = 0; i < items.size(); i++) {
+				if (!(items.get(i) instanceof List<?> row) || row.size() < 5)
+					continue;
+				if (versionNumber(String.valueOf(row.get(3))) != rowid)
+					continue;
+				if (source == 0 && !Global.REGULAR_RECORD.equals(String.valueOf(row.get(4))))
+					continue;                                    // the live record
+				if (source == 1 && (row.size() < 9 || versionNumber(String.valueOf(row.get(8))) != frame))
+					continue;                                    // the record of this WAL frame
+				index = i;
+				break;
+			}
+		}
+		if (index < 0) {
+			Alert alert = new Alert(AlertType.INFORMATION);
+			alert.setTitle("Row versions");
+			alert.setHeaderText(null);
+			alert.setContentText("The " + (source == 1 ? "version in WAL frame " + frame : "current version")
+					+ " of rowid " + rowid + " was not found in table " + from.tablename + ".");
+			alert.showAndWait();
+			return;
+		}
+		final FQTableView tbl = target;
+		final int idx = index;
+		if (tbl != from)
+			tree.getSelectionModel().select(node);
+		Platform.runLater(() -> {
+			tbl.scrollTo(Math.max(0, idx - 2));
+			tbl.getSelectionModel().clearSelection();
+			tbl.getSelectionModel().select(idx);
+			tbl.requestFocus();
+		});
 	}
 
 

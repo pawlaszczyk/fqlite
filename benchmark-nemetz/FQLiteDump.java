@@ -13,11 +13,18 @@ import java.util.concurrent.*;
  * Scoring/filtering is done afterwards in score.py, so the emission policy of the
  * benchmark's HeadlessTap can be reproduced AND alternatives compared.
  * Usage: java FQLiteDump <db> <out.tsv>
+ *        java FQLiteDump --startup                         (JVM + JavaFX start only, then exit)
+ *        java FQLiteDump --timing <times.tsv> <outdir> <rounds> <db>...
+ *            analyses all databases in ONE JVM, <rounds> times, and writes per database and
+ *            round the analysis time (Job.run + journal + WAL + writing the dump) - this separates
+ *            the per-process start-up cost from the actual scan time.
  */
 public final class FQLiteDump {
     public static void main(String[] a) {
         try {
-            dump(a);
+            if (a.length > 0 && a[0].equals("--startup")) startup(a);
+            else if (a.length > 0 && a[0].equals("--timing")) timing(a);
+            else dump(a);
         } catch (Throwable t) {
             // an uncaught exception would end main() while the (non-daemon) JavaFX thread
             // keeps the JVM alive -> the benchmark run hangs. Always terminate.
@@ -26,13 +33,80 @@ public final class FQLiteDump {
         }
     }
 
-    static void dump(String[] a) throws Exception {
-        File db = new File(a[0]);
+    /** starts JavaFX once (FQLite's Job reports via Platform.runLater) */
+    static void startFx() throws Exception {
         File base = Files.createTempDirectory("fqlite-dump-").toFile();
         GUI.baseDir = base;
         CountDownLatch l = new CountDownLatch(1);
         try { Platform.startup(l::countDown); } catch (IllegalStateException e) { l.countDown(); }
         l.await(30, TimeUnit.SECONDS);
+    }
+
+    static void startup(String[] a) throws Exception {
+        long jvmStart = java.lang.management.ManagementFactory.getRuntimeMXBean().getStartTime();
+        long main = System.currentTimeMillis();
+        long t = System.nanoTime();
+        startFx();
+        long fx = (System.nanoTime() - t) / 1_000_000;
+        System.out.println("jvm_to_main_ms\t" + (main - jvmStart) + "\tjavafx_startup_ms\t" + fx);
+        Platform.exit();
+        System.exit(0);
+    }
+
+    static void timing(String[] a) throws Exception {
+        long jvmStart = java.lang.management.ManagementFactory.getRuntimeMXBean().getStartTime();
+        long main = System.currentTimeMillis();
+        File times = new File(a[1]), outdir = new File(a[2]);
+        int rounds = Integer.parseInt(a[3]);
+        outdir.mkdirs();
+        long t = System.nanoTime();
+        startFx();
+        long fx = (System.nanoTime() - t) / 1_000_000;
+        ExecutorService ex = Executors.newSingleThreadExecutor(r -> { Thread th = new Thread(r); th.setDaemon(true); return th; });
+        try (PrintWriter w = new PrintWriter(new OutputStreamWriter(new FileOutputStream(times), StandardCharsets.UTF_8))) {
+            w.println("# jvm_to_main_ms=" + (main - jvmStart) + " javafx_startup_ms=" + fx);
+            w.println("round\tdb\tbytes\trows\tms\tstatus");
+            for (int r = 1; r <= rounds; r++) {
+                for (int i = 4; i < a.length; i++) {
+                    File db = new File(a[i]);
+                    String n = db.getName().replaceAll("\\.(db|sqlite)$", "");
+                    long bytes = db.length() + new File(a[i] + "-wal").length() + new File(a[i] + "-journal").length();
+                    File out = new File(outdir, n + ".tsv");
+                    long t0 = System.nanoTime();
+                    String status = "ok";
+                    Future<?> f = ex.submit(() -> { analyse(db, out); return null; });
+                    try {
+                        f.get(180, TimeUnit.SECONDS);
+                    } catch (TimeoutException te) {
+                        status = "timeout"; f.cancel(true);
+                        ex.shutdownNow();
+                        ex = Executors.newSingleThreadExecutor(rr -> { Thread th = new Thread(rr); th.setDaemon(true); return th; });
+                    } catch (ExecutionException ee) {
+                        status = "error:" + ee.getCause();
+                    }
+                    long ms = (System.nanoTime() - t0) / 1_000_000;
+                    long rows = 0;
+                    if (out.isFile()) try (BufferedReader br = new BufferedReader(new InputStreamReader(new FileInputStream(out), StandardCharsets.UTF_8))) {
+                        while (br.readLine() != null) rows++;
+                    }
+                    w.println(r + "\t" + n + "\t" + bytes + "\t" + rows + "\t" + ms + "\t" + status.replace('\t', ' ').replace('\n', ' '));
+                    w.flush();
+                }
+            }
+        }
+        Platform.exit();
+        System.exit(0);
+    }
+
+    static void dump(String[] a) throws Exception {
+        startFx();
+        analyse(new File(a[0]), new File(a[1]));
+        Platform.exit();
+        System.exit(0);
+    }
+
+    /** one database (+ -journal / -wal next to it) -> dump file */
+    static void analyse(File db, File outFile) throws Exception {
         PrintStream real = System.out;
         System.setOut(new PrintStream(OutputStream.nullOutputStream()));
         Job job = new Job();
@@ -58,7 +132,7 @@ public final class FQLiteDump {
                 // wal.output() is not needed headless (it only writes a CSV into the cwd)
             }
         } finally { System.setOut(real); }
-        try (Writer w = new OutputStreamWriter(new FileOutputStream(a[1]), StandardCharsets.UTF_8)) {
+        try (Writer w = new OutputStreamWriter(new FileOutputStream(outFile), StandardCharsets.UTF_8)) {
             for (String t : job.resultlist.keySet()) {
                 for (ObservableList<String> row : job.resultlist.get(t)) {
                     StringBuilder sb = new StringBuilder(esc(t));
@@ -85,8 +159,6 @@ public final class FQLiteDump {
                 }
             }
         }
-        Platform.exit();
-        System.exit(0);
     }
     static String esc(String s) {
         if (s == null) return "\\N";

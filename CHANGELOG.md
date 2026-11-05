@@ -3,6 +3,7 @@
 -  CSV/HTML export: new columns `_SOURCE` (file the row was read from, SFT-CA-13) and `_CELLS` (file offset and length of every value of a recovered row, SFT-AO-06)
 -  deleted records that are older versions of a live record are flagged "↻ old version (UPDATE)" (SFT-AO-04); carved records without rowid are matched by content
 -  WAL: row versions are compared across frames and with the database file – "↻ updated in WAL frame n" / "✗ deleted in WAL frame n" (SFT-AO-05)
+-  table view: older versions of a row are highlighted amber, deleted records red; context menu "Go to current version" / "Go to newer version (WAL frame n)" jumps to the current row
 -  WAL panel: new "Transactions" tab – frames grouped into transactions per WAL generation, with commit size and state (SFT-AO-08)
 -  rollback journal: rows of the journal snapshot are compared with the database – "✗ deleted after journal snapshot (not in database)" / "↻ old version (UPDATE), newer version in database" (SFT-AO-04/05)
 -  carved copies of live records whose INTEGER PRIMARY KEY was lost (b-tree page splits) are recognised as stale copies and no longer reported as deleted
