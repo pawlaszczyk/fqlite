@@ -62,6 +62,12 @@ class CustomTooltip extends Tooltip {
     
     @Override
     protected void show() {
+         // macOS: showing a tooltip of an inactive window brings that window to the front - e.g.
+         // the main window over the Case or Timeline window when the mouse just passes over a
+         // table. Tooltips are therefore only shown while their window has the focus.
+         javafx.stage.Window owner = getOwnerWindow();
+         if (owner != null && !owner.isFocused())
+             return;
          setGraphic(null);
          setText(null);
     	 setToolTipText();

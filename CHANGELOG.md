@@ -9,6 +9,7 @@
 -  evidence: SHA-256 of database, -wal, -journal, -shm at open, verified on close / exit (warning if changed), "Verify now" and comparison with an expected hash; every export writes <file>.manifest.json (tool, time UTC, evidence and export hashes)
 -  Case menu: open a folder as a case (scan for SQLite files with name / size conditions, open the chosen ones one after the other), overview of all open databases, search over all open databases (live, recovered, WAL, journal)
 -  Timeline (Analyze / Case): date columns detected by name and value (Unix s/ms/us/ns, Cocoa, WebKit, FILETIME, HFS+, .NET, OLE, ISO text), events of all open databases incl. deleted records and WAL / journal versions, density chart, CSV export
+-  bug fix (macOS): moving the mouse over a table of the main window brought it in front of other FQLite windows (cell tooltips of an inactive window)
 -  bug fix: WAL / journal version analysis read shifted fields when the GUI had already numbered the rows (DB rows flagged wrongly or not at all in the GUI)
 -  bug fix: stale copies of live records were kept when another column held the same number as the rowid
 -  table view: older versions of a row are highlighted amber, deleted records red; context menu "Go to current version" / "Go to newer version (WAL frame n)" jumps to the current row
