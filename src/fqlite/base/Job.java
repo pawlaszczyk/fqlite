@@ -3721,9 +3721,25 @@ public class Job {
 			if (rows == null || rows.size() < 2)
 				continue;
 			Map<List<String>, Set<String>> live = new HashMap<>();
+			// same, with the INTEGER PRIMARY KEY column (value = rowid) blanked: a carved copy loses
+			// its rowid and the id column with it (the freeblock header overwrites the cell start)
+			Map<List<String>, Set<String>> liveNoId = new HashMap<>();
 			for (ObservableList<String> r : rows)
-				if (r.size() > 5 && Global.REGULAR_RECORD.equals(r.get(3)))
+				if (r.size() > 5 && Global.REGULAR_RECORD.equals(r.get(3))) {
 					live.computeIfAbsent(new ArrayList<>(r.subList(5, r.size())), k -> new HashSet<>()).add(r.get(2));
+					String rid = r.get(2) == null ? "" : r.get(2).trim();
+					if (!positiveRowid(rid))
+						continue;
+					List<String> v = blankValues(r.subList(5, r.size()));
+					boolean ipk = false;
+					for (int k = 0; k < v.size(); k++)
+						if (rid.equals(v.get(k).trim())) {
+							v.set(k, "");
+							ipk = true;
+						}
+					if (ipk)
+						liveNoId.computeIfAbsent(v, k -> new HashSet<>()).add(rid);
+				}
 			if (live.isEmpty())
 				continue;
 			for (int i = rows.size() - 1; i >= 0; i--) {
@@ -3734,6 +3750,11 @@ public class Job {
 				if (!Global.FREELIST_ENTRY.equals(st) && !Global.DELETED_RECORD_IN_PAGE.equals(st))
 					continue;
 				Set<String> liveRowids = live.get(r.subList(5, r.size()));
+				if (liveRowids == null && !liveNoId.isEmpty()) {
+					List<String> v = blankValues(r.subList(5, r.size()));
+					if (v.stream().filter(x -> !x.isEmpty()).count() >= 2)
+						liveRowids = liveNoId.get(v);
+				}
 				if (liveRowids == null)
 					continue;
 				String rowid = r.get(2);
@@ -3929,6 +3950,14 @@ public class Job {
 		// only the INTEGER PRIMARY KEY (= rowid) differs: a copy of the same row with a lost id, not an UPDATE
 		String rowid = live.get(2) == null ? "" : live.get(2).trim();
 		return !rowid.equals(live.get(col) == null ? null : live.get(col).trim());
+	}
+
+	/** column values with SQL NULL / "NULL" / null mapped to "" (for comparisons only) */
+	private static List<String> blankValues(List<String> vals) {
+		List<String> v = new ArrayList<>(vals.size());
+		for (String x : vals)
+			v.add(x == null || x.equals("NULL") ? "" : x);
+		return v;
 	}
 
 	private static boolean positiveRowid(String s) {

@@ -287,32 +287,47 @@ public class RecoveryTask implements Runnable {
 						if (data_length == 0) {
 							break;
 						}
+
+						/*
+						 * Which bytes did the freeblock header [next(2)][size(2)] overwrite? Usually
+						 * payload length + rowid + header length + the 1st serial type (all 1 byte).
+						 * With a 2-byte rowid (>= 128) or payload length only the first three are
+						 * lost and the 1st serial type (00 for an INTEGER PRIMARY KEY) survives as
+						 * freeblock[0]. Assumed whenever freeblock[0] is 00 and the record fits into the freeblock
+						 * (otherwise 00 would have to be a NULL in the 2nd column).
+						 */
+						boolean firstTypeSurvived = false;
+						if (firstColumnIsROWID && freeblock[0] == 0 && freeblock.length >= columns) {
+							int dlA = Auxiliary.computePayloadLengthByte(Arrays.copyOfRange(freeblock, 0, columns), 0);
+							int fbTotal = freeblocksize + 2;                 // size field (incl. 4-byte header)
+							int lenA = 4 + columns + dlA;                    // record if the 1st serial type survived
+							// (a freeblock may hold several merged cells, so the record only has to fit)
+							if (lenA <= fbTotal) {
+								firstTypeSurvived = true;
+								data_length = dlA;
+							}
+						}
 						leave:
 						do {
-							boolean addfirstcolumn = true;
-
 							if (!firstColumnIsROWID)
 								break leave;
-
-							// Github issue number #19:
-							if (firstColumnIsROWID && freeblock[0] == 0){
-								addfirstcolumn = false;
-							}
 
 							remaining = remaining - 4 - data_length;
 
 							// reconstruct the original header with the missing 1st column
-							ByteBuffer recover = ByteBuffer.allocate(freeblock.length + 6);
-
-
-							recover.put(pos + 0, (byte) (data_length + 4)); // total length byte(s)
-							recover.put(pos + 1, (byte) 00); // rowid
-							recover.put(pos + 2, (byte) (columns + 1));  // header length
-							// only add the serial type 00 for the first column if the table is a ROWID table in the
-							// 1st column and the serial byte of colum 1 is wiped
-							if (addfirstcolumn)
-								recover.put(pos + 3, (byte) 0);  // first column is 00
-							recover.put(pos + 4, freeblock); // the freeblock
+							final boolean typeSurvived = firstTypeSurvived;
+							firstTypeSurvived = false;                       // later rounds: regular case
+							// payload length = header (length byte + one byte per column) + content, as varint
+							byte[] plv = varint(columns + 1 + data_length);
+							ByteBuffer recover = ByteBuffer.allocate(freeblock.length + plv.length + 3);
+							int h = pos;
+							recover.put(h, plv);                            // payload length
+							h += plv.length;
+							recover.put(h++, (byte) 0);                      // rowid (overwritten, placeholder)
+							recover.put(h++, (byte) (columns + 1));          // header length
+							if (!typeSurvived)
+								recover.put(h++, (byte) 0);                  // wiped 1st serial type: INTEGER PRIMARY KEY = 00
+							recover.put(h, freeblock);                       // the rest of the cell
 
 							DataRow dr = ct.readRecord(pos, recover, pagenumber, null, Integer.MAX_VALUE, withoutROWID, Global.REGULAR_DB_FILE, -1,null);
 
@@ -328,6 +343,12 @@ public class RecoveryTask implements Runnable {
 							// compute the correct offset for this match
 							long match_offset = +(pagenumber - 1) * pagesize + fbstart;
 							record.set(4, "" + match_offset);
+							// the rowid was overwritten by the freeblock header (00 is only a placeholder)
+							if ("0".equals(record.get(2))) {
+								record.set(2, "-1");
+								if (record.size() > 5 && "0".equals(record.get(5)))
+									record.set(5, "");                       // INTEGER PRIMARY KEY = rowid
+							}
 
 							/* add record to result set */
 							if (!record.isEmpty()) {
@@ -697,6 +718,22 @@ public class RecoveryTask implements Runnable {
 	 *
 	 * @return list with gaps inside.
 	 */
+	/** SQLite varint encoding of a non-negative value */
+	private static byte[] varint(long v) {
+		if (v < 0x80)
+			return new byte[]{(byte) v};
+		java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
+		int n = 0;
+		byte[] tmp = new byte[9];
+		while (v > 0 && n < 9) {
+			tmp[n++] = (byte) (v & 0x7F);
+			v >>>= 7;
+		}
+		for (int i = n - 1; i >= 0; i--)
+			out.write(i > 0 ? (tmp[i] | 0x80) : tmp[i]);
+		return out.toByteArray();
+	}
+
 	public LinkedList<Gap> findGaps() {
 		LinkedList <Gap> gaps = new LinkedList<Gap>();
 

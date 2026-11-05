@@ -376,6 +376,10 @@ public class Auxiliary {
     public static final String FLAG_WAL_SUPERSEDED = "\u21BB updated in WAL frame ";
     /** marker for WAL rows: a later frame of the same page no longer contains the row (DELETE); followed by the frame number */
     public static final String FLAG_WAL_DELETED = "\u2717 deleted in WAL frame ";
+    /** rollback journal: the row of the journal snapshot no longer exists in the database */
+    public static final String FLAG_RJ_DELETED = "\u2717 deleted after journal snapshot (not in database)";
+    /** rollback journal: the database holds a newer version of the row */
+    public static final String FLAG_RJ_SUPERSEDED = "\u21BB old version (UPDATE), newer version in database";
 
     /** record the file offset and length of every value (job.cellLayout); disabled for carving in WAL/journal pages */
     public boolean recordCellLayout = true;

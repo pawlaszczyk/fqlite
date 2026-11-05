@@ -148,8 +148,16 @@ public class Carver{
 				}
 			}
 
+			/*
+			 * A leading 00 is the NULL serial type of an INTEGER PRIMARY KEY (rowid alias) column.
+			 * Behind a freeblock header [next(2)][size(2)] it is the first surviving byte whenever
+			 * payload length + rowid varint take 3 bytes (e.g. rowid >= 128) - a genuine record.
+			 */
+			boolean ipkNull = headertype == CarverTypes.COLUMNSONLY && tbd.rowid_col == 0
+					&& m.length() >= 6 && m.startsWith("00") && !m.startsWith("0000");
+
 			/* skip stupid matches - remember - it is just a heuristic */
-			if ((m.length() < 2) || (m.startsWith("00")))	
+			if ((m.length() < 2) || (m.startsWith("00") && !ipkNull))
 			{	
 				continue;
 			}

@@ -38,10 +38,19 @@ public final class FQLiteDump {
         Job job = new Job();
         job.setPath(db.getAbsolutePath());
         File walFile = new File(db.getAbsolutePath() + "-wal");
+        File rjFile = new File(db.getAbsolutePath() + "-journal");
         fqlite.base.WALReader wal = null;
+        fqlite.base.RollbackJournalReader rol = null;
         try {
             if (walFile.isFile()) job.readWAL = true;          // same as GUI.java for a companion -wal
+            if (rjFile.isFile() && rjFile.length() > 0) job.readRollbackJournal = true;
             job.run(db.getAbsolutePath());
+            if (rjFile.isFile() && rjFile.length() > 0) {        // same as ImportDBTask
+                rol = new fqlite.base.RollbackJournalReader(rjFile.getAbsolutePath(), job);
+                rol.ps = job.ps;
+                rol.parse();
+                job.rol = rol;
+            }
             if (walFile.isFile()) {                              // same as ImportDBTask
                 wal = new fqlite.base.WALReader(walFile.getAbsolutePath(), job);
                 job.wal = wal;
@@ -55,6 +64,15 @@ public final class FQLiteDump {
                     StringBuilder sb = new StringBuilder(esc(t));
                     if (row != null) for (String c : row) sb.append('\t').append(esc(c));
                     w.write(sb.append('\n').toString());
+                }
+            }
+            if (rol != null) {                                   // journal records, bucket prefixed "RJ:"
+                for (String t : rol.resultlist.keySet()) {
+                    for (ObservableList<String> row : rol.resultlist.get(t)) {
+                        StringBuilder sb = new StringBuilder(esc("RJ:" + t));
+                        if (row != null) for (String c : row) sb.append('\t').append(esc(c));
+                        w.write(sb.append('\n').toString());
+                    }
                 }
             }
             if (wal != null) {                                   // WAL records, bucket prefixed "WAL:"

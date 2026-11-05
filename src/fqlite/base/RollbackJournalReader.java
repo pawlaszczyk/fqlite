@@ -235,7 +235,68 @@ public class RollbackJournalReader{
 
 		//AppLog.info("Lines after RollbackJournal-file recovery: " + output.size());
 		AppLog.info("Number of pages in RollbackJournal-file" + records.size());
-	
+
+		markJournalVersions();
+	}
+
+	/**
+	 * NIST SFT-AO-04/05 for a rollback journal: the journal holds page images from before the
+	 * last transaction(s). A regular row of such an image whose rowid no longer exists in the
+	 * database was deleted afterwards; if the database holds a different version of the rowid
+	 * (at least one value equal, one different) the journal row is an older version (UPDATE).
+	 * The finding is appended to the "[pll|hl]" column, the status is not changed.
+	 */
+	private void markJournalVersions() {
+		if (job == null || job.resultlist == null)
+			return;
+		int upd = 0, del = 0;
+		for (String table : resultlist.keySet()) {
+			ObservableList<ObservableList<String>> jrows = resultlist.get(table);
+			ObservableList<ObservableList<String>> dbrows = job.resultlist.get(table);
+			if (jrows == null || dbrows == null)
+				continue;
+			Map<String, ObservableList<String>> live = new HashMap<>();
+			for (ObservableList<String> r : dbrows)
+				if (r.size() > 5 && Global.REGULAR_RECORD.equals(r.get(3)) && positiveNumber(r.get(2)))
+					live.put(r.get(2).trim(), r);
+			if (live.isEmpty())
+				continue;                          // table without rowids or not readable in the database
+			for (ObservableList<String> j : jrows) {
+				if (j.size() <= 5 || !Global.REGULAR_RECORD.equals(j.get(3)) || !positiveNumber(j.get(2)))
+					continue;
+				String pll = j.get(1);
+				if (pll == null || pll.contains(Auxiliary.FLAG_TRUNCATED) || pll.contains("header\u2260payload")
+						|| pll.contains(Auxiliary.FLAG_RJ_DELETED) || pll.contains(Auxiliary.FLAG_RJ_SUPERSEDED))
+					continue;                          // incomplete / misparsed records are not compared
+				ObservableList<String> l = live.get(j.get(2).trim());
+				if (l == null) {
+					j.set(1, pll + " " + Auxiliary.FLAG_RJ_DELETED);
+					del++;
+				} else if (olderVersion(j, l)) {
+					j.set(1, pll + " " + Auxiliary.FLAG_RJ_SUPERSEDED);
+					upd++;
+				}
+			}
+		}
+		AppLog.info("Rollback journal version analysis: " + upd + " row(s) updated and " + del + " row(s) deleted after the journal snapshot");
+	}
+
+	private static boolean olderVersion(List<String> older, List<String> current) {
+		String rowid = older.get(2).trim();
+		int same = 0, diff = 0;
+		for (int k = 5; k < Math.max(older.size(), current.size()); k++) {
+			String a = k < older.size() ? older.get(k) : null, b = k < current.size() ? current.get(k) : null;
+			a = a == null || a.equals("NULL") ? "" : a;
+			b = b == null || b.equals("NULL") ? "" : b;
+			if (a.equals(rowid) && b.equals(rowid))
+				continue;                              // INTEGER PRIMARY KEY column = alias of the rowid
+			if (a.equals(b)) same++; else diff++;
+		}
+		return same >= 1 && diff >= 1;
+	}
+
+	private static boolean positiveNumber(String s) {
+		try { return s != null && Long.parseLong(s.trim()) > 0; } catch (NumberFormatException e) { return false; }
 	}
 	
 	private void updateResultSet(DataRow row)
