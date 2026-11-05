@@ -1,5 +1,7 @@
 package fqlite.base;
 
+import fqlite.forensics.RowLayout;
+
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.channels.AsynchronousFileChannel;
@@ -249,6 +251,7 @@ public class RollbackJournalReader{
 	private void markJournalVersions() {
 		if (job == null || job.resultlist == null)
 			return;
+		// the GUI may already have prepended its line number to the database rows: use RowLayout
 		int upd = 0, del = 0;
 		for (String table : resultlist.keySet()) {
 			ObservableList<ObservableList<String>> jrows = resultlist.get(table);
@@ -257,23 +260,25 @@ public class RollbackJournalReader{
 				continue;
 			Map<String, ObservableList<String>> live = new HashMap<>();
 			for (ObservableList<String> r : dbrows)
-				if (r.size() > 5 && Global.REGULAR_RECORD.equals(r.get(3)) && positiveNumber(r.get(2)))
-					live.put(r.get(2).trim(), r);
+				if (RowLayout.size(r) > RowLayout.VALUES && Global.REGULAR_RECORD.equals(RowLayout.status(r))
+						&& positiveNumber(RowLayout.rowid(r)))
+					live.put(RowLayout.rowid(r).trim(), r);
 			if (live.isEmpty())
 				continue;                          // table without rowids or not readable in the database
 			for (ObservableList<String> j : jrows) {
-				if (j.size() <= 5 || !Global.REGULAR_RECORD.equals(j.get(3)) || !positiveNumber(j.get(2)))
+				if (RowLayout.size(j) <= RowLayout.VALUES || !Global.REGULAR_RECORD.equals(RowLayout.status(j))
+						|| !positiveNumber(RowLayout.rowid(j)))
 					continue;
-				String pll = j.get(1);
+				String pll = RowLayout.pll(j);
 				if (pll == null || pll.contains(Auxiliary.FLAG_TRUNCATED) || pll.contains("header\u2260payload")
 						|| pll.contains(Auxiliary.FLAG_RJ_DELETED) || pll.contains(Auxiliary.FLAG_RJ_SUPERSEDED))
 					continue;                          // incomplete / misparsed records are not compared
-				ObservableList<String> l = live.get(j.get(2).trim());
+				ObservableList<String> l = live.get(RowLayout.rowid(j).trim());
 				if (l == null) {
-					j.set(1, pll + " " + Auxiliary.FLAG_RJ_DELETED);
+					RowLayout.set(j, RowLayout.PLL, Auxiliary.FLAG_RJ_DELETED + " " + pll);
 					del++;
 				} else if (olderVersion(j, l)) {
-					j.set(1, pll + " " + Auxiliary.FLAG_RJ_SUPERSEDED);
+					RowLayout.set(j, RowLayout.PLL, Auxiliary.FLAG_RJ_SUPERSEDED + " " + pll);
 					upd++;
 				}
 			}
@@ -282,10 +287,11 @@ public class RollbackJournalReader{
 	}
 
 	private static boolean olderVersion(List<String> older, List<String> current) {
-		String rowid = older.get(2).trim();
+		String rowid = RowLayout.rowid(older).trim();
+		List<String> a1 = RowLayout.values(older), b1 = RowLayout.values(current);
 		int same = 0, diff = 0;
-		for (int k = 5; k < Math.max(older.size(), current.size()); k++) {
-			String a = k < older.size() ? older.get(k) : null, b = k < current.size() ? current.get(k) : null;
+		for (int k = 0; k < Math.max(a1.size(), b1.size()); k++) {
+			String a = k < a1.size() ? a1.get(k) : null, b = k < b1.size() ? b1.get(k) : null;
 			a = a == null || a.equals("NULL") ? "" : a;
 			b = b == null || b.equals("NULL") ? "" : b;
 			if (a.equals(rowid) && b.equals(rowid))

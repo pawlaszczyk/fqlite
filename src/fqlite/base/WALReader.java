@@ -1,5 +1,7 @@
 package fqlite.base;
 
+import fqlite.forensics.RowLayout;
+
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.channels.AsynchronousFileChannel;
@@ -413,6 +415,7 @@ public class WALReader{
 	 * The finding is appended to the "[pll|hl]" column, the status is not changed.
 	 */
 	private void markWALVersions() {
+		// the GUI may already have prepended its line number to these rows: use RowLayout
 		int upd = 0, del = 0;
 		Map<Integer, List<long[]>> framesOfPage = new HashMap<>();
 		for (WALFrame f : framelist)
@@ -424,28 +427,30 @@ public class WALReader{
 				continue;
 			Map<String, List<ObservableList<String>>> byRowid = new HashMap<>();
 			for (ObservableList<String> r : rows) {
-				if (r.size() <= 10 || !Global.REGULAR_RECORD.equals(r.get(3)) || !positiveNumber(r.get(2)))
+				if (RowLayout.size(r) <= RowLayout.WAL_VALUES || !Global.REGULAR_RECORD.equals(RowLayout.status(r))
+						|| !positiveNumber(RowLayout.rowid(r)))
 					continue;
-				byRowid.computeIfAbsent(r.get(2).trim(), x -> new ArrayList<>()).add(r);
+				byRowid.computeIfAbsent(RowLayout.rowid(r).trim(), x -> new ArrayList<>()).add(r);
 			}
 			for (List<ObservableList<String>> versions : byRowid.values()) {
-				versions.sort(Comparator.comparingLong((ObservableList<String> r) -> number(r.get(8)))
-						.thenComparingLong(r -> number(r.get(7))));
+				versions.sort(Comparator.comparingLong((ObservableList<String> r) -> number(RowLayout.get(r, RowLayout.WAL_SALT1)))
+						.thenComparingLong(r -> number(RowLayout.get(r, RowLayout.WAL_FRAME))));
 				for (int i = 0; i + 1 < versions.size(); i++) {
 					ObservableList<String> older = versions.get(i), newer = versions.get(i + 1);
-					if (!older.subList(10, older.size()).equals(newer.subList(10, newer.size()))) {
-						older.set(1, older.get(1) + " " + Auxiliary.FLAG_WAL_SUPERSEDED + newer.get(7));
+					if (!RowLayout.walValues(older).equals(RowLayout.walValues(newer))) {
+						RowLayout.set(older, RowLayout.PLL, RowLayout.pll(older) + " " + Auxiliary.FLAG_WAL_SUPERSEDED
+								+ RowLayout.get(newer, RowLayout.WAL_FRAME));
 						upd++;
 					}
 				}
 				ObservableList<String> last = versions.get(versions.size() - 1);
-				long salt = number(last.get(8)), frame = number(last.get(7));
-				List<long[]> pageFrames = framesOfPage.get((int) number(last.get(6)));
+				long salt = number(RowLayout.get(last, RowLayout.WAL_SALT1)), frame = number(RowLayout.get(last, RowLayout.WAL_FRAME));
+				List<long[]> pageFrames = framesOfPage.get((int) number(RowLayout.get(last, RowLayout.WAL_DBPAGE)));
 				if (pageFrames == null)
 					continue;
 				for (long[] f : pageFrames) {
 					if (f[0] > salt || (f[0] == salt && f[1] > frame)) {
-						last.set(1, last.get(1) + " " + Auxiliary.FLAG_WAL_DELETED + f[1]);
+						RowLayout.set(last, RowLayout.PLL, RowLayout.pll(last) + " " + Auxiliary.FLAG_WAL_DELETED + f[1]);
 						del++;
 						break;
 					}
@@ -468,31 +473,34 @@ public class WALReader{
 				// earliest WAL version of every rowid of the current generation
 				Map<String, ObservableList<String>> firstVersion = new HashMap<>();
 				for (ObservableList<String> w : walrows) {
-					if (w.size() <= 10 || !Global.REGULAR_RECORD.equals(w.get(3)) || !positiveNumber(w.get(2)))
+					if (RowLayout.size(w) <= RowLayout.WAL_VALUES || !Global.REGULAR_RECORD.equals(RowLayout.status(w))
+							|| !positiveNumber(RowLayout.rowid(w)))
 						continue;
-					if (number(w.get(8)) != hsalt1)
+					if (number(RowLayout.get(w, RowLayout.WAL_SALT1)) != hsalt1)
 						continue;
-					ObservableList<String> o = firstVersion.get(w.get(2).trim());
-					if (o == null || number(w.get(7)) < number(o.get(7)))
-						firstVersion.put(w.get(2).trim(), w);
+					ObservableList<String> o = firstVersion.get(RowLayout.rowid(w).trim());
+					if (o == null || number(RowLayout.get(w, RowLayout.WAL_FRAME)) < number(RowLayout.get(o, RowLayout.WAL_FRAME)))
+						firstVersion.put(RowLayout.rowid(w).trim(), w);
 				}
 				for (ObservableList<String> r : dbrows) {
-					if (r.size() <= 5 || !Global.REGULAR_RECORD.equals(r.get(3)) || !positiveNumber(r.get(2)))
+					if (RowLayout.size(r) <= RowLayout.VALUES || !Global.REGULAR_RECORD.equals(RowLayout.status(r))
+							|| !positiveNumber(RowLayout.rowid(r)))
 						continue;
-					ObservableList<String> w = firstVersion.get(r.get(2).trim());
+					ObservableList<String> w = firstVersion.get(RowLayout.rowid(r).trim());
 					if (w != null) {
-						if (!r.subList(5, r.size()).equals(w.subList(10, w.size()))) {
-							r.set(1, r.get(1) + " " + Auxiliary.FLAG_WAL_SUPERSEDED + w.get(7));
+						if (!RowLayout.values(r).equals(RowLayout.walValues(w))) {
+							RowLayout.set(r, RowLayout.PLL, RowLayout.pll(r) + " " + Auxiliary.FLAG_WAL_SUPERSEDED
+									+ RowLayout.get(w, RowLayout.WAL_FRAME));
 							dbUpd++;
 						}
 						continue;
 					}
-					long off = number(r.get(4));
+					long off = number(RowLayout.offset(r));
 					if (off < 0)
 						continue;
 					Long frame = firstFrameOfPage.get((int) (off / job.ps) + 1);
 					if (frame != null) {        // the page was rewritten in the WAL without this row
-						r.set(1, r.get(1) + " " + Auxiliary.FLAG_WAL_DELETED + frame);
+						RowLayout.set(r, RowLayout.PLL, RowLayout.pll(r) + " " + Auxiliary.FLAG_WAL_DELETED + frame);
 						dbDel++;
 					}
 				}

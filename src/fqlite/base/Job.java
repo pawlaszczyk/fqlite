@@ -188,6 +188,9 @@ public class Job {
 	public List<TableDescriptor> headers = new ArrayList<TableDescriptor>();
 	public List<IndexDescriptor> indices = new ArrayList<IndexDescriptor>();
 	public AtomicInteger runningTasks = new AtomicInteger();
+
+	/** completed when the import (database, journal and WAL) is finished - used to open a case */
+	public final java.util.concurrent.CompletableFuture<Job> importDone = new java.util.concurrent.CompletableFuture<>();
 	int tablematch = 0;
 	int indexmatch = 0;
 	public BLOBCache bincache;
@@ -3730,15 +3733,15 @@ public class Job {
 					String rid = r.get(2) == null ? "" : r.get(2).trim();
 					if (!positiveRowid(rid))
 						continue;
-					List<String> v = blankValues(r.subList(5, r.size()));
-					boolean ipk = false;
-					for (int k = 0; k < v.size(); k++)
-						if (rid.equals(v.get(k).trim())) {
+					// one key per column that holds the rowid (the INTEGER PRIMARY KEY; another
+					// column may hold the same number by chance, e.g. a counter)
+					List<String> base = blankValues(r.subList(5, r.size()));
+					for (int k = 0; k < base.size(); k++)
+						if (rid.equals(base.get(k).trim())) {
+							List<String> v = new ArrayList<>(base);
 							v.set(k, "");
-							ipk = true;
+							liveNoId.computeIfAbsent(v, x -> new HashSet<>()).add(rid);
 						}
-					if (ipk)
-						liveNoId.computeIfAbsent(v, k -> new HashSet<>()).add(rid);
 				}
 			if (live.isEmpty())
 				continue;
@@ -3853,7 +3856,7 @@ public class Job {
 					continue;
 				for (ObservableList<String> l : candidates) {
 					if (isOlderVersion(r, l)) {
-						r.set(1, pll + " " + Auxiliary.FLAG_UPDATED);
+						r.set(1, " " + Auxiliary.FLAG_UPDATED + " " + pll);
 						marked++;
 						break;
 					}
@@ -3926,7 +3929,7 @@ public class Job {
 					}
 				}
 				if (matches == 1 && match != null) {
-					r.set(1, pll + " " + Auxiliary.FLAG_UPDATED + " of rowid " + match.get(2));
+					r.set(1, Auxiliary.FLAG_UPDATED + " of rowid " + match.get(2) + " " + pll);
 					marked++;
 				}
 			}

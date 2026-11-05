@@ -69,6 +69,7 @@ public class ImportDBTask {
               ImportDBTask.this.job.walNode.setGraphic(iv3); 
             ImportDBTask.this.job.updateWALPanel();
           } 
+          ImportDBTask.this.job.importDone.complete(ImportDBTask.this.job);
           
                }
           });
@@ -82,6 +83,7 @@ public class ImportDBTask {
         
         public void failed() {
           super.failed();
+          ImportDBTask.this.job.importDone.completeExceptionally(getException() != null ? getException() : new RuntimeException("import failed"));
           updateMessage("Failed!");
         }
       };

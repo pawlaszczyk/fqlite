@@ -316,11 +316,7 @@ public class GUI extends Application {
 	@Override
 	public void start(Stage stage) throws Exception {
 
-		stage.setOnCloseRequest(e -> {
-					Platform.exit();
-					System.exit(0);
-				}
-		);
+		stage.setOnCloseRequest(e -> exitApp());
 
 
 		HexViewManager.setParent(stage);
@@ -376,10 +372,7 @@ public class GUI extends Application {
 
 		MenuItem mntmExit = new MenuItem("Exit");
 		mntmExit.setAccelerator(KeyCombination.keyCombination("Alt+F4"));
-		mntmExit.setOnAction(e -> {
-			Platform.exit();
-			System.exit(0);
-		});
+		mntmExit.setOnAction(e -> exitApp());
 
 		MenuItem mntAbout = new MenuItem("About...");
 		mntAbout.setOnAction(e -> new AboutDialog(topContainer));
@@ -417,12 +410,26 @@ public class GUI extends Application {
 
 		mnFiles.getItems().addAll(mntopen, sep, mntclose, sep2, mntmProp, mntmExit);
 		mnExport.getItems().addAll(cmExport, mntmExportDB, mntmHTML);
-		mnAnalyze.getItems().addAll(mntmSQL, mntmHex, mntmSchema, new SeparatorMenuItem(), mntmBinViewer);
+		MenuItem mntmForensics = new MenuItem("Forensic analysis (row history, missing rows, index entries, evidence)...");
+		mntmForensics.setOnAction(e -> showForensicsWindow());
+		MenuItem mntmTimeline = new MenuItem("Timeline...");
+		mntmTimeline.setOnAction(e -> new fqlite.ui.TimelineWindow(this).show());
+		mnAnalyze.getItems().addAll(mntmSQL, mntmHex, mntmSchema, new SeparatorMenuItem(), mntmForensics, mntmTimeline,
+				new SeparatorMenuItem(), mntmBinViewer);
+
+		Menu mnCase = new Menu("Case");
+		MenuItem mntmCaseOpen = new MenuItem("Open folder as case...");
+		mntmCaseOpen.setOnAction(e -> fqlite.ui.CaseWindow.show(this, 0));
+		MenuItem mntmCaseView = new MenuItem("Case overview and search...");
+		mntmCaseView.setOnAction(e -> fqlite.ui.CaseWindow.show(this, 1));
+		MenuItem mntmCaseTimeline = new MenuItem("Case timeline...");
+		mntmCaseTimeline.setOnAction(e -> new fqlite.ui.TimelineWindow(this).show());
+		mnCase.getItems().addAll(mntmCaseOpen, mntmCaseView, mntmCaseTimeline);
 		mnInfo.getItems().addAll(mntmHelp, mntmLog, mntAbout);
 
 		/* MenuBar */
 		menuBar = new MenuBar();
-		menuBar.getMenus().addAll(mnFiles, mnExport, mnAnalyze, mnInfo);
+		menuBar.getMenus().addAll(mnFiles, mnExport, mnAnalyze, mnCase, mnInfo);
 
 		splitPane = new SplitPane();
 
@@ -486,10 +493,7 @@ public class GUI extends Application {
 		iv = loadIcon("icon24_exitt", icon_size_in_pixels);
 		btnexit.setGraphic(iv);
 		btnexit.setTooltip(new Tooltip("Exit FQLite"));
-		btnexit.setOnAction(e -> {
-			Platform.exit();
-			System.exit(0);
-		});
+		btnexit.setOnAction(e -> exitApp());
 		toolBar.getItems().add(btnexit);
 
 
@@ -1272,6 +1276,8 @@ public class GUI extends Application {
 				//root node -> do nothing
 			} else if (null != node.getValue()) {
 				NodeObject no = node.getValue();
+				if (no.job != null && no.tabletype == 99)
+					verifyEvidenceAsync(List.of(no.job.path));
 				boolean remove = node.getParent().getChildren().remove(node);
 				if (remove) {
 					AppLog.info(" Database " + no.name + " closed.");
@@ -1497,9 +1503,87 @@ public class GUI extends Application {
 	/**
 	 * Close all database nodes that are currently open.
 	 */
+	/**
+	 * Verifies size, modification time and SHA-256 of the evidence files of the given
+	 * databases against the values at open time (background thread). A change is reported in
+	 * a dialog, every result is written to the log.
+	 */
+	public void verifyEvidenceAsync(List<String> dbPaths) {
+		List<String> paths = new ArrayList<>(dbPaths);
+		if (paths.isEmpty())
+			return;
+		Thread t = new Thread(() -> {
+			List<fqlite.forensics.Evidence.Check> changed = new ArrayList<>();
+			int n = 0;
+			for (String p : paths)
+				for (fqlite.forensics.Evidence.Check c : fqlite.forensics.Evidence.close(p)) {
+					n++;
+					if (!c.unchanged())
+						changed.add(c);
+				}
+			final int total = n;
+			if (!changed.isEmpty())
+				Platform.runLater(() -> {
+					Alert alert = new Alert(AlertType.WARNING);
+					alert.setTitle("Evidence changed");
+					alert.setHeaderText(changed.size() + " of " + total + " evidence file(s) changed while open");
+					StringBuilder sb = new StringBuilder();
+					for (fqlite.forensics.Evidence.Check c : changed)
+						sb.append(c.describe()).append("\n");
+					alert.setContentText(sb.toString());
+					alert.show();
+				});
+		}, "evidence-verify");
+		t.setDaemon(false);       // finish the verification even if the window closes
+		t.start();
+	}
+
+	/** verifies all open evidence, then exits */
+	private void exitApp() {
+		List<String> changed = new ArrayList<>();
+		for (String p : fqlite.forensics.Evidence.registered())
+			for (fqlite.forensics.Evidence.Check c : fqlite.forensics.Evidence.close(p))
+				if (!c.unchanged())
+					changed.add(c.describe());
+		if (!changed.isEmpty()) {
+			Alert alert = new Alert(AlertType.WARNING);
+			alert.setTitle("Evidence changed");
+			alert.setHeaderText("Evidence files changed while FQLite had them open");
+			alert.setContentText(String.join("\n", changed));
+			alert.showAndWait();
+		}
+		Platform.exit();
+		System.exit(0);
+	}
+
+	/** writes the manifest of an export (see Evidence#writeManifest) and logs it */
+	private void writeExportManifest(String kind, NodeObject no, File target, Map<File, Long> before) {
+		try {
+			List<File> written = fqlite.forensics.Evidence.writtenSince(target.getParentFile(), before);
+			if (written.isEmpty() && target.exists())
+				written = List.of(target);
+			// the chosen file first: the manifest is named after it
+			List<File> ordered = new ArrayList<>();
+			if (written.contains(target))
+				ordered.add(target);
+			for (File f : written)
+				if (!f.equals(target))
+					ordered.add(f);
+			String db = no.job != null ? no.job.path : null;
+			fqlite.forensics.Evidence.writeManifest(kind, no.name, db, ordered);
+		} catch (Exception e) {
+			AppLog.error("Export manifest failed: " + e.getMessage());
+		}
+	}
+
 	public void closeAll() {
 
 		TreeItem<NodeObject> root = tree.getRoot();
+		List<String> closing = new ArrayList<>();
+		for (TreeItem<NodeObject> node : root.getChildren())
+			if (node.getValue() != null && node.getValue().job != null && node.getValue().tabletype == 99)
+				closing.add(node.getValue().job.path);
+		verifyEvidenceAsync(closing);
 
 		this.tables.clear();
 
@@ -2395,11 +2479,135 @@ public class GUI extends Application {
 		MenuItem versionItem = versionMenuItem(mytable, selection);
 		if (versionItem != null)
 			contextMenu.getItems().addAll(new SeparatorMenuItem(), versionItem);
+		MenuItem historyItem = rowHistoryMenuItem(mytable, selection);
+		if (historyItem != null) {
+			if (versionItem == null)
+				contextMenu.getItems().add(new SeparatorMenuItem());
+			contextMenu.getItems().add(historyItem);
+		}
 
 		return contextMenu;
 	}
 
 	// ------------------------------------------------------------------ row versions (NIST SFT-AO-04/05)
+
+	/** "Row history (rowid N)..." for a row whose rowid is known (or linked by "of rowid N") */
+	private MenuItem rowHistoryMenuItem(FQTableView table, ObservableList<TablePosition> selection) {
+		if (selection == null || selection.isEmpty() || table.job == null)
+			return null;
+		int r = selection.get(0).getRow();
+		if (r < 0 || r >= table.getItems().size() || !(table.getItems().get(r) instanceof List<?> row))
+			return null;
+		@SuppressWarnings("unchecked")
+		List<String> rr = (List<String>) row;
+		long rowid = fqlite.forensics.RowHistory.rowidOf(rr);
+		if (rowid <= 0)
+			return null;
+		MenuItem mi = new MenuItem("Row history (rowid " + rowid + ")...");
+		mi.setOnAction(e -> new fqlite.ui.RowHistoryWindow(this, table.job, table.tablename, rowid).show());
+		return mi;
+	}
+
+	/** the databases currently open (database nodes of the tree) with their display names */
+	public List<fqlite.forensics.CaseSearch.Target> openDatabases() {
+		List<fqlite.forensics.CaseSearch.Target> l = new ArrayList<>();
+		for (TreeItem<NodeObject> n : tree.getRoot().getChildren())
+			if (n.getValue() != null && n.getValue().tabletype == 99 && n.getValue().job != null)
+				l.add(new fqlite.forensics.CaseSearch.Target(n.getValue().job, n.getValue().name));
+		return l;
+	}
+
+	/** opens a database of a case (FX thread); returns its job, or null if it was not opened */
+	public Job openForCase(File f) {
+		List<String> before = new ArrayList<>();
+		for (fqlite.forensics.CaseSearch.Target t : openDatabases())
+			before.add(t.job().path);
+		open_db(f);
+		for (fqlite.forensics.CaseSearch.Target t : openDatabases())
+			if (!before.contains(t.job().path) && new File(t.job().path).getAbsolutePath().equals(f.getAbsolutePath()))
+				return t.job();
+		return null;
+	}
+
+	/** the job of the database selected in the tree (or the only open database) */
+	public Job selectedJob() {
+		TreeItem<NodeObject> db = tree.getSelectionModel().getSelectedItem() == null ? null : getDatabaseNode();
+		if (db != null && db.getValue() != null && db.getValue().job != null)
+			return db.getValue().job;
+		List<fqlite.forensics.CaseSearch.Target> open = openDatabases();
+		return open.size() == 1 ? open.get(0).job() : null;
+	}
+
+	private void showForensicsWindow() {
+		Job job = selectedJob();
+		if (job == null) {
+			Alert alert = new Alert(AlertType.INFORMATION);
+			alert.setTitle("Forensic analysis");
+			alert.setHeaderText(null);
+			alert.setContentText("Please select a database in the tree first.");
+			alert.showAndWait();
+			return;
+		}
+		new fqlite.ui.ForensicsWindow(this, job).show();
+	}
+
+	/**
+	 * Shows a result row in its table view: sourceKind 0 = database, 1 = WAL, 2 = rollback journal.
+	 * The row is found by identity, otherwise by rowid and offset.
+	 */
+	public void navigateToRow(Job job, int sourceKind, String table, List<String> row) {
+		if (job == null)
+			return;
+		TreeItem<NodeObject> parent = sourceKind == 1 ? job.walNode : sourceKind == 2 ? job.rjNode : job.getTreeItem();
+		if (parent == null)
+			return;
+		TreeItem<NodeObject> node = null;
+		for (TreeItem<NodeObject> c : parent.getChildren())
+			if (c.getValue() != null && table.equals(c.getValue().name)) {
+				node = c;
+				break;
+			}
+		if (node == null || node.getValue().tablePane == null)
+			return;
+		FQTableView target = null;
+		for (javafx.scene.Node n : node.getValue().tablePane.getChildren())
+			if (n instanceof FQTableView<?> t)
+				target = t;
+		if (target == null)
+			return;
+		int idx = -1;
+		ObservableList<?> items = target.getItems();
+		for (int i = 0; i < items.size() && idx < 0; i++)
+			if (items.get(i) == row)
+				idx = i;
+		if (idx < 0 && row != null) {
+			String rid = fqlite.forensics.RowLayout.rowid(row), off = fqlite.forensics.RowLayout.offset(row);
+			for (int i = 0; i < items.size() && idx < 0; i++)
+				if (items.get(i) instanceof List<?> l) {
+					@SuppressWarnings("unchecked")
+					List<String> x = (List<String>) l;
+					if (java.util.Objects.equals(fqlite.forensics.RowLayout.rowid(x), rid)
+							&& java.util.Objects.equals(fqlite.forensics.RowLayout.offset(x), off))
+						idx = i;
+				}
+		}
+		tree.getSelectionModel().select(node);
+		final FQTableView tbl = target;
+		final int i = idx;
+		stage.toFront();
+		Platform.runLater(() -> {
+			if (i >= 0) {
+				tbl.scrollTo(Math.max(0, i - 2));
+				tbl.getSelectionModel().clearSelection();
+				tbl.getSelectionModel().select(i);
+			}
+			tbl.requestFocus();
+		});
+	}
+
+	public Stage getStage() {
+		return stage;
+	}
 
 	private static final javafx.css.PseudoClass PC_OLD_VERSION = javafx.css.PseudoClass.getPseudoClass("fq-old-version");
 	private static final javafx.css.PseudoClass PC_DELETED = javafx.css.PseudoClass.getPseudoClass("fq-deleted");
@@ -3259,6 +3467,7 @@ public class GUI extends Application {
 		job.setGUI(this);
 		job.setTreeItem(dbNode);
 		job.setPath(file.getAbsolutePath());
+		fqlite.forensics.Evidence.register(file.getAbsolutePath());
 		Importer.createAndShowGUI(this, file.getAbsolutePath(), job, dbNode);
 		o.job = job;
 
@@ -3368,7 +3577,10 @@ public class GUI extends Application {
 			default -> null;
 		};
 
+		Map<File, Long> before = fqlite.forensics.Evidence.snapshot(f.getParentFile());
 		success = no.job.exportDB(no.job.filename, f.getAbsolutePath(), etype);
+		if (success)
+			writeExportManifest("SQLite database", no, f, before);
 
 	}
 
@@ -3408,7 +3620,9 @@ public class GUI extends Application {
 		};
 
 		try {
+			Map<File, Long> before = fqlite.forensics.Evidence.snapshot(f.getParentFile());
 			no.job.exportToHtml(no.job.filename, f.getAbsolutePath(), f.getParent(), etype, no.isTable, no.name);
+			writeExportManifest("HTML report", no, f, before);
 			openInBrowser(f.getAbsolutePath(), gui.getHostServices());
 		} catch (IOException e) {
 			throw new RuntimeException(e);
@@ -3451,7 +3665,9 @@ public class GUI extends Application {
 		};
 
 		try {
+			Map<File, Long> before = fqlite.forensics.Evidence.snapshot(f.getParentFile());
 			no.job.exportToCASE(no.job.filename, f.getAbsolutePath(), f.getParent(), etype, no.isTable, no.name);
+			writeExportManifest("CASE/UCO JSON-LD", no, f, before);
 			//openInBrowser(f.getAbsolutePath(), gui.getHostServices());
 		} catch (IOException e) {
 			throw new RuntimeException(e);
@@ -3494,6 +3710,7 @@ public class GUI extends Application {
 			return;
 
 		boolean success = false;
+		Map<File, Long> before = fqlite.forensics.Evidence.snapshot(f.getParentFile());
 
 		switch (no.tabletype) {
 			case 0:    // table
@@ -3522,9 +3739,11 @@ public class GUI extends Application {
 		}
 
 		if (success) {
+			writeExportManifest("CSV", no, f, before);
 			Alert alert = new Alert(AlertType.INFORMATION);
 			alert.setTitle("Success Info");
-			alert.setContentText("Data of " + no.name + " exported successfully to \n" + f.getAbsolutePath());
+			alert.setContentText("Data of " + no.name + " exported successfully to \n" + f.getAbsolutePath()
+					+ "\n(manifest with SHA-256: " + f.getName() + ".manifest.json)");
 			alert.showAndWait();
 		}
 
