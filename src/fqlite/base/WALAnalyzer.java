@@ -51,6 +51,13 @@ public class WALAnalyzer {
 
     @FunctionalInterface interface PageSource { byte[] get(long pageNo) throws IOException; }
 
+    /**
+     * This is the actual WAL processing procedure. A WALReader instance is handover a parameter
+     * to this method.
+     *
+      * @param reader
+     * @throws Exception
+     */
    public static void analyzeWAL(WALReader reader) throws Exception {
 
         Path dbPath  = Path.of(reader.job.path);
@@ -116,6 +123,12 @@ public class WALAnalyzer {
     }
 
 
+    /**
+     * This method can be used for headless access to WAL-archives.
+     *
+     * @param args
+     * @throws Exception
+     */
     public static void main(String[] args) throws Exception {
         if (args.length < 2) {
             System.err.println("Usage: java WalAnalyzer <database.db> <database.db-wal>");

@@ -71,6 +71,31 @@ public class SQLiteDatabaseCreator {
         return sql.toString();
     }
 
+    /// Quotes an identifier (table or column name) for use in a CREATE TABLE statement,
+    /// so that names like "order" or names with blanks do not break the statement.
+    public static String quoteIdentifier(String name) {
+        if (name == null) return "\"\"";
+        String n = name.trim();
+        if (n.length() > 1 && ((n.startsWith("\"") && n.endsWith("\"")) || (n.startsWith("[") && n.endsWith("]"))
+                || (n.startsWith("`") && n.endsWith("`"))))
+            n = n.substring(1, n.length() - 1);
+        return "\"" + n.replace("\"", "\"\"") + "\"";
+    }
+
+    /// Returns a declared column type that is safe to use in a CREATE TABLE statement.
+    /// Column constraints that ended up in the type text (e.g. "REFERENCESconversations(id)")
+    /// are dropped; without a usable type name the column gets no type (BLOB affinity).
+    public static String safeColumnType(String type) {
+        if (type == null) return "";
+        String t = type.trim();
+        String u = t.toUpperCase();
+        for (String k : new String[]{"REFERENCES", "CONSTRAINT", "PRIMARY", "NOT", "NULL", "UNIQUE", "CHECK", "DEFAULT", "COLLATE", "GENERATED"})
+            if (u.startsWith(k)) return "";
+        java.util.regex.Matcher m = java.util.regex.Pattern
+                .compile("^[A-Za-z_][A-Za-z0-9_ ]*(\\(\\s*[-+]?[0-9.]+\\s*(,\\s*[-+]?[0-9.]+\\s*)?\\))?").matcher(t);
+        return m.find() ? m.group().trim() : "";
+    }
+
     private static String createTableSql(String tableName, List<String> columnNames, List<String> columnTypes, boolean isWAL) {
         if (columnNames == null || columnTypes == null || columnNames.size() != columnTypes.size()) {
             throw new IllegalArgumentException("The number of columns and types in the lists has to be the same.");
@@ -84,9 +109,9 @@ public class SQLiteDatabaseCreator {
 
         for (int i = 0; i < columnNames.size(); i++) {
             sql.append(" ")
-                    .append(columnNames.get(i))
+                    .append(quoteIdentifier(columnNames.get(i)))
                     .append(" ")
-                    .append(columnTypes.get(i));
+                    .append(safeColumnType(columnTypes.get(i)));
 
             if (i < columnNames.size() - 1) {
                 sql.append(",");
@@ -211,7 +236,7 @@ public class SQLiteDatabaseCreator {
 
             for (int i = 0; i < colNames.size(); i++) {
                 sql.append(" ")
-                        .append(colNames.get(i));
+                        .append(quoteIdentifier(colNames.get(i)));
 
                 if (i < colNames.size() - 1) {
                     sql.append(",");

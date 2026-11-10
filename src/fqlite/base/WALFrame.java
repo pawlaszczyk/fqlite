@@ -1,5 +1,10 @@
 package fqlite.base;
 
+/**
+ *  This class represents a WAL-Frame structure from an WAL archive.
+ *  It holds information like pagenumber of the original db the frame belongs to.
+ *  Furthermore, an information about the current state (committed or not) is managed.
+ */
 public class WALFrame
 {
 	public int pagenumber;
@@ -7,6 +12,8 @@ public class WALFrame
 	public long salt1;
     public long salt2;
 	public boolean committed = false;
+
+
 	/** "DB size after commit" from the frame header (0 = no commit frame) */
 	public int commitSize = 0;
 	

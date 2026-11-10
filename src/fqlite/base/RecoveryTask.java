@@ -95,8 +95,6 @@ public class RecoveryTask implements Runnable {
 
 			/* first page -> we need to check from offset 100 */
 			if(offset == 0 || offset == 100){
-				// offset 0
-				//buffer.position(100);
 
 				/* check type of the page by reading the first two bytes */
 				type = Auxiliary.getPageType(content);
@@ -232,16 +230,11 @@ public class RecoveryTask implements Runnable {
 
 			}
 
-			//String rc;
 			// List, not LinkedList: holds DataRow.line(), which is now
 			// ArrayList-backed for the dominant readRecord() path (see
 			// DataRow.java) — keep the declared type as the interface so it
 			// accepts that without a cast.
 			List<String> record;
-
-
-			//SQLitePageAnalyzer.parseFreeBlocks(buffer,job.ps);
-
 
 			/*
 			 * scan of Freeblock list
@@ -301,6 +294,7 @@ public class RecoveryTask implements Runnable {
 							int dlA = Auxiliary.computePayloadLengthByte(Arrays.copyOfRange(freeblock, 0, columns), 0);
 							int fbTotal = freeblocksize + 2;                 // size field (incl. 4-byte header)
 							int lenA = 4 + columns + dlA;                    // record if the 1st serial type survived
+
 							// (a freeblock may hold several merged cells, so the record only has to fit)
 							if (lenA <= fbTotal) {
 								firstTypeSurvived = true;

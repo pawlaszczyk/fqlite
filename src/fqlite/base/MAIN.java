@@ -14,7 +14,7 @@ import java.util.logging.Level;
 /// $> java fqlite.base.MAIN <database.db>
 ///
 /// @author Dirk Pawlaszczyk
-/// @version 1.5.6
+/// @version 2.0
 public class MAIN {
 
 

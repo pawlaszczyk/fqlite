@@ -1042,7 +1042,8 @@ public class Job {
 				 *  case 2: Normal (possible) intact table with intact but short header
 				 *  has a length of 6 bytes including header length (06)
 				 **/
-				else if (headerStr.startsWith("0617")) {
+				else if (headerStr.startsWith("0617") || headerStr.startsWith("0621")) {
+					// 0x17 = 'table' as UTF-8 text, 0x21 = 'table' as UTF-16 text (10 bytes)
 
 					tablematch++;
 					readSchema(bb,index,headerStr);
@@ -1101,7 +1102,8 @@ public class Job {
 				 *         with a header length of 6 bytes
 				 **/
 
-				else if ((headerStr.startsWith("0617"))) {
+				else if (headerStr.startsWith("0617") || headerStr.startsWith("0621")) {
+					// 0x17 = 'index' as UTF-8 text, 0x21 = 'index' as UTF-16 text (10 bytes)
 					indexmatch++;
 					readSchema(bb,index2,headerStr);
 
@@ -3989,6 +3991,13 @@ public class Job {
 		if (wal == null)
 			return out.toArray(new String[0][]);
 		int tx = 0;
+		fqlite.forensics.WalAudit audit = null;
+		try {
+			if (wal.path != null)
+				audit = fqlite.forensics.WalAudit.analyse(wal.path);
+		} catch (Exception e) {
+			audit = null;
+		}
 		for (Long salt1 : wal.checkpoints.keySet()) {     // ascending: salt-1 is incremented on every WAL reset
 			List<WALFrame> frames = new ArrayList<>(wal.checkpoints.get(salt1));
 			frames.sort((a, b) -> Integer.compare(a.framenumber, b.framenumber));
@@ -4005,6 +4014,15 @@ public class Job {
 					state = "earlier WAL generation (stale frames)";
 				else
 					state = f.commitSize > 0 ? "committed" : "not committed (no commit frame)";
+				// checksums verified like SQLite does (frame numbers are 0-based here)
+				fqlite.forensics.WalAudit.Frame af = audit == null ? null : audit.frame(f.framenumber + 1);
+				if (af != null && current)
+					state = switch (af.state) {
+					case INVALID -> "invalid checksum - ignored by SQLite";
+					case UNCOMMITTED -> "not committed - ignored by SQLite";
+					case STALE -> "earlier WAL generation (stale frames)";
+					default -> "committed (checksums valid)";
+					};
 				StringBuilder pg = new StringBuilder();
 				java.util.LinkedHashSet<Integer> seen = new java.util.LinkedHashSet<>();
 				for (WALFrame o : open)

@@ -435,6 +435,11 @@ public class SimpleSQLiteParser {
         	    // or DEFAULT XXX
 				if(value.equals("NOT") || value.equals("DEFAULT"))
 					value = "BLOB";
+				// case: no type given, but a column constraint follows directly, e.g.
+				// "conversation_id REFERENCES conversations(id)". The grammar takes the
+				// constraint keyword (and the following name) as the type name.
+				if (ctx.getChildCount() > 0 && isConstraintKeyword(ctx.getChild(0).getText()))
+					value = "BLOB";
         	    if(value.isEmpty())
         	    	value = "BLOB";
         	    	
@@ -641,6 +646,15 @@ public class SimpleSQLiteParser {
 		return type;
 	}
 	
+	/** keywords that start a column constraint and can therefore never begin a type name */
+	static final java.util.Set<String> CONSTRAINT_KEYWORDS = java.util.Set.of(
+			"REFERENCES", "CONSTRAINT", "PRIMARY", "NOT", "NULL", "UNIQUE", "CHECK",
+			"DEFAULT", "COLLATE", "GENERATED", "AS");
+
+	static boolean isConstraintKeyword(String token) {
+		return token != null && CONSTRAINT_KEYWORDS.contains(token.trim().toUpperCase());
+	}
+
 	public static boolean stringContainsItemFromList(String inputStr, String[] items) {
 		return Arrays.stream(items).parallel().anyMatch(inputStr::contains);
 	}

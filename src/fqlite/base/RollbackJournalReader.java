@@ -1,22 +1,9 @@
 package fqlite.base;
 
-import fqlite.forensics.RowLayout;
-
-import java.io.IOException;
-import java.nio.ByteBuffer;
-import java.nio.channels.AsynchronousFileChannel;
-import java.nio.file.Path;
-import java.nio.file.Paths;
-import java.nio.file.StandardOpenOption;
-import java.time.LocalDateTime;
-import java.time.format.DateTimeFormatter;
-import java.util.*;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ConcurrentLinkedQueue;
-import java.util.concurrent.Future;
 import fqlite.analyzer.DatabaseComparator;
 import fqlite.descriptor.AbstractDescriptor;
 import fqlite.descriptor.TableDescriptor;
+import fqlite.forensics.RowLayout;
 import fqlite.log.AppLog;
 import fqlite.pattern.SerialTypeMatcher;
 import fqlite.types.CarverTypes;
@@ -24,934 +11,889 @@ import fqlite.util.Auxiliary;
 import javafx.collections.FXCollections;
 import javafx.collections.ObservableList;
 
+import java.io.IOException;
+import java.nio.ByteBuffer;
+import java.nio.channels.AsynchronousFileChannel;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.nio.file.StandardOpenOption;
+import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Future;
+
 /**
  * The class analyses a Rollback Journal file and writes the found records into a file.
- * 
+ * <p>
  * From the SLite documentation:
- * 
- * "The rollback journal is usually created when a transaction is first started and 
- *  is usually deleted when a transaction commits or rolls back. The rollback journal file 
- *  is essential for implementing the atomic commit and rollback capabilities of SQLite."
- * 
- * 
- * 
+ * <p>
+ * "The rollback journal is usually created when a transaction is first started and
+ * is usually deleted when a transaction commits or rolls back. The rollback journal file
+ * is essential for implementing the atomic commit and rollback capabilities of SQLite."
+ *
  * @author pawlaszc
  *
  */
-public class RollbackJournalReader{
+public class RollbackJournalReader {
 
-	public static final String MAGIC_HEADER_STRING = "d9d505f920a163d7";
-	
-	/* An asynchronous channel for reading, writing, and manipulating a file. */
-	public AsynchronousFileChannel file;
+    public static final String MAGIC_HEADER_STRING = "d9d505f920a163d7";
+    public static List<TableDescriptor> tables = new ArrayList<TableDescriptor>();
+    /* An asynchronous channel for reading, writing, and manipulating a file. */
+    public AsynchronousFileChannel file;
+    /* this is a multi-threaded program -> all data are saved to the list first*/
+    public ConcurrentHashMap<String, ObservableList<ObservableList<String>>> resultlist = new ConcurrentHashMap<>();
+    public ConcurrentHashMap<String, ObservableList<ObservableList<byte[]>>> hexdumplist = new ConcurrentHashMap<>();
+    /* pagesize */
+    public int ps;
+    /* path to RollbackJournal-file */
+    public String path;
+    /* This buffer holds RollbackJournal-file in RAM */ ByteBuffer rollbackjournal;
+    /* total size of RollbackJournal-file in bytes */ long size;
+    /* flag for already visited Bytes of the page */ BitSet visit = null;
+    /* reference to the MAIN class */ Job job;
+    /* number of pages that is currently analysed */ int pagenumber_rol;
+    int pagenumber_maindb;
+    long pagecount;
+    long nounce;
+    long pages;
+    long sectorsize;
+    long journalpagesize;
+    boolean withoutROWID = false;
+    /* buffer that holds the current page */ ByteBuffer buffer;
+    /* file pointer */ int journalpointer = 0;
+    Map<Long, RollbackjournalAnalyzer.SchemaEntry> pageOwner;
 
-	/* this is a multi-threaded program -> all data are saved to the list first*/
-    public ConcurrentHashMap<String,ObservableList<ObservableList<String>>> resultlist = new ConcurrentHashMap<>();
-	public ConcurrentHashMap<String,ObservableList<ObservableList<byte[]>>> hexdumplist = new ConcurrentHashMap<>();
+    //ConcurrentLinkedQueue<LinkedList<String>> output = new ConcurrentLinkedQueue<LinkedList<String>>();
+    List<RollbackjournalAnalyzer.PageRecord> records;
+    /* offers a lot of useful utility functions */
+    private final Auxiliary ct;
+    /* knowlegde store */
+    private final StringBuffer firstcol = new StringBuffer();
 
-	/* This buffer holds RollbackJournal-file in RAM */
-	ByteBuffer rollbackjournal;
+    /**
+     * Constructor.
+     *
+     * @param path full qualified file name to the RollbackJournal archive
+     * @param job  reference to the Job class
+     */
+    public RollbackJournalReader(String path, Job job) {
+        this.path = path;
+        this.job = job;
+        this.ct = new Auxiliary(job);
+    }
 
-	/* total size of RollbackJournal-file in bytes */
-	long size;
+    private static boolean olderVersion(List<String> older, List<String> current) {
+        String rowid = RowLayout.rowid(older).trim();
+        List<String> a1 = RowLayout.values(older), b1 = RowLayout.values(current);
+        int same = 0, diff = 0;
+        for (int k = 0; k < Math.max(a1.size(), b1.size()); k++) {
+            String a = k < a1.size() ? a1.get(k) : null, b = k < b1.size() ? b1.get(k) : null;
+            a = a == null || a.equals("NULL") ? "" : a;
+            b = b == null || b.equals("NULL") ? "" : b;
+            if (a.equals(rowid) && b.equals(rowid))
+                continue;                              // INTEGER PRIMARY KEY column = alias of the rowid
+            if (a.equals(b)) same++;
+            else diff++;
+        }
+        return same >= 1 && diff >= 1;
+    }
 
-	/* pagesize */
-	public int ps;
+    private static boolean positiveNumber(String s) {
+        try {
+            return s != null && Long.parseLong(s.trim()) > 0;
+        } catch (NumberFormatException e) {
+            return false;
+        }
+    }
 
-	/* path to RollbackJournal-file */
-	public String path;
+    /**
+     * Quick lookup. Does a given hex-string start with Zeros?
+     *
+     * @param s the String to check
+     * @return true if zero bytes could be found
+     */
+    static boolean allCharactersZero(String s) {
+        if (!s.startsWith("0000")) return false;
 
-	/* flag for already visited Bytes of the page */
-	BitSet visit = null;
+        int n = s.length();
+        for (int i = 1; i < n; i++)
+            if (s.charAt(i) != s.charAt(0)) return false;
 
-	
-	/* reference to the MAIN class */
-	Job job;
+        return true;
+    }
 
-	/* number of pages that is currently analysed */
-	int pagenumber_rol;
-	int pagenumber_maindb;
-	long pagecount;
-	long nounce;
-	long pages;
-	long sectorsize;
-	long journalpagesize;
+    /**
+     * This method is the main processing loop. First, the header is analysed.
+     * Afterward, all write-ahead frames are recovered.
+     *
+     * @return
+     */
+    public void parse() throws IOException {
 
-	boolean withoutROWID = false;
+        Path p = Paths.get(path);
 
+        RollbackjournalAnalyzer.analyzeJournal(this);
 
-	/* offers a lot of useful utility functions */
-	private Auxiliary ct;
+        /*
+         * We have to do this before we open the database because of the concurrent
+         * access
+         */
 
-	/* knowlegde store */
-	private StringBuffer firstcol = new StringBuffer();
-
-	/* buffer that holds the current page */
-	ByteBuffer buffer;
-
-	public static List<TableDescriptor> tables = new ArrayList<TableDescriptor>();
-
-	//ConcurrentLinkedQueue<LinkedList<String>> output = new ConcurrentLinkedQueue<LinkedList<String>>();
-
-	/* file pointer */
-	int journalpointer = 0;
-
-	Map<Long, RollbackjournalAnalyzer.SchemaEntry> pageOwner;
-	List<RollbackjournalAnalyzer.PageRecord> records;
-
-	/**
-	 * Constructor.
-	 * 
-	 * @param path    full qualified file name to the RollbackJournal archive
-	 * @param job reference to the Job class
-	 */
-	public RollbackJournalReader(String path, Job job) {
-		this.path = path;
-		this.job = job;
-		this.ct = new Auxiliary(job);
-	}
-
-	/**
-	 * This method is the main processing loop. First, the header is analysed.
-	 * Afterwards, all write-ahead frames are recovered.
-	 * 
-	 * @return
-	 */
-	public void parse() throws IOException {
-
-		Path p = Paths.get(path);
-
-		RollbackjournalAnalyzer.analyzeJournal(this);
-		
-		/*
-		 * We have to do this before we open the database because of the concurrent
-		 * access
-		 */
-
-		/* try to open the db-file in read-only mode */
-		try {
-			file = AsynchronousFileChannel.open(p, StandardOpenOption.READ);
-		} catch (Exception e) {
+        /* try to open the db-file in read-only mode */
+        try {
+            file = AsynchronousFileChannel.open(p, StandardOpenOption.READ);
+        } catch (Exception e) {
             AppLog.error("Cannot open RollbackJournal-file" + p.getFileName());
-			return;
-		}
+            return;
+        }
 
-		/** Caution!!! We read the complete file into RAM **/
-		try {
-			readFileIntoBuffer();
-		} catch (IOException e) {
+        /** Caution!!! We read the complete file into RAM **/
+        try {
+            readFileIntoBuffer();
+        } catch (IOException e) {
 
-			e.printStackTrace();
-		}
-		
-		try {
-			if(file.size() <= 512)
-			{	
-				System.out.println("RollbackJournal-File is empty. Skip analyzing.");
-					return;
-			}
-		} catch (IOException e) {
-			e.printStackTrace();
-		}	
-		
-		
-		
-		/*
-		 * In practice, when a transaction is committed, it seems that the journal
-		 * The header is normally zeroed, and the data in the journal remains.
-		 * This is not a problem when it comes to reading each page from 
-		 * the journal, as we can obtain the page size from the database itself.
-		 */
+            e.printStackTrace();
+        }
 
-		/*******************************************************************/
+        try {
+            if (file.size() <= 512) {
+                System.out.println("RollbackJournal-File is empty. Skip analyzing.");
+                return;
+            }
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
 
-		
-		/*
-		 * A valid rollback journal begins with a header in the following format:
-		 * 
-		 * Offset	Size	Description
-		 * 0 		8 		Header string: 0xd9, 0xd5, 0x05, 0xf9, 0x20, 0xa1, 0x63, 0xd7
-		 * 8	 	4 		The "Page Count" - The number of pages in the next segment of the journal, or -1 to mean all content to the end of the file
-		 * 12	 	4 		A random nonce for the checksum
-		 * 16	 	4 		Initial size of the database in pages
-		 * 20 		4 		Size of a disk sector assumed by the process that wrote this journal.
-		 * 24 		4 		Size of pages in this journal. 
-		 */
-		
-		/* read header of the WAL file - the first 28 bytes */
-		ByteBuffer header = ByteBuffer.allocate(28);
-		Future<Integer> result = file.read(header, 0); // position = 0
-		while (!result.isDone()) {
 
-			// we can do something in between or just wait ;-).
-		}
 
-		header.flip();
-		
-		
-		byte head[] = new byte[8];
-		header.get(head);
-		
+        /*
+         * In practice, when a transaction is committed, it seems that the journal
+         * The header is normally zeroed, and the data in the journal remains.
+         * This is not a problem when it comes to reading each page from
+         * the journal, as we can obtain the page size from the database itself.
+         */
 
-		if (Auxiliary.bytesToHex3(head).equals(MAGIC_HEADER_STRING))
-		{
-			AppLog.info("header is okay. seems to be an rollback journal file.");
-		}
-		else 
-		{
-			AppLog.info("This file does not contain a header. It is a hot journal file (still active). ");
-		}
-		
-		pagecount = Integer.toUnsignedLong(header.getInt());
-		AppLog.info(" pagecount " + pagecount);
+        /*******************************************************************/
 
-		nounce = Integer.toUnsignedLong(header.getInt());
-		AppLog.info(" nounce " + nounce);
 
-		pages = Integer.toUnsignedLong(header.getInt());
-		AppLog.info(" pages " + pages);
-		
-		sectorsize = Integer.toUnsignedLong(header.getInt());
-		AppLog.info(" sector size  " + sectorsize);
-		
-		journalpagesize = Integer.toUnsignedLong(header.getInt());
-		AppLog.info(" journal page size  " + journalpagesize);
+        /*
+         * A valid rollback journal begins with a header in the following format:
+         *
+         * Offset	Size	Description
+         * 0 		8 		Header string: 0xd9, 0xd5, 0x05, 0xf9, 0x20, 0xa1, 0x63, 0xd7
+         * 8	 	4 		The "Page Count" - The number of pages in the next segment of the journal, or -1 to mean all content to the end of the file
+         * 12	 	4 		A random nonce for the checksum
+         * 16	 	4 		Initial size of the database in pages
+         * 20 		4 		Size of a disk sector assumed by the process that wrote this journal.
+         * 24 		4 		Size of pages in this journal.
+         */
 
-	    journalpointer = 512; // this is the position, where the first frame should be
+        /* read header of the WAL file - the first 28 bytes */
+        ByteBuffer header = ByteBuffer.allocate(28);
+        Future<Integer> result = file.read(header, 0); // position = 0
+        while (!result.isDone()) {
 
-		/* initialise the BitSet for already visited location within */
-		visit = new BitSet(ps);
+            // we can do something in between or just wait ;-).
+        }
 
-		int i = 0;
-		for(RollbackjournalAnalyzer.PageRecord r: records){
+        header.flip();
 
-			long offset = r.recordOffset();
-			long page = r.pageNumber();
 
-			/* read the db page into buffer */
-			buffer = readPage((int)offset+4);
+        byte[] head = new byte[8];
+        header.get(head);
 
-			analyzePage(i, (int)page,(int)offset + 4); // we need the original page number to compute the offset for the diff between journal and database
-			i++;
-		}
 
-		//AppLog.info("Lines after RollbackJournal-file recovery: " + output.size());
-		AppLog.info("Number of pages in RollbackJournal-file" + records.size());
+        if (Auxiliary.bytesToHex3(head).equals(MAGIC_HEADER_STRING)) {
+            AppLog.info("header is okay. seems to be an rollback journal file.");
+        } else {
+            AppLog.info("This file does not contain a header. It is a hot journal file (still active). ");
+        }
 
-		markJournalVersions();
-	}
+        pagecount = Integer.toUnsignedLong(header.getInt());
+        AppLog.info(" pagecount " + pagecount);
 
-	/**
-	 * NIST SFT-AO-04/05 for a rollback journal: the journal holds page images from before the
-	 * last transaction(s). A regular row of such an image whose rowid no longer exists in the
-	 * database was deleted afterwards; if the database holds a different version of the rowid
-	 * (at least one value equal, one different) the journal row is an older version (UPDATE).
-	 * The finding is appended to the "[pll|hl]" column, the status is not changed.
-	 */
-	private void markJournalVersions() {
-		if (job == null || job.resultlist == null)
-			return;
-		// the GUI may already have prepended its line number to the database rows: use RowLayout
-		int upd = 0, del = 0;
-		for (String table : resultlist.keySet()) {
-			ObservableList<ObservableList<String>> jrows = resultlist.get(table);
-			ObservableList<ObservableList<String>> dbrows = job.resultlist.get(table);
-			if (jrows == null || dbrows == null)
-				continue;
-			Map<String, ObservableList<String>> live = new HashMap<>();
-			for (ObservableList<String> r : dbrows)
-				if (RowLayout.size(r) > RowLayout.VALUES && Global.REGULAR_RECORD.equals(RowLayout.status(r))
-						&& positiveNumber(RowLayout.rowid(r)))
-					live.put(RowLayout.rowid(r).trim(), r);
-			if (live.isEmpty())
-				continue;                          // table without rowids or not readable in the database
-			for (ObservableList<String> j : jrows) {
-				if (RowLayout.size(j) <= RowLayout.VALUES || !Global.REGULAR_RECORD.equals(RowLayout.status(j))
-						|| !positiveNumber(RowLayout.rowid(j)))
-					continue;
-				String pll = RowLayout.pll(j);
-				if (pll == null || pll.contains(Auxiliary.FLAG_TRUNCATED) || pll.contains("header\u2260payload")
-						|| pll.contains(Auxiliary.FLAG_RJ_DELETED) || pll.contains(Auxiliary.FLAG_RJ_SUPERSEDED))
-					continue;                          // incomplete / misparsed records are not compared
-				ObservableList<String> l = live.get(RowLayout.rowid(j).trim());
-				if (l == null) {
-					RowLayout.set(j, RowLayout.PLL, Auxiliary.FLAG_RJ_DELETED + " " + pll);
-					del++;
-				} else if (olderVersion(j, l)) {
-					RowLayout.set(j, RowLayout.PLL, Auxiliary.FLAG_RJ_SUPERSEDED + " " + pll);
-					upd++;
-				}
-			}
-		}
-		AppLog.info("Rollback journal version analysis: " + upd + " row(s) updated and " + del + " row(s) deleted after the journal snapshot");
-	}
+        nounce = Integer.toUnsignedLong(header.getInt());
+        AppLog.info(" nounce " + nounce);
 
-	private static boolean olderVersion(List<String> older, List<String> current) {
-		String rowid = RowLayout.rowid(older).trim();
-		List<String> a1 = RowLayout.values(older), b1 = RowLayout.values(current);
-		int same = 0, diff = 0;
-		for (int k = 0; k < Math.max(a1.size(), b1.size()); k++) {
-			String a = k < a1.size() ? a1.get(k) : null, b = k < b1.size() ? b1.get(k) : null;
-			a = a == null || a.equals("NULL") ? "" : a;
-			b = b == null || b.equals("NULL") ? "" : b;
-			if (a.equals(rowid) && b.equals(rowid))
-				continue;                              // INTEGER PRIMARY KEY column = alias of the rowid
-			if (a.equals(b)) same++; else diff++;
-		}
-		return same >= 1 && diff >= 1;
-	}
+        pages = Integer.toUnsignedLong(header.getInt());
+        AppLog.info(" pages " + pages);
 
-	private static boolean positiveNumber(String s) {
-		try { return s != null && Long.parseLong(s.trim()) > 0; } catch (NumberFormatException e) { return false; }
-	}
-	
-	private void updateResultSet(DataRow row)
-	{
-		// entry for table name already exists
-		if (resultlist.containsKey(row.line().getFirst()))
-		{
-			ObservableList<ObservableList<String>> tablelist = resultlist.get(row.line().getFirst());
-			tablelist.add(FXCollections.observableList(row.line()));  // add row
+        sectorsize = Integer.toUnsignedLong(header.getInt());
+        AppLog.info(" sector size  " + sectorsize);
 
-			// save the original bytes-values of the table row separately to a different list
-			ObservableList<ObservableList<byte[]>> hexlist = hexdumplist.get(row.line().getFirst());
-			hexlist.add(FXCollections.observableList(row.hexdump()));
-		}
+        journalpagesize = Integer.toUnsignedLong(header.getInt());
+        AppLog.info(" journal page size  " + journalpagesize);
 
-		// create a new data set since the table name occurs for the first time
-		else {
-			ObservableList<ObservableList<String>> tablelist = FXCollections.observableArrayList();
-			tablelist.add(FXCollections.observableList(row.line())); // add row
-			resultlist.put(row.line().getFirst(),tablelist);
+        journalpointer = 512; // this is the position, where the first frame should be
 
-			ObservableList<ObservableList<byte[]>> hexlist = FXCollections.observableArrayList();
-			hexlist.add(FXCollections.observableList(row.hexdump()));
-			hexdumplist.put(row.line().getFirst(),hexlist);
-		}
-	}
+        /* initialise the BitSet for already visited location within */
+        visit = new BitSet(ps);
 
-	/**
-	 * Analyse the actual database page and try to recover regular and deleted content.
-	 * 
-	 * @return int success
-	 */
-	public int analyzePage(int page, int originalpagenumber,int pageoffset) {
+        int i = 0;
+        for (RollbackjournalAnalyzer.PageRecord r : records) {
 
-		withoutROWID = false;
-		pagenumber_maindb = originalpagenumber;
-		
-		/* convert byte array into a string representation */
-		String content = Auxiliary.bytesToHex2(buffer);
+            long offset = r.recordOffset();
+            long page = r.pageNumber();
 
-		// offset 0
-		buffer.position(0);
+            /* read the db page into buffer */
+            buffer = readPage((int) offset + 4);
 
-		/* check type of the page by reading the first two bytes */
-		int type = Auxiliary.getPageType(content);
-		/* mark bytes as visited */
-		visit.set(0, 2);
+            analyzePage(i, (int) page, (int) offset + 4); // we need the original page number to compute the offset for the diff between journal and database
+            i++;
+        }
 
-		/*
-		 * Tricky thing, since a zero page type has normally two possible reasons:
-		 * 
-		 * reason 1:
-		 * 
-		 * It is a dropped page. We have to carve out for deleted cells, but without the cell
-		 * pointers, cause this list is dropped too or is damaged.
-		 * 
-		 * reason 2:
-		 * 
-		 * It is an overflow page -> skip it!
-		 */
-		if (type == 0) {
+        //AppLog.info("Lines after RollbackJournal-file recovery: " + output.size());
+        AppLog.info("Number of pages in RollbackJournal-file" + records.size());
 
-			/*
-			 * if page was dropped - because of a DROP TABLE command - first 8 Bytes are
-			 * zero-bytes
-			 */
-			buffer.position(0);
-			Integer checksum = buffer.getInt();
-			/* was page dropped? */
-			if (checksum == 0) {
-				System.out.println(" DROPPED PAGE !!!");
-				/* no overflow page -> carve for data records - we do our best! ;-) */
-				carve(content, null);
-			}
-			/*
-			 * otherwise it seems to be an overflow page - however, that is not 100% safe!!!
-			 */
+        markJournalVersions();
+    }
 
-			/* we have to leave in any case */
-			return 0;
-		}
+    /**
+     * NIST SFT-AO-04/05 for a rollback journal: the journal holds page images from before the
+     * last transaction(s). A regular row of such an image whose rowid no longer exists in the
+     * database was deleted afterward; if the database holds a different version of the rowid
+     * (at least one value equal, one different) the journal row is an older version (UPDATE).
+     * The finding is appended to the "[pll|hl]" column, the status is not changed.
+     */
+    private void markJournalVersions() {
+        if (job == null || job.resultlist == null) return;
+        // the GUI may already have prepended its line number to the database rows: use RowLayout
+        int upd = 0, del = 0;
+        for (String table : resultlist.keySet()) {
+            ObservableList<ObservableList<String>> jrows = resultlist.get(table);
+            ObservableList<ObservableList<String>> dbrows = job.resultlist.get(table);
+            if (jrows == null || dbrows == null) continue;
+            Map<String, ObservableList<String>> live = new HashMap<>();
+            for (ObservableList<String> r : dbrows)
+                if (RowLayout.size(r) > RowLayout.VALUES && Global.REGULAR_RECORD.equals(RowLayout.status(r)) && positiveNumber(RowLayout.rowid(r)))
+                    live.put(RowLayout.rowid(r).trim(), r);
+            if (live.isEmpty())
+                continue;                          // table without rowids or not readable in the database
+            for (ObservableList<String> j : jrows) {
+                if (RowLayout.size(j) <= RowLayout.VALUES || !Global.REGULAR_RECORD.equals(RowLayout.status(j)) || !positiveNumber(RowLayout.rowid(j)))
+                    continue;
+                String pll = RowLayout.pll(j);
+                if (pll == null || pll.contains(Auxiliary.FLAG_TRUNCATED) || pll.contains("header\u2260payload") || pll.contains(Auxiliary.FLAG_RJ_DELETED) || pll.contains(Auxiliary.FLAG_RJ_SUPERSEDED))
+                    continue;                          // incomplete / misparsed records are not compared
+                ObservableList<String> l = live.get(RowLayout.rowid(j).trim());
+                if (l == null) {
+                    RowLayout.set(j, RowLayout.PLL, Auxiliary.FLAG_RJ_DELETED + " " + pll);
+                    del++;
+                } else if (olderVersion(j, l)) {
+                    RowLayout.set(j, RowLayout.PLL, Auxiliary.FLAG_RJ_SUPERSEDED + " " + pll);
+                    upd++;
+                }
+            }
+        }
+        AppLog.info("Rollback journal version analysis: " + upd + " row(s) updated and " + del + " row(s) deleted after the journal snapshot");
+    }
 
-		/************** skip unknown page types ******************/
+    private void updateResultSet(DataRow row) {
+        // entry for table name already exists
+        if (resultlist.containsKey(row.line().getFirst())) {
+            ObservableList<ObservableList<String>> tablelist = resultlist.get(row.line().getFirst());
+            tablelist.add(FXCollections.observableList(row.line()));  // add row
 
-		// no leaf page -> skip this page
-		if (type < 0) {
-			AppLog.info("No Data page. " + pagenumber_rol);
-			return -1;
-		} else if (type == 5) {
-		//	AppLog.info("Internal Table page " + pagenumber_rol);
-			return -1;
-		} else if (type == 10) {
-		//	AppLog.info("Index leaf page " + pagenumber_rol);
-			withoutROWID = true;
+            // save the original bytes-values of the table row separately to a different list
+            ObservableList<ObservableList<byte[]>> hexlist = hexdumplist.get(row.line().getFirst());
+            hexlist.add(FXCollections.observableList(row.hexdump()));
+        }
 
-		//	} else {
-			//AppLog.info("Data page " + pagenumber_rol+ " Offset: " + (rollbackjournal.position() - ps));
-		}
+        // create a new data set since the table name occurs for the first time
+        else {
+            ObservableList<ObservableList<String>> tablelist = FXCollections.observableArrayList();
+            tablelist.add(FXCollections.observableList(row.line())); // add row
+            resultlist.put(row.line().getFirst(), tablelist);
 
-		/************** regular leaf page with data ******************/
+            ObservableList<ObservableList<byte[]>> hexlist = FXCollections.observableArrayList();
+            hexlist.add(FXCollections.observableList(row.hexdump()));
+            hexdumplist.put(row.line().getFirst(), hexlist);
+        }
+    }
 
-		// boolean freeblocks = false;
-		if (type == 8) {
-			// offset 1-2 let us find the first free block offset for carving
-			byte fboffset[] = new byte[2];
-			buffer.position(1);
-			buffer.get(fboffset);
+    /**
+     * Analyse the actual database page and try to recover regular and deleted content.
+     *
+     * @return int success
+     */
+    public int analyzePage(int page, int originalpagenumber, int pageoffset) {
 
-		}
+        withoutROWID = false;
+        pagenumber_maindb = originalpagenumber;
 
-		
+        /* convert byte array into a string representation */
+        String content = Auxiliary.bytesToHex2(buffer);
 
-		// found Data-Page - determine number of cell pointers at offset 3-4 of this
-		// page
-		byte cpn[] = new byte[2];
-		buffer.position(3);
-		buffer.get(cpn);
+        // offset 0
+        buffer.position(0);
 
-		// get start pointer for the cell content region
-		byte ccr[] = new byte[2];
-		buffer.position(5);
-		buffer.get(ccr);
+        /* check type of the page by reading the first two bytes */
+        int type = Auxiliary.getPageType(content);
+        /* mark bytes as visited */
+        visit.set(0, 2);
 
-		ByteBuffer contentregionstart = ByteBuffer.wrap(ccr);
-		Auxiliary.TwoByteBuffertoInt(contentregionstart);
+        /*
+         * Tricky thing, since a zero page type has normally two possible reasons:
+         *
+         * reason 1:
+         *
+         * It is a dropped page. We have to carve out for deleted cells, but without the cell
+         * pointers, cause this list is dropped too or is damaged.
+         *
+         * reason 2:
+         *
+         * It is an overflow page -> skip it!
+         */
+        if (type == 0) {
 
-		/* mark as visited */
-		visit.set(2, 8);
+            /*
+             * if page was dropped - because of a DROP TABLE command - first 8 Bytes are
+             * zero-bytes
+             */
+            buffer.position(0);
+            Integer checksum = buffer.getInt();
+            /* was page dropped? */
+            if (checksum == 0) {
+                System.out.println(" DROPPED PAGE !!!");
+                /* no overflow page -> carve for data records - we do our best! ;-) */
+                carve(content, null);
+            }
+            /*
+             * otherwise it seems to be an overflow page - however, that is not 100% safe!!!
+             */
 
-		ByteBuffer size = ByteBuffer.wrap(cpn);
-		int cp = Auxiliary.TwoByteBuffertoInt(size);
+            /* we have to leave in any case */
+            return 0;
+        }
 
-		AppLog.debug(" number of cells: " + cp + " type of page " + type);
-		job.numberofcells.addAndGet(cp);
-		if (0 == cp)
-			AppLog.debug(" Page seems to be dropped. No cell entries.");
+        /************** skip unknown page types ******************/
 
-		int headerend = 8 + (cp * 2);
-		visit.set(0, headerend);
+        // no leaf page -> skip this page
+        if (type < 0) {
+            AppLog.info("No Data page. " + pagenumber_rol);
+            return -1;
+        } else if (type == 5) {
+            //	AppLog.info("Internal Table page " + pagenumber_rol);
+            return -1;
+        } else if (type == 10) {
+            //	AppLog.info("Index leaf page " + pagenumber_rol);
+            withoutROWID = true;
 
-		/***************************************************************
-		 * STEP 2:
-		 * 
-		 * Cell pointer array scan (if possible)
-		 * 
-		 ***************************************************************/
-		int last = 0;
+            //	} else {
+            //AppLog.info("Data page " + pagenumber_rol+ " Offset: " + (rollbackjournal.position() - ps));
+        }
 
-		/* go on with the cell pointer array */
-		for (int i = 0; i < cp; i++) {
+        /************** regular leaf page with data ******************/
 
-			// address of the next cell pointer
-			byte pointer[] = new byte[2];
-			if (type == 5)
-				buffer.position(12 + 2 * i);
-			else
-				buffer.position(8 + 2 * i);
-			buffer.get(pointer);
-			ByteBuffer celladdr = ByteBuffer.wrap(pointer);
-			int celloff = Auxiliary.TwoByteBuffertoInt(celladdr);
+        // boolean freeblocks = false;
+        if (type == 8) {
+            // offset 1-2 let us find the first free block offset for carving
+            byte[] fboffset = new byte[2];
+            buffer.position(1);
+            buffer.get(fboffset);
 
-			if (last > 0) {
-				if (celloff == last) {
-					continue;
-				}
-			}
-			last = celloff;
-				String hls = Auxiliary.Int2Hex(celloff); 
+        }
 
-				AppLog.debug(page + " -> " + celloff + " " + "0" + hls);
-			hls.trim();
-			
+
+        // found Data-Page - determine number of cell pointers at offset 3-4 of this
+        // page
+        byte[] cpn = new byte[2];
+        buffer.position(3);
+        buffer.get(cpn);
+
+        // get start pointer for the cell content region
+        byte[] ccr = new byte[2];
+        buffer.position(5);
+        buffer.get(ccr);
+
+        ByteBuffer contentregionstart = ByteBuffer.wrap(ccr);
+        Auxiliary.TwoByteBuffertoInt(contentregionstart);
+
+        /* mark as visited */
+        visit.set(2, 8);
+
+        ByteBuffer size = ByteBuffer.wrap(cpn);
+        int cp = Auxiliary.TwoByteBuffertoInt(size);
+
+        AppLog.debug(" number of cells: " + cp + " type of page " + type);
+        job.numberofcells.addAndGet(cp);
+        if (0 == cp) AppLog.debug(" Page seems to be dropped. No cell entries.");
+
+        int headerend = 8 + (cp * 2);
+        visit.set(0, headerend);
+
+        /***************************************************************
+         * STEP 2:
+         *
+         * Cell pointer array scan (if possible)
+         *
+         ***************************************************************/
+        int last = 0;
+
+        /* go on with the cell pointer array */
+        for (int i = 0; i < cp; i++) {
+
+            // address of the next cell pointer
+            byte[] pointer = new byte[2];
+            if (type == 5) buffer.position(12 + 2 * i);
+            else buffer.position(8 + 2 * i);
+            buffer.get(pointer);
+            ByteBuffer celladdr = ByteBuffer.wrap(pointer);
+            int celloff = Auxiliary.TwoByteBuffertoInt(celladdr);
+
+            if (last > 0) {
+                if (celloff == last) {
+                    continue;
+                }
+            }
+            last = celloff;
+            String hls = Auxiliary.Int2Hex(celloff);
+
+            AppLog.debug(page + " -> " + celloff + " " + "0" + hls);
+            hls.trim();
+
             // List, not LinkedList: holds DataRow.line(), now ArrayList-backed
             // for the dominant readRecord() path (see DataRow.java).
             List<String> record = null;
 
-			String tname = null;
-
-			for (RollbackjournalAnalyzer.PageRecord re : records){
-				if (re.pageNumber()== pagenumber_maindb){
-					tname = re.ownerName();
-				}
-			}
-
-			if (tname == null) {
-				tname = "unkown";
-			}
-
-			try {
-				DataRow r = ct.readRecord(celloff, buffer, pagenumber_maindb, visit, Integer.MAX_VALUE, withoutROWID, Global.ROLLBACK_JOURNAL_FILE, pageoffset + celloff, tname);
-				if (r == null)
-					// A single unreadable cell does not invalidate the rest of
-					// the page: readRecord() legitimately returns null for
-					// ordinary, non-fatal reasons (header parse failure,
-					// buffer underflow, etc.) on individual cells. Aborting
-					// the whole page here (the old "return -1") silently
-					// dropped every other, perfectly valid record on the
-					// page as soon as the first bad cell was hit - this was
-					// the cause of journal-file tables being created but
-					// left empty. WALReader/RecoveryTask already just skip
-					// the bad cell and keep going; do the same here.
-					continue;
-				record = r.line();
-
-				// add new line to output
-				if (null != record && record.size() > 0) {
-					updateResultSet(r);
-				}
-
-			} catch (IOException err) {
-				err.printStackTrace();
-			}
-
-
-
-		} // end of for - cell pointer
-
-		
-		AppLog.debug("finished STEP2 -> cellpoint array completed");
-
-		
-		return 0;
-
-	}
-
-	
-	
-	
-	
-	/**
-	 * Quick lookup. Does a given hex-string start with Zeros?
-	 * 
-	 * @param s the String to check
-	 * @return true if zero bytes could be found
-	 */
-	static boolean allCharactersZero(String s) {
-		if (!s.startsWith("0000"))
-			return false;
-
-		int n = s.length();
-		for (int i = 1; i < n; i++)
-			if (s.charAt(i) != s.charAt(0))
-				return false;
-
-		return true;
-	}
-
-	/**
-	 * This method is used to read the database file into RAM.
-	 * 
-	 * @return a read-only ByteBuffer representing the RollbackJournal file content
-	 * @throws IOException
-	 */
-	private void readFileIntoBuffer() throws IOException {
-
-		/* read the complete file into a ByteBuffer */
-		size = file.size();
-
-		rollbackjournal = ByteBuffer.allocateDirect((int) size);
-
-		Future<Integer> result = file.read(rollbackjournal, 0); // position = 0
-
-		while (!result.isDone()) {
-
-			// we can do something in between or we can do nothing ;-).
-		}
-
-		// set filepointer to the beginning of the file
-		rollbackjournal.position(0);
-
-	}
-
-	/**
-	 * Starting with the current position of the RollbackJournal-ByteBuffer 
-	 * 
-	 * Read the next DB page.
-	 * 
-	 * @return
-	 */
-	protected ByteBuffer readPage() {
-
-		byte [] page = new byte[ps];
-		
-		rollbackjournal.get(page);
-		
-		ByteBuffer content = ByteBuffer.wrap(page);
-		
-		return content;
-	}
-
-	protected ByteBuffer readPage(int offset) {
+            String tname = null;
 
-		byte [] page = new byte[ps];
+            for (RollbackjournalAnalyzer.PageRecord re : records) {
+                if (re.pageNumber() == pagenumber_maindb) {
+                    tname = re.ownerName();
+                }
+            }
 
-		rollbackjournal.position(offset);
-		rollbackjournal.get(page);
+            if (tname == null) {
+                tname = "unkown";
+            }
 
-		ByteBuffer content = ByteBuffer.wrap(page);
+            try {
+                DataRow r = ct.readRecord(celloff, buffer, pagenumber_maindb, visit, Integer.MAX_VALUE, withoutROWID, Global.ROLLBACK_JOURNAL_FILE, pageoffset + celloff, tname);
+                if (r == null)
+                    // A single unreadable cell does not invalidate the rest of
+                    // the page: readRecord() legitimately returns null for
+                    // ordinary, non-fatal reasons (header parse failure,
+                    // buffer underflow, etc.) on individual cells. Aborting
+                    // the whole page here (the old "return -1") silently
+                    // dropped every other, perfectly valid record on the
+                    // page as soon as the first bad cell was hit - this was
+                    // the cause of journal-file tables being created but
+                    // left empty. WALReader/RecoveryTask already just skip
+                    // the bad cell and keep going; do the same here.
+                    continue;
+                record = r.line();
 
-		return content;
-	}
+                // add new line to output
+                if (null != record && record.size() > 0) {
+                    updateResultSet(r);
+                }
 
-	/**
-	 * This method is called to carve a data page for records.
-	 * 
-	 * @param content page content as hex string
-	 */
-	public void carve(ByteBuffer buffer, String content, Carver crv) {
+            } catch (IOException err) {
+                err.printStackTrace();
+            }
 
-		Carver c = crv;
-
-		if (null == c)
-			/* no type could be found in the first two bytes */
-			/* Maybe the whole page was dropped because of a drop component command? */
-			/* start carving on the complete page */
-			c = new Carver(job, buffer, content, visit, ps);
-		c.recordCellLayout = false;   // page offsets refer to the db, not to this file
-
-
-		/* try to get component schema for the current page, if possible */
-		TableDescriptor tdesc = null;
-		if (job.pages.length > ps) {
-			AbstractDescriptor ad = job.pages[ps];
-			if (ad instanceof TableDescriptor)
-				tdesc = (TableDescriptor) ad;
-		}
-
-		List<TableDescriptor> tab = tables;
-		AppLog.debug(" tables :: " + tables.size());
-
-		if (null != tdesc) {
-			/* there is a schema for this page */
-			tab = new LinkedList<TableDescriptor>();
-			tab.add(tdesc);
-			AppLog.debug(" added tdsec ");
-		} else {
-			AppLog.warning(" No component description!");
-			tab = tables;
-		}
-
-		LinkedList<Gap> gaps = findGaps();
-		if (gaps.size() == 0) {
-			AppLog.debug("no gaps anymore. Stopp search");
-			return;
-		}
-
-		/* try out all component schema(s) */
-		for (int n = 0; n < tab.size(); n++) {
-			tdesc = tab.get(n);
-			AppLog.debug("pagenumber :: " + pagenumber_maindb + " component size :: " + tab.size());
-			AppLog.debug("n " + n);
-			// TableDescriptor tdb = tab.get(n);
-
-			/* access pattern for a particular component */
-			String tablename = tab.get(n).tblname;
-			if (tablename.startsWith("fqlite_freelist"))
-				continue;
-			/* create matcher object for constraint check */
-			SerialTypeMatcher stm = new SerialTypeMatcher(buffer);
-
-			gaps = findGaps();
-
-			for (int a = 0; a < gaps.size(); a++) {
-
-				Gap next = gaps.get(a);
-
-				if (next.to - next.from > 10)
-					/* do we have at least one match? */
-					if (c.carve(next.from + 4, next.to, stm, CarverTypes.NORMAL, tab.get(n)) != Global.CARVING_ERROR) {
-						AppLog.debug("*****************************  STEP NORMAL finished with matches");
-
-					}
-			}
-
-			gaps = findGaps();
-
-			for (int a = 0; a < gaps.size(); a++) {
-
-				Gap next = gaps.get(a);
 
-				if (c.carve(next.from + 4, next.to, stm, CarverTypes.COLUMNSONLY, tab.get(n)) != Global.CARVING_ERROR) {
-					AppLog.debug("*****************************  STEP COLUMNSONLY finished with matches");
-
-				}
-			}
-
-			gaps = findGaps();
-
-			for (int a = 0; a < gaps.size(); a++) {
-
-				Gap next = gaps.get(a);
+        } // end of for - cell pointer
 
-				if (c.carve(next.from + 4, next.to, stm, CarverTypes.FIRSTCOLUMNMISSING, tab.get(n))!= Global.CARVING_ERROR) {
-					AppLog.debug("*****************************  STEP FIRSTCOLUMNMISSING finished with matches");
 
-				}
+        AppLog.debug("finished STEP2 -> cellpoint array completed");
 
-			}
 
-			/**
-			 * When a record deletion occurs, the first 2 bytes of the cell are set to the
-			 * offset value of next free block and latter 2 bytes covers the length of the
-			 * current free block. Because of this, the first 4 bytes of a deleted cell
-			 * differ startRegion from the normal data. Accordingly, we need a different approach
-			 * to recover the data records.
-			 * 
-			 * In most cases, at least the header length information is overwritten.
-			 * This, sometimes, also overwrites the first column type field.
-			 * 
-			 * We have two cases:
-			 * 
-			 * (1) only the first column of the header is missing, but the rest of the
-			 * header is intact.
-			 * 
-			 * (2) Both the header length field plus the first column are overwritten.
-			 * 
-			 * [cell size | rowid | header size | header bytes | payload ]
-			 * 
-			 * for a deleted cell looks maybe like this
-			 * 
-			 * [offset of next free block | length of the current free block | ]
-			 */
+        return 0;
 
-			/* There are still gaps? */
-			gaps = findGaps();
+    }
 
-			for (int a = 0; a < gaps.size(); a++) {
+    /**
+     * This method is used to read the database file into RAM.
+     *
+     * @return a read-only ByteBuffer representing the RollbackJournal file content
+     * @throws IOException
+     */
+    private void readFileIntoBuffer() throws IOException {
 
-				Gap next = gaps.get(a);
+        /* read the complete file into a ByteBuffer */
+        size = file.size();
 
-				/* one last try with 4+1 instead of 4 Bytes */
-				c.carve(next.from + 4 + 1, next.to, stm, CarverTypes.FIRSTCOLUMNMISSING, tab.get(n));
+        rollbackjournal = ByteBuffer.allocateDirect((int) size);
 
-			}
-
-		} // end of tables ( component fingerprint )
+        Future<Integer> result = file.read(rollbackjournal, 0); // position = 0
 
-		AppLog.debug("End of journal parse");
-		
-	}
-	
-	/**
-	 *  This method is used to update tables in the user interface (in GUI mode).
-	 */
-	public void output()
-	{
-		if (job.gui != null) {
+        while (!result.isDone()) {
 
-			// make a diff between the rolback journal and the database
-			Map<String, DatabaseComparator.TableDiff> differences = DatabaseComparator.compare(job.resultlist, this.resultlist, 2);
+            // we can do something in between or we can do nothing ;-).
+        }
 
-			for (DatabaseComparator.TableDiff diff : differences.values()) {
-				System.out.println(diff);
-
-				System.out.println("  Inserted:" + diff.inserted.size());
-				diff.inserted.forEach(row -> System.out.println("    " + row));
+        // set filepointer to the beginning of the file
+        rollbackjournal.position(0);
 
-				System.out.println("  Deleted:" + diff.deleted.size());
-				//diff.deleted.forEach(row -> System.out.println("    " + row));
+    }
 
-				System.out.println("  Modified:" + diff.modified.size());
-				diff.modified.forEach(row -> System.out.println("    " + row));
-			}
-
-			// journal entries 
-			Enumeration<String> tables = this.resultlist.keys();
-
+    /**
+     * Starting with the current position of the RollbackJournal-ByteBuffer
+     * <p>
+     * Read the next DB page.
+     *
+     * @return
+     */
+    protected ByteBuffer readPage() {
 
-			/* finally, we can update the TableView for each table */
-			while(tables.hasMoreElements())
-			{	
-				String tablename = tables.nextElement();
-		        /* get tree path, i.e. /databases/02-05.db/users */
-				String rpath = job.guiroltab.get(tablename);
-
-				ObservableList<ObservableList<String>> rs = resultlist.get(tablename);
-
-				//resultlist.get(tablename).getFirst().set(1,"BLBABLBA");
-
-				//for(String d : differences.keySet())
-				//{
-				//	if(tablename.equals(d)){
-
-				//		DatabaseComparator.TableDiff td = differences.get(d);
-				//		List<ObservableList<String>> del = td.getConfirmedDeletes();
-				//		System.out.println(" test " + rs.get(2));
-				//	}
-				//}
-
-
-
-				job.gui.update_table(rpath,resultlist.get(tablename),hexdumplist.get(tablename),false);
-				
-			}
-		} 
-
-	}
-
-	/**
-	 * Check the BitSet for gaps, i.e. regions we still have to carve.
-	 * 
-	 * @return
-	 */
-	public LinkedList<Gap> findGaps() {
-		LinkedList<Gap> gaps = new LinkedList<Gap>();
-
-		int from = 0;
-
-		/* Are there any regions left in the page? */
-		for (int i = 0; i < ps; i++) {
-
-			if (!visit.get(i)) {
-				from = i;
-
-				int to = i;
-
-				while (!visit.get(++i) && i < (ps - 1)) {
-					to++;
-				}
-
-				if (to - from > 10) {
-
-					/* check for zero bytes */
-					boolean isNull = false;
-					if (buffer.get(from) == 0) {
-						isNull = true;
-						for (int index = from; index < to; index++) {
-							if (0 != buffer.get(index))
-								isNull = false;
-						}
-					}
-					// skip NULL-Byte areas - mark as visited
-					if (isNull)
-						visit.set(from, to);
-					else {
-
-						gaps.add(new Gap(from, to));
-					}
-				}
-				from = i;
+        byte[] page = new byte[ps];
 
-			}
+        rollbackjournal.get(page);
 
-		} // end of finding gaps in BitSet
+        ByteBuffer content = ByteBuffer.wrap(page);
 
-		return gaps;
-	}
+        return content;
+    }
 
-	/**
-	 * This method is called to carve a data page for records.
-	 * 
-	 * @param content page content as hex string
-	 */
-	public void carve(String content, Carver crv) {
+    protected ByteBuffer readPage(int offset) {
 
-		Carver c = crv;
+        byte[] page = new byte[ps];
 
-		if (null == c)
-			/* no type could be found in the first two bytes */
-			/* Maybe the whole page was dropped because of a drop component command? */
-			/* start carving on the complete page */
-			c = new Carver(job, buffer, content, visit, pagenumber_maindb);
-		c.recordCellLayout = false;   // page offsets refer to the db, not to this file
+        rollbackjournal.position(offset);
+        rollbackjournal.get(page);
 
-		// Matcher mat = null;
-		// boolean match = false;
+        ByteBuffer content = ByteBuffer.wrap(page);
 
-		/* try to get component schema for the current page, if possible */
-		TableDescriptor tdesc = null;
-		if (job.pages.length > pagenumber_maindb) {
-			AbstractDescriptor ad = job.pages[pagenumber_maindb];
-			if (ad instanceof TableDescriptor)
-				tdesc = (TableDescriptor) ad;
-		}
+        return content;
+    }
 
-		List<TableDescriptor> tab = tables;
-		AppLog.debug(" tables :: " + tables.size());
+    /**
+     * This method is called to carve a data page for records.
+     *
+     * @param content page content as hex string
+     */
+    public void carve(ByteBuffer buffer, String content, Carver crv) {
+
+        Carver c = crv;
+
+        if (null == c)
+            /* no type could be found in the first two bytes */
+            /* Maybe the whole page was dropped because of a drop component command? */
+            /* start carving on the complete page */ c = new Carver(job, buffer, content, visit, ps);
+        c.recordCellLayout = false;   // page offsets refer to the db, not to this file
+
+
+        /* try to get component schema for the current page, if possible */
+        TableDescriptor tdesc = null;
+        if (job.pages.length > ps) {
+            AbstractDescriptor ad = job.pages[ps];
+            if (ad instanceof TableDescriptor) tdesc = (TableDescriptor) ad;
+        }
+
+        List<TableDescriptor> tab = tables;
+        AppLog.debug(" tables :: " + tables.size());
+
+        if (null != tdesc) {
+            /* there is a schema for this page */
+            tab = new LinkedList<TableDescriptor>();
+            tab.add(tdesc);
+            AppLog.debug(" added tdsec ");
+        } else {
+            AppLog.warning(" No component description!");
+            tab = tables;
+        }
 
-		if (null != tdesc) {
-			/* there is a schema for this page */
-			tab = new LinkedList<TableDescriptor>();
-			tab.add(tdesc);
-			AppLog.debug(" added tdsec ");
-		} else {
-			AppLog.warning(" No component description!");
-			tab = tables;
-		}
+        LinkedList<Gap> gaps = findGaps();
+        if (gaps.size() == 0) {
+            AppLog.debug("no gaps anymore. Stopp search");
+            return;
+        }
 
-		LinkedList<Gap> gaps = findGaps();
-		if (gaps.size() == 0) {
-			AppLog.debug("no gaps anymore. Stopp search");
-			return;
-		}
+        /* try out all component schema(s) */
+        for (int n = 0; n < tab.size(); n++) {
+            tdesc = tab.get(n);
+            AppLog.debug("pagenumber :: " + pagenumber_maindb + " component size :: " + tab.size());
+            AppLog.debug("n " + n);
+            // TableDescriptor tdb = tab.get(n);
 
-		/* try out all component schema(s) */
-		for (int n = 0; n < tab.size(); n++) {
-			tdesc = tab.get(n);
-			AppLog.debug("pagenumber :: " + pagenumber_maindb + " component size :: " + tab.size());
-			AppLog.debug("n " + n);
-			// TableDescriptor tdb = tab.get(n);
+            /* access pattern for a particular component */
+            String tablename = tab.get(n).tblname;
+            if (tablename.startsWith("fqlite_freelist")) continue;
+            /* create matcher object for constraint check */
+            SerialTypeMatcher stm = new SerialTypeMatcher(buffer);
 
-			/* access pattern for a particular component */
-			String tablename = tab.get(n).tblname;
-			AppLog.debug("Check component : " + tablename);
-			if (tablename.startsWith("fqlite_freelist"))
-				continue;
-			/* create matcher object for constraint check */
-			SerialTypeMatcher stm = new SerialTypeMatcher(buffer);
+            gaps = findGaps();
 
-			gaps = findGaps();
+            for (int a = 0; a < gaps.size(); a++) {
 
-			for (int a = 0; a < gaps.size(); a++) {
+                Gap next = gaps.get(a);
 
-				Gap next = gaps.get(a);
+                if (next.to - next.from > 10)
+                    /* do we have at least one match? */
+                    if (c.carve(next.from + 4, next.to, stm, CarverTypes.NORMAL, tab.get(n)) != Global.CARVING_ERROR) {
+                        AppLog.debug("*****************************  STEP NORMAL finished with matches");
 
-				if (next.to - next.from > 10)
-					/* do we have at least one match? */
-					if (c.carve(next.from + 4, next.to, stm, CarverTypes.NORMAL, tab.get(n)) != Global.CARVING_ERROR) {
-						AppLog.debug("*****************************  STEP NORMAL finished with matches");
+                    }
+            }
 
-					}
-			}
+            gaps = findGaps();
 
-			gaps = findGaps();
+            for (int a = 0; a < gaps.size(); a++) {
 
-			for (int a = 0; a < gaps.size(); a++) {
+                Gap next = gaps.get(a);
 
-				Gap next = gaps.get(a);
+                if (c.carve(next.from + 4, next.to, stm, CarverTypes.COLUMNSONLY, tab.get(n)) != Global.CARVING_ERROR) {
+                    AppLog.debug("*****************************  STEP COLUMNSONLY finished with matches");
 
-				if (c.carve(next.from + 4, next.to, stm, CarverTypes.COLUMNSONLY, tab.get(n)) != Global.CARVING_ERROR) {
-					AppLog.debug("*****************************  STEP COLUMNSONLY finished with matches");
+                }
+            }
 
-				}
-			}
+            gaps = findGaps();
 
-			gaps = findGaps();
+            for (int a = 0; a < gaps.size(); a++) {
 
-			for (int a = 0; a < gaps.size(); a++) {
+                Gap next = gaps.get(a);
 
-				Gap next = gaps.get(a);
+                if (c.carve(next.from + 4, next.to, stm, CarverTypes.FIRSTCOLUMNMISSING, tab.get(n)) != Global.CARVING_ERROR) {
+                    AppLog.debug("*****************************  STEP FIRSTCOLUMNMISSING finished with matches");
 
-				if (c.carve(next.from + 4, next.to, stm, CarverTypes.FIRSTCOLUMNMISSING, tab.get(n)) != Global.CARVING_ERROR) {
-					AppLog.debug("*****************************  STEP FIRSTCOLUMNMISSING finished with matches");
+                }
 
-				}
+            }
 
-			}
+            /**
+             * When a record deletion occurs, the first 2 bytes of the cell are set to the
+             * offset value of next free block and latter 2 bytes covers the length of the
+             * current free block. Because of this, the first 4 bytes of a deleted cell
+             * differ startRegion from the normal data. Accordingly, we need a different approach
+             * to recover the data records.
+             *
+             * In most cases, at least the header length information is overwritten.
+             * This, sometimes, also overwrites the first column type field.
+             *
+             * We have two cases:
+             *
+             * (1) only the first column of the header is missing, but the rest of the
+             * header is intact.
+             *
+             * (2) Both the header length field plus the first column are overwritten.
+             *
+             * [cell size | rowid | header size | header bytes | payload ]
+             *
+             * for a deleted cell looks maybe like this
+             *
+             * [offset of next free block | length of the current free block | ]
+             */
 
-		}
-	}
+            /* There are still gaps? */
+            gaps = findGaps();
+
+            for (int a = 0; a < gaps.size(); a++) {
+
+                Gap next = gaps.get(a);
+
+                /* one last try with 4+1 instead of 4 Bytes */
+                c.carve(next.from + 4 + 1, next.to, stm, CarverTypes.FIRSTCOLUMNMISSING, tab.get(n));
+
+            }
+
+        } // end of tables ( component fingerprint )
+
+        AppLog.debug("End of journal parse");
+
+    }
+
+    /**
+     * This method is used to update tables in the user interface (in GUI mode).
+     */
+    public void output() {
+        if (job.gui != null) {
+
+            // make a diff between the rolback journal and the database
+            Map<String, DatabaseComparator.TableDiff> differences = DatabaseComparator.compare(job.resultlist, this.resultlist, 2);
+
+            for (DatabaseComparator.TableDiff diff : differences.values()) {
+                System.out.println(diff);
+
+                System.out.println("  Inserted:" + diff.inserted.size());
+                diff.inserted.forEach(row -> System.out.println("    " + row));
+
+                System.out.println("  Deleted:" + diff.deleted.size());
+                //diff.deleted.forEach(row -> System.out.println("    " + row));
+
+                System.out.println("  Modified:" + diff.modified.size());
+                diff.modified.forEach(row -> System.out.println("    " + row));
+            }
+
+            // journal entries
+            Enumeration<String> tables = this.resultlist.keys();
+
+
+            /* finally, we can update the TableView for each table */
+            while (tables.hasMoreElements()) {
+                String tablename = tables.nextElement();
+                /* get tree path, i.e. /databases/02-05.db/users */
+                String rpath = job.guiroltab.get(tablename);
+
+                ObservableList<ObservableList<String>> rs = resultlist.get(tablename);
+
+                //resultlist.get(tablename).getFirst().set(1,"BLBABLBA");
+
+                //for(String d : differences.keySet())
+                //{
+                //	if(tablename.equals(d)){
+
+                //		DatabaseComparator.TableDiff td = differences.get(d);
+                //		List<ObservableList<String>> del = td.getConfirmedDeletes();
+                //		System.out.println(" test " + rs.get(2));
+                //	}
+                //}
+
+
+                job.gui.update_table(rpath, resultlist.get(tablename), hexdumplist.get(tablename), false);
+
+            }
+        }
+
+    }
+
+    /**
+     * Check the BitSet for gaps, i.e. regions we still have to carve.
+     *
+     * @return
+     */
+    public LinkedList<Gap> findGaps() {
+        LinkedList<Gap> gaps = new LinkedList<Gap>();
+
+        int from = 0;
+
+        /* Are there any regions left in the page? */
+        for (int i = 0; i < ps; i++) {
+
+            if (!visit.get(i)) {
+                from = i;
+
+                int to = i;
+
+                while (!visit.get(++i) && i < (ps - 1)) {
+                    to++;
+                }
+
+                if (to - from > 10) {
+
+                    /* check for zero bytes */
+                    boolean isNull = false;
+                    if (buffer.get(from) == 0) {
+                        isNull = true;
+                        for (int index = from; index < to; index++) {
+                            if (0 != buffer.get(index)) isNull = false;
+                        }
+                    }
+                    // skip NULL-Byte areas - mark as visited
+                    if (isNull) visit.set(from, to);
+                    else {
+
+                        gaps.add(new Gap(from, to));
+                    }
+                }
+                from = i;
+
+            }
+
+        } // end of finding gaps in BitSet
+
+        return gaps;
+    }
+
+    /**
+     * This method is called to carve a data page for records.
+     *
+     * @param content page content as hex string
+     */
+    public void carve(String content, Carver crv) {
+
+        Carver c = crv;
+
+        if (null == c)
+            /* no type could be found in the first two bytes */
+            /* Maybe the whole page was dropped because of a drop component command? */
+            /* start carving on the complete page */ c = new Carver(job, buffer, content, visit, pagenumber_maindb);
+        c.recordCellLayout = false;   // page offsets refer to the db, not to this file
+
+        // Matcher mat = null;
+        // boolean match = false;
+
+        /* try to get component schema for the current page, if possible */
+        TableDescriptor tdesc = null;
+        if (job.pages.length > pagenumber_maindb) {
+            AbstractDescriptor ad = job.pages[pagenumber_maindb];
+            if (ad instanceof TableDescriptor) tdesc = (TableDescriptor) ad;
+        }
+
+        List<TableDescriptor> tab = tables;
+        AppLog.debug(" tables :: " + tables.size());
+
+        if (null != tdesc) {
+            /* there is a schema for this page */
+            tab = new LinkedList<TableDescriptor>();
+            tab.add(tdesc);
+            AppLog.debug(" added tdsec ");
+        } else {
+            AppLog.warning(" No component description!");
+            tab = tables;
+        }
+
+        LinkedList<Gap> gaps = findGaps();
+        if (gaps.size() == 0) {
+            AppLog.debug("no gaps anymore. Stopp search");
+            return;
+        }
+
+        /* try out all component schema(s) */
+        for (int n = 0; n < tab.size(); n++) {
+            tdesc = tab.get(n);
+            AppLog.debug("pagenumber :: " + pagenumber_maindb + " component size :: " + tab.size());
+            AppLog.debug("n " + n);
+            // TableDescriptor tdb = tab.get(n);
+
+            /* access pattern for a particular component */
+            String tablename = tab.get(n).tblname;
+            AppLog.debug("Check component : " + tablename);
+            if (tablename.startsWith("fqlite_freelist")) continue;
+            /* create matcher object for constraint check */
+            SerialTypeMatcher stm = new SerialTypeMatcher(buffer);
+
+            gaps = findGaps();
+
+            for (int a = 0; a < gaps.size(); a++) {
+
+                Gap next = gaps.get(a);
+
+                if (next.to - next.from > 10)
+                    /* do we have at least one match? */
+                    if (c.carve(next.from + 4, next.to, stm, CarverTypes.NORMAL, tab.get(n)) != Global.CARVING_ERROR) {
+                        AppLog.debug("*****************************  STEP NORMAL finished with matches");
+
+                    }
+            }
+
+            gaps = findGaps();
+
+            for (int a = 0; a < gaps.size(); a++) {
+
+                Gap next = gaps.get(a);
+
+                if (c.carve(next.from + 4, next.to, stm, CarverTypes.COLUMNSONLY, tab.get(n)) != Global.CARVING_ERROR) {
+                    AppLog.debug("*****************************  STEP COLUMNSONLY finished with matches");
+
+                }
+            }
+
+            gaps = findGaps();
+
+            for (int a = 0; a < gaps.size(); a++) {
+
+                Gap next = gaps.get(a);
+
+                if (c.carve(next.from + 4, next.to, stm, CarverTypes.FIRSTCOLUMNMISSING, tab.get(n)) != Global.CARVING_ERROR) {
+                    AppLog.debug("*****************************  STEP FIRSTCOLUMNMISSING finished with matches");
+
+                }
+
+            }
+
+        }
+    }
 
 }

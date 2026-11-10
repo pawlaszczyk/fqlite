@@ -34,6 +34,9 @@ FQLite allows you to:
 * missing row numbers (rowid gaps), deleted index entries and SHA-256 evidence hashes with export manifests
 * case mode: scan a folder for SQLite files, overview and search across all open databases, timeline of all date columns
 * triggers explained in plain English, including forensic notes
+* audit report: header and page-structure checks, unreferenced pages, secure_delete traces, journal state
+* WAL frames verified by checksum (current, superseded, uncommitted, stale, invalid) and "time travel" to the state after each commit
+* class and confidence (high/medium/low, with reasons) for every recovered record
 * command palette (Ctrl+K / Cmd+K), adjustable limits and font sizes
 * integrated SQL-Analyser 
 * HTML-export functionality (since. 4.0)
@@ -140,6 +143,12 @@ Further additions:
   close). Every export writes a `.manifest.json` with the hashes of the evidence and the export.
 * **Case menu**: open a folder as a case, overview of all open databases, search across all of
   them (live, recovered, WAL, journal) and a combined **timeline** of all date columns.
+* **Audit report** (Analyze menu): consistency of the header (page count, change counter, reserved bytes), the use of
+  every page including *unreferenced* pages, structural anomalies, traces of `secure_delete`, the state of the rollback
+  journal and of every WAL frame (checksums, salts, current / superseded / uncommitted / stale / invalid). The tab
+  **Time travel** writes the database state after any committed WAL transaction to a new file and opens it.
+* **Recovered records** (Forensic analysis): every recovered record with its class (older version, re-inserted,
+  deleted, unreferenced page, index entry), where it was found and a confidence (high / medium / low) with the reasons.
 * **Command palette**: press **Ctrl+K** (macOS: also Cmd+K) to search all menu commands and all
   tables of the open databases.
 * **Settings → Display & limits**: font size of the user interface and of hex dumps, size of the

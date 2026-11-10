@@ -72,8 +72,7 @@ public class WALReader{
 	/* total size of WAL-file in bytes */
 	long size;
 
-	/* File format version. Currently 3007000. */
-	
+	/* File format version. For example 3007000. */
 	int ffversion;
 	
 	/* pagesize */
@@ -125,7 +124,6 @@ public class WALReader{
 	ByteBuffer buffer;
 
 	public static List<TableDescriptor> tables = new LinkedList<TableDescriptor>();
-	/* this is a multi-threaded program -> all data are saved to the list first */
 
 	/* outputlist */
 	ConcurrentLinkedQueue<List<String>> output = new ConcurrentLinkedQueue<List<String>>();
@@ -146,11 +144,10 @@ public class WALReader{
 	}
 
 	
-	
-	
+
 	/**
 	 * This method is the main processing loop. First, the header is analysed.
-	 * Afterwards, all write-ahead frames are recovered.
+	 * Afterward, all write-ahead frames are recovered.
 	 * 
 	 */
 	public void parse() {
@@ -164,7 +161,6 @@ public class WALReader{
             throw new RuntimeException(e);
         }
 
-        System.out.println("parse WAL-File");
 		/*
 		 * We have to do this before we open the database because of the concurrent
 		 * access
@@ -269,8 +265,6 @@ public class WALReader{
 
 		AppLog.info("page size " + ps + " Bytes ");
 
-		
-	
 		/*
 		 * Offset 12 Size 4 Checkpoint sequence number 
 		 */
@@ -401,9 +395,7 @@ public class WALReader{
 		markWALVersions();
 		long end = System.currentTimeMillis();
 		System.out.println("WAL Import duration in ms: " + (end-start));
-		
-		//AppLog.info("Checkpoints " + checkpoints.toString());
-	
+
 	}
 	
 	
@@ -415,9 +407,11 @@ public class WALReader{
 	 * The finding is appended to the "[pll|hl]" column, the status is not changed.
 	 */
 	private void markWALVersions() {
+
 		// the GUI may already have prepended its line number to these rows: use RowLayout
 		int upd = 0, del = 0;
 		Map<Integer, List<long[]>> framesOfPage = new HashMap<>();
+
 		for (WALFrame f : framelist)
 			framesOfPage.computeIfAbsent(f.pagenumber, x -> new ArrayList<>()).add(new long[]{f.salt1, f.framenumber});
 
@@ -457,6 +451,7 @@ public class WALReader{
 				}
 			}
 		}
+
 		/* rows of the database file compared with the WAL: the db file holds the state of the last
 		 * checkpoint, the WAL the newer versions (NIST SFT-AO-05 for data of the main file) */
 		int dbUpd = 0, dbDel = 0;
@@ -464,6 +459,7 @@ public class WALReader{
 		for (WALFrame f : framelist)
 			if (f.salt1 == hsalt1 && f.salt2 == hsalt2)
 				firstFrameOfPage.merge(f.pagenumber, (long) f.framenumber, Math::min);
+
 		if (job != null && job.resultlist != null && job.ps > 0) {
 			for (String table : resultlist.keySet()) {
 				ObservableList<ObservableList<String>> walrows = resultlist.get(table);
@@ -506,13 +502,21 @@ public class WALReader{
 				}
 			}
 		}
+
+
 		AppLog.info("WAL version analysis: " + upd + " row version(s) superseded by an UPDATE, " + del + " row(s) deleted in a later frame; "
 				+ "db file: " + dbUpd + " row(s) updated and " + dbDel + " row(s) deleted in the WAL");
 	}
 
+	/**
+	 * Small helper function. Check whehter the number is positive.
+	 * @param s
+	 * @return
+	 */
 	private static boolean positiveNumber(String s) {
 		try { return s != null && Long.parseLong(s.trim()) > 0; } catch (NumberFormatException e) { return false; }
 	}
+
 
 	private static long number(String s) {
 		try { return Long.parseLong(s.trim()); } catch (NumberFormatException | NullPointerException e) { return -1; }
@@ -876,8 +880,14 @@ public class WALReader{
 	return 0;
 		
 	}
-	
-	
+
+	/**
+	 * Manages the result list for the tableview.
+	 * Creates a new one, if there is no live record for the table at the moment (first entry).
+	 * Otherwise, it is appending the row to the existing list.
+	 *
+	 * @param row
+	 */
 	private void updateResultSet(DataRow row)
 	{
 		// entry for table name already exists  

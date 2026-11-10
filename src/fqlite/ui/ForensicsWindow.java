@@ -50,7 +50,7 @@ public class ForensicsWindow {
 		this.job = job;
 		this.name = new File(job.path).getName();
 		stage.setTitle("Forensic analysis \u2014 " + name);
-		TabPane tabs = new TabPane(changedTab(), gapsTab(), indexTab(), evidenceTab());
+		TabPane tabs = new TabPane(recoveredTab(), changedTab(), gapsTab(), indexTab(), evidenceTab());
 		tabs.setTabClosingPolicy(TabPane.TabClosingPolicy.UNAVAILABLE);
 		Scene sc = new Scene(tabs, 1150, 620);
 		stage.setScene(sc);
@@ -91,6 +91,102 @@ public class ForensicsWindow {
 		}, "forensics");
 		t.setDaemon(true);
 		t.start();
+	}
+
+	private List<IndexCarver.Entry> carved;
+
+	/** the carved index entries (computed once, shared by two tabs) */
+	private synchronized List<IndexCarver.Entry> indexEntries() throws java.io.IOException {
+		if (carved == null)
+			carved = IndexCarver.carve(job);
+		return carved;
+	}
+
+	// ------------------------------------------------------------------ recovered records
+
+	private Tab recoveredTab() {
+		ObservableList<fqlite.forensics.RecordClassifier.Result> data = FXCollections.observableArrayList();
+		FilteredList<fqlite.forensics.RecordClassifier.Result> filtered = new FilteredList<>(data, x -> true);
+		TableView<fqlite.forensics.RecordClassifier.Result> tv = new TableView<>(filtered);
+		tv.getColumns().add(UiUtil.col("Table", fqlite.forensics.RecordClassifier.Result::table, 130));
+		tv.getColumns().add(UiUtil.col("rowid", r -> r.rowid() > 0 ? String.valueOf(r.rowid()) : "", 60));
+		tv.getColumns().add(UiUtil.col("Class", r -> r.kind().label, 115));
+		tv.getColumns().add(UiUtil.col("Confidence", r -> r.confidence().label + " (" + r.score() + ")", 95));
+		tv.getColumns().add(UiUtil.col("Found in", fqlite.forensics.RecordClassifier.Result::foundIn, 115));
+		tv.getColumns().add(UiUtil.col("Why", fqlite.forensics.RecordClassifier.Result::reasons, 430));
+		tv.getColumns().add(UiUtil.col("Location", fqlite.forensics.RecordClassifier.Result::location, 150));
+		tv.getColumns().add(UiUtil.col("Values", fqlite.forensics.RecordClassifier.Result::values, 360));
+		tv.setRowFactory(x -> new javafx.scene.control.TableRow<>() {
+			@Override
+			protected void updateItem(fqlite.forensics.RecordClassifier.Result r, boolean empty) {
+				super.updateItem(r, empty);
+				setStyle(empty || r == null ? "" : switch (r.confidence()) {
+				case HIGH -> "";
+				case MEDIUM -> "-fx-background-color: rgba(245,158,11,0.16);";
+				default -> "-fx-background-color: rgba(239,68,68,0.18);";
+				});
+				setTooltip(empty || r == null ? null : new javafx.scene.control.Tooltip(r.kind().label + ", confidence " + r.confidence().label
+						+ " (" + r.score() + "/100)\n\u2022 " + r.reasons().replace("; ", "\n\u2022 ")));
+			}
+		});
+		VBox.setVgrow(tv, Priority.ALWAYS);
+		javafx.scene.control.ComboBox<String> kind = new javafx.scene.control.ComboBox<>();
+		kind.getItems().add("all classes");
+		for (fqlite.forensics.RecordClassifier.Kind k : fqlite.forensics.RecordClassifier.Kind.values())
+			kind.getItems().add(k.label);
+		kind.setValue("all classes");
+		javafx.scene.control.ComboBox<String> conf = new javafx.scene.control.ComboBox<>();
+		conf.getItems().addAll("any confidence", "high", "medium", "low", "medium or low");
+		conf.setValue("any confidence");
+		javafx.scene.control.TextField text = new javafx.scene.control.TextField();
+		text.setPromptText("filter (table, values, reasons)");
+		Runnable apply = () -> filtered.setPredicate(r -> (kind.getValue().equals("all classes") || r.kind().label.equals(kind.getValue()))
+				&& (conf.getValue().equals("any confidence") || r.confidence().label.equals(conf.getValue())
+						|| (conf.getValue().equals("medium or low") && r.confidence() != fqlite.forensics.RecordClassifier.Confidence.HIGH))
+				&& (text.getText().isBlank() || (r.table() + " " + r.values() + " " + r.reasons()).toLowerCase()
+						.contains(text.getText().toLowerCase())));
+		kind.setOnAction(e -> apply.run());
+		conf.setOnAction(e -> apply.run());
+		text.textProperty().addListener((o, a, b) -> apply.run());
+		tv.setOnMouseClicked(e -> {
+			fqlite.forensics.RecordClassifier.Result r = tv.getSelectionModel().getSelectedItem();
+			if (e.getClickCount() != 2 || r == null)
+				return;
+			if (r.row() != null)
+				gui.navigateToRow(job, 0, r.table(), r.row());
+			else if (r.rowid() > 0)
+				new RowHistoryWindow(gui, job, r.table(), r.rowid()).show();
+		});
+		Label status = new Label();
+		Button export = new Button("Export CSV...");
+		export.setOnAction(e -> {
+			List<List<String>> rows = new ArrayList<>();
+			for (fqlite.forensics.RecordClassifier.Result r : filtered)
+				rows.add(List.of(r.table(), r.rowid() > 0 ? String.valueOf(r.rowid()) : "", r.kind().label, r.confidence().label,
+						String.valueOf(r.score()), r.foundIn(), r.reasons(), r.location(), r.values()));
+			UiUtil.exportCsv(stage, name + "-recovered-records", List.of("table", "rowid", "class", "confidence", "score", "found in",
+					"reasons", "location", "values"), rows, "classification of recovered records", name, List.of(job.path));
+		});
+		background(status, "Classifying recovered records", () -> fqlite.forensics.RecordClassifier.classify(job, indexEntries()), l -> {
+			data.setAll(l);
+			java.util.Map<String, Integer> m = new java.util.LinkedHashMap<>();
+			for (fqlite.forensics.RecordClassifier.Result r : l)
+				m.merge(r.kind().label, 1, Integer::sum);
+			long low = l.stream().filter(r -> r.confidence() == fqlite.forensics.RecordClassifier.Confidence.LOW).count();
+			StringBuilder sb = new StringBuilder();
+			m.forEach((k, v) -> sb.append(sb.length() > 0 ? ", " : "").append(v).append(" ").append(k));
+			status.setText(l.size() + " record(s): " + sb + (low > 0 ? "; " + low + " with low confidence" : ""));
+		});
+		VBox b = box(UiUtil.hint("Every recovered record with its class (older version of a live row, re-inserted, deleted, record on an "
+				+ "unreferenced page, carved index entry), where it was found and a confidence (high / medium / low) with the reasons: "
+				+ "completeness of the record, reconstructed header or lost rowid, values that do not fit the column types or contain "
+				+ "unreadable characters. Double-click shows the record in its table."),
+				bar(kind, conf, text, export), tv, status);
+		HBox.setHgrow(text, Priority.ALWAYS);
+		conf.setMinWidth(Region.USE_PREF_SIZE);
+		kind.setMinWidth(Region.USE_PREF_SIZE);
+		export.setMinWidth(Region.USE_PREF_SIZE);
+		return new Tab("Recovered records", b);
 	}
 
 	// ------------------------------------------------------------------ changed rows
@@ -247,7 +343,7 @@ public class ForensicsWindow {
 					List.of("index", "table", "indexed values", "rowid", "row", "confidence", "found in", "file offset"), rows,
 					"deleted index entries", name, List.of(job.path));
 		});
-		background(status, "Carving index pages", () -> IndexCarver.carve(job), l -> {
+		background(status, "Carving index pages", this::indexEntries, l -> {
 			data.setAll(l);
 			long none = l.stream().filter(x -> x.rowState().contains("no other trace")).count();
 			status.setText(l.size() + " deleted index entr" + (l.size() == 1 ? "y" : "ies") + (none > 0 ? ", " + none + " of a row with no other trace" : ""));

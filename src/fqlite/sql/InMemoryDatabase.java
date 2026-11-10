@@ -107,9 +107,9 @@ public class InMemoryDatabase {
 
         for (int i = 0; i < columnNames.size(); i++) {
             sql.append(" ")
-                    .append(columnNames.get(i))
+                    .append(fqlite.export.SQLiteDatabaseCreator.quoteIdentifier(columnNames.get(i)))
                     .append(" ")
-                    .append(columnTypes.get(i));
+                    .append(fqlite.export.SQLiteDatabaseCreator.safeColumnType(columnTypes.get(i)));
 
             if (i < columnNames.size() - 1) {
                 sql.append(",");
@@ -226,7 +226,7 @@ public class InMemoryDatabase {
 
             for (int i = 0; i < colNames.size(); i++) {
                 sql.append(" ")
-                        .append(colNames.get(i));
+                        .append(fqlite.export.SQLiteDatabaseCreator.quoteIdentifier(colNames.get(i)));
 
                 if (i < colNames.size() - 1) {
                     sql.append(",");

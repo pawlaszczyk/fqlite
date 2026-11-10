@@ -1,29 +1,8 @@
-# FQLite 5.2
--  
-- CSV/HTML export: new columns `_SOURCE` (file the row was read from, SFT-CA-13) and `_CELLS` (file offset and length of every value of a recovered row, SFT-AO-06)
--  deleted records that are older versions of a live record are flagged "↻ old version (UPDATE)" (SFT-AO-04); carved records without rowid are matched by content
--  WAL: row versions are compared across frames and with the database file – "↻ updated in WAL frame n" / "✗ deleted in WAL frame n" (SFT-AO-05)
--  Analyze > Forensic analysis: changed rows (every version of a row across database file, WAL, journal and carved records; carved records without rowid matched by content), "Row history" in the table context menu
--  missing row numbers: rowid gaps and numbers up to sqlite_sequence, cross-checked with the recovered records
--  deleted index entries: carved from freeblocks, unallocated area and freed index pages (reconstructed freeblock entries only when unique), with the state of their row
--  evidence: SHA-256 of database, -wal, -journal, -shm at open, verified on close / exit (warning if changed), "Verify now" and comparison with an expected hash; every export writes <file>.manifest.json (tool, time UTC, evidence and export hashes)
--  Case menu: open a folder as a case (scan for SQLite files with name / size conditions, open the chosen ones one after the other), overview of all open databases, search over all open databases (live, recovered, WAL, journal)
--  Timeline (Analyze / Case): date columns detected by name and value (Unix s/ms/us/ns, Cocoa, WebKit, FILETIME, HFS+, .NET, OLE, ISO text), events of all open databases incl. deleted records and WAL / journal versions, density chart, CSV export
--  BLOBs: compressed content is unpacked transparently – gzip, zlib, zstd, LZ4 (frame, legacy, Apple "bv41") and LZFSE/LZVN (Apple "bvx*"), also nested; own Java decoders without native libraries, size limit against decompression bombs, damaged streams are decoded up to the error
--  BLOBs: Apple typedstream (NSArchiver, e.g. iMessage `attributedBody`) is decoded – text, attribute runs, NSDictionary/NSArray/NSNumber/NSData/NSDate; NSKeyedArchiver archives (binary and XML plist) are resolved
--  "Decode column into fields…" (table context menu): fields of plist / NSKeyedArchiver / typedstream / protobuf / JSON values (also compressed or Base64-wrapped) are listed with frequency and example and can be added as additional columns (view only); hex pane badge, cell tooltip and BinViewer show the decoded content
--  Analyze > Triggers explained: every trigger (also recovered schema entries) in plain English with forensic notes (automatic deletions, history tables, blocked changes), CSV export
--  command palette (Ctrl+K / Cmd+K): all menu commands and all tables of the open databases
--  Settings > Display & limits: font sizes of the user interface and the hex dumps, hex preview size, BLOB decoding limits, sample size for field decoding, maximum missing row numbers and case-search hits
--  bug fix (macOS): moving the mouse over a table of the main window brought it in front of other FQLite windows (cell tooltips of an inactive window)
--  bug fix: WAL / journal version analysis read shifted fields when the GUI had already numbered the rows (DB rows flagged wrongly or not at all in the GUI)
--  bug fix: stale copies of live records were kept when another column held the same number as the rowid
--  table view: older versions of a row are highlighted amber, deleted records red; context menu "Go to current version" / "Go to newer version (WAL frame n)" jumps to the current row
--  WAL panel: new "Transactions" tab – frames grouped into transactions per WAL generation, with commit size and state (SFT-AO-08)
--  rollback journal: rows of the journal snapshot are compared with the database – "✗ deleted after journal snapshot (not in database)" / "↻ old version (UPDATE), newer version in database" (SFT-AO-04/05)
--  carved copies of live records whose INTEGER PRIMARY KEY was lost (b-tree page splits) are recognised as stale copies and no longer reported as deleted
--  bug fix: deleted records of tables with an INTEGER PRIMARY KEY were misparsed ("header≠payload", columns shifted) when the freeblock header covered only payload length + rowid + header length (e.g. rowid >= 128); the reconstructed payload length was also too short and not varint-encoded
--  bug fix: the last frame of a WAL file was never analysed
--  bug fix: records on WAL/journal pages beyond the end of the database file were lost (rowid not read)
--  header: journal mode label corrected (bytes 18/19 only distinguish legacy/WAL; 0 is invalid)
--  WAL/journal analyzer no longer calls System.exit() when a file is missing
+# FQLite 5.21
+
+-  Analyze > Audit report: header checks (page count in the header vs. file, change counter, reserved bytes, encoding, auto-vacuum), use of every page (b-tree, overflow, freelist, pointer map, unreferenced), freelist consistency, structural anomalies (loops, invalid pointers), traces of secure_delete (freeblocks / freed pages wiped with zeros), rollback journal (hot / persisted header, page images, checksums); CSV export
+-  WAL frames are verified like SQLite does on recovery (header checksum, salts, cumulative frame checksums): state per frame current / superseded / uncommitted / stale (earlier generation) / invalid, comparison with mxFrame and nBackfill of the -shm file; the "Transactions" tab of the WAL panel uses the verified states
+-  WAL time travel: the database state after every committed transaction is written to a new file (with manifest) and opened as a separate database; pages that may be newer because of an earlier checkpoint are reported
+-  Forensic analysis > Recovered records: class (older version, re-inserted, deleted, unreferenced page, index entry), where it was found (freeblock, unallocated area, freelist page, ...) and confidence high / medium / low with the reasons for every recovered record; also in the table context menu ("Classification and confidence...")
+-  Fix: NodeQL / SQL analyzer and export to SQLite failed with "near "REFERENCESconversations": syntax error" for columns without a declared type but with a column constraint (e.g. `conversation_id REFERENCES conversations(id)`); such columns now get BLOB affinity, column names are quoted in the generated CREATE TABLE / INSERT statements (keywords such as "order" work as column names)
+-  Fix: in UTF-16 databases (UTF-16LE/BE), tables and indexes whose CREATE statement has at most 28 characters (e.g. `CREATE TABLE u(a,b)`) were not recognised; their rows were not shown under the table (found while checking the NIST SFT-01/02 test cases)

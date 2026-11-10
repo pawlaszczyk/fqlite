@@ -414,12 +414,14 @@ public class GUI extends Application {
 		mntmForensics.setOnAction(e -> showForensicsWindow());
 		MenuItem mntmTimeline = new MenuItem("Timeline...");
 		mntmTimeline.setOnAction(e -> new fqlite.ui.TimelineWindow(this).show());
+		MenuItem mntmAudit = new MenuItem("Audit report (header, pages, WAL frames, time travel)...");
+		mntmAudit.setOnAction(e -> showAuditWindow());
 		MenuItem mntmTriggers = new MenuItem("Triggers explained...");
 		mntmTriggers.setOnAction(e -> fqlite.ui.TriggerWindow.show(this));
 		MenuItem mntmPalette = new MenuItem("Command palette...");
 		mntmPalette.setAccelerator(KeyCombination.keyCombination("Shortcut+K"));
 		mntmPalette.setOnAction(e -> fqlite.ui.CommandPalette.show(this));
-		mnAnalyze.getItems().addAll(mntmSQL, mntmHex, mntmSchema, mntmTriggers, new SeparatorMenuItem(), mntmForensics, mntmTimeline,
+		mnAnalyze.getItems().addAll(mntmSQL, mntmHex, mntmSchema, mntmTriggers, new SeparatorMenuItem(), mntmForensics, mntmAudit, mntmTimeline,
 				new SeparatorMenuItem(), mntmBinViewer, new SeparatorMenuItem(), mntmPalette);
 
 		Menu mnCase = new Menu("Case");
@@ -2537,6 +2539,12 @@ public class GUI extends Application {
 				contextMenu.getItems().add(new SeparatorMenuItem());
 			contextMenu.getItems().add(historyItem);
 		}
+		MenuItem classItem = classificationMenuItem(mytable, selection);
+		if (classItem != null) {
+			if (versionItem == null && historyItem == null)
+				contextMenu.getItems().add(new SeparatorMenuItem());
+			contextMenu.getItems().add(classItem);
+		}
 		if (!selection.isEmpty() && selection.get(0).getTableColumn() != null
 				&& (fqlite.ui.DerivedColumns.isDerived(selection.get(0).getTableColumn())
 						|| fqlite.ui.DerivedColumns.baseIndex(mytable, selection.get(0).getColumn()) >= 5))
@@ -2663,6 +2671,59 @@ public class GUI extends Application {
 
 	public Stage getStage() {
 		return stage;
+	}
+
+	/** opens the hex viewer at a file offset */
+	public void showInHexViewer(String path, long offset) {
+		try {
+			HEXVIEW.go2(path, offset);
+		} catch (Exception e) {
+			AppLog.error(e.getMessage());
+		}
+	}
+
+	private void showAuditWindow() {
+		Job job = selectedJob();
+		if (job == null) {
+			Alert alert = new Alert(AlertType.INFORMATION);
+			alert.setTitle("Audit report");
+			alert.setHeaderText(null);
+			alert.setContentText("Please select a database in the tree first.");
+			alert.showAndWait();
+			return;
+		}
+		new fqlite.ui.AuditWindow(this, job).show();
+	}
+
+	/** context menu: class and confidence of a recovered record */
+	@SuppressWarnings("rawtypes")
+	private MenuItem classificationMenuItem(FQTableView table, ObservableList<TablePosition> selection) {
+		if (table == null || table.job == null || table.source != 0 || selection == null || selection.isEmpty())
+			return null;
+		Object item = table.getItems().get(selection.get(0).getRow());
+		if (!(item instanceof List<?> l))
+			return null;
+		@SuppressWarnings("unchecked")
+		List<String> row = (List<String>) l;
+		String st = fqlite.forensics.RowLayout.status(row);
+		if (st == null)
+			return null;
+		MenuItem mi = new MenuItem("Classification and confidence...");
+		mi.setOnAction(e -> {
+			fqlite.forensics.RecordClassifier.Result r = fqlite.forensics.RecordClassifier.classifyRow(table.job, table.tablename, row);
+			Alert a = new Alert(AlertType.INFORMATION);
+			a.setTitle("Recovered record");
+			if (r == null) {
+				a.setHeaderText("Regular record");
+				a.setContentText("This is a live record of the table (referenced by the b-tree).");
+			} else {
+				a.setHeaderText(r.kind().label + " \u2014 confidence " + r.confidence().label + " (" + r.score() + "/100)");
+				a.setContentText("Found in: " + r.foundIn() + ", " + r.location() + "\n\n\u2022 " + r.reasons().replace("; ", "\n\u2022 "));
+			}
+			a.getDialogPane().setMinWidth(560);
+			a.showAndWait();
+		});
+		return mi;
 	}
 
 	public MenuBar getMenuBar() {
