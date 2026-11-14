@@ -33,6 +33,8 @@ import fqlite.nodeql.NodeQlBuilderWindow;
 import fqlite.rag.*;
 import fqlite.sql.DBManager;
 import fqlite.sql.InMemoryDatabase;
+import fqlite.sql.QueryableDatabase;
+import fqlite.sql.ReadOnlySqliteDatabase;
 import fqlite.types.*;
 import fqlite.ui.*;
 import fqlite.hex.HexViewManager;
@@ -366,6 +368,9 @@ public class GUI extends Application {
 		mntmSchema.setOnAction(e -> doAnalyzeSchema());
 		mntmSchema.setDisable(true);
 
+		MenuItem mntLighthouse = new MenuItem("Open in Lighthouse (read-only, large databases)...");
+		mntLighthouse.setOnAction(e -> openLighthouseDirect(null));
+
 		MenuItem mntclose = new MenuItem("Close All");
 		mntclose.setAccelerator(KeyCombination.keyCombination("Ctrl+D"));
 		mntclose.setOnAction(e -> closeAll());
@@ -408,7 +413,17 @@ public class GUI extends Application {
 		Menu mnAnalyze = new Menu("Analyze");
 		Menu mnInfo = new Menu("Info");
 
-		mnFiles.getItems().addAll(mntopen, sep, mntclose, sep2, mntmProp, mntmExit);
+		Menu mnRecent = new Menu("Open Recent");
+		// The submenu is rebuilt whenever the list changes - not only when the
+		// File menu opens: on macOS the showing events of menu bar menus are
+		// not reliable, the entries opened during a session were missing.
+		fillRecentMenu(mnRecent);
+		RecentFiles.addListener(() -> {
+			if (Platform.isFxApplicationThread()) fillRecentMenu(mnRecent);
+			else Platform.runLater(() -> fillRecentMenu(mnRecent));
+		});
+		mnFiles.setOnShowing(e -> fillRecentMenu(mnRecent));
+		mnFiles.getItems().addAll(mntopen, mntLighthouse, mnRecent, sep, mntclose, sep2, mntmProp, mntmExit);
 		mnExport.getItems().addAll(cmExport, mntmExportDB, mntmHTML);
 		MenuItem mntmForensics = new MenuItem("Forensic analysis (row history, missing rows, index entries, evidence)...");
 		mntmForensics.setOnAction(e -> showForensicsWindow());
@@ -866,6 +881,7 @@ public class GUI extends Application {
 		NodeObject nd = node.getValue();
 		String tblname = nd.name;
 
+		nd.job.loadDeferredIndex(tblname);
 		ObservableList<ObservableList<String>> result = nd.job.resultlist.get(tblname);
 
 		for (TableDescriptor td : nd.job.headers) {
@@ -889,13 +905,23 @@ public class GUI extends Application {
 	 * Verwendet getDatabaseNode() — exakt wie showLLMWindow() und prepareLLM().
 	 */
 	private void initLlmForMapView(LocationWindow mapview) {
+		initLlmForMapView(mapview, null);
+	}
+
+	/**
+	 * Wie {@link #initLlmForMapView(LocationWindow)}, aber mit einer bereits
+	 * geöffneten Datenbank: Ist {@code directDb} gesetzt (Lighthouse-Datei
+	 * direkt und schreibgeschützt geöffnet), arbeitet das LLM auf dieser Datei,
+	 * und es wird keine In-Memory-Kopie aus dem Baum angelegt.
+	 */
+	private void initLlmForMapView(LocationWindow mapview, QueryableDatabase directDb) {
 
 		// Konfigurationsdatei prüfen — exakt wie in showLLMWindow()
 		if (!Files.exists(Global.llmconfig)) return;
 
 		// Datenbank-Node ermitteln — exakt wie in showLLMWindow()
-		TreeItem<NodeObject> selected = getDatabaseNode();
-		if (selected == null) return;
+		TreeItem<NodeObject> selected = directDb == null ? getDatabaseNode() : null;
+		if (directDb == null && selected == null) return;
 
 		Properties props = new Properties();
 		try (InputStream input = new FileInputStream(Global.llmconfig.toFile())) {
@@ -917,13 +943,18 @@ public class GUI extends Application {
 							// RAGPipeline mit Modellpfad initialisieren — wie in prepareRAG()
 							RAGPipeline pipeline = new RAGPipeline(finalModelPath);
 
-							// InMemoryDatabase ermitteln oder neu anlegen — wie in prepareRAG()
-							String dbname = finalSelected.getValue().name;
-							InMemoryDatabase mdb;
-							if (DBManager.exists(dbname)) {
-								mdb = DBManager.get(dbname);
+							// Direkt geöffnete Datei verwenden, sonst InMemoryDatabase
+							// ermitteln oder neu anlegen — wie in prepareRAG()
+							QueryableDatabase mdb;
+							if (directDb != null) {
+								mdb = directDb;
 							} else {
-								mdb = createInMemoryDB(finalSelected.getValue());
+								String dbname = finalSelected.getValue().name;
+								if (DBManager.exists(dbname)) {
+									mdb = DBManager.get(dbname);
+								} else {
+									mdb = createInMemoryDB(finalSelected.getValue());
+								}
 							}
 
 							if (mdb == null) {
@@ -957,6 +988,140 @@ public class GUI extends Application {
 		}
 	}
 
+
+	/**
+	 * Opens a Lighthouse database (written by the ETSI importer) directly and
+	 * read-only in the Lighthouse plugin, without fqlite's recovery.
+	 *
+	 * <p>In contrast to opening it via "Open Database..." and the Lighthouse
+	 * button, no records are recovered into memory and no in-memory SQLite
+	 * copy is created: the map is streamed from the file, and presets and
+	 * query assistant run their SQL against the file itself (see
+	 * {@link ReadOnlySqliteDatabase}). This makes databases of several
+	 * gigabytes usable. Deleted records are not shown in this mode; for those,
+	 * open the file via "Open Database..." as before.</p>
+	 *
+	 * @param f the database file, or {@code null} to ask the user
+	 */
+	/**
+	 * Fills "File > Open Recent" with the recently opened databases: a
+	 * database opens again the way it was opened (FQLite analysis or
+	 * Lighthouse); files that no longer exist are shown disabled.
+	 */
+	private void fillRecentMenu(Menu menu) {
+		menu.getItems().clear();
+		List<RecentFiles.Entry> entries = RecentFiles.list();
+		for (RecentFiles.Entry e : entries) {
+			File f = e.file();
+			String text = f.getName() + (e.mode() == RecentFiles.Mode.LIGHTHOUSE ? "  (Lighthouse)" : "")
+					+ "   \u2014   " + (f.getParent() != null ? f.getParent() : "");
+			MenuItem item = new MenuItem(text);
+			item.setMnemonicParsing(false);
+			item.setDisable(!f.isFile());
+			item.setOnAction(ev -> {
+				if (!f.isFile()) return;
+				if (e.mode() == RecentFiles.Mode.LIGHTHOUSE) openLighthouseDirect(f);
+				else open_db(f);
+			});
+			menu.getItems().add(item);
+		}
+		if (entries.isEmpty()) {
+			MenuItem none = new MenuItem("(no recent files)");
+			none.setDisable(true);
+			menu.getItems().add(none);
+		} else {
+			MenuItem clear = new MenuItem("Clear list");
+			clear.setOnAction(ev -> RecentFiles.clear());
+			menu.getItems().addAll(new SeparatorMenuItem(), clear);
+		}
+	}
+
+	public void openLighthouseDirect(File f) {
+		File file = f;
+		if (file == null) {
+			FileChooser fileChooser = new FileChooser();
+			fileChooser.setTitle("Open Lighthouse database (read-only)");
+			fileChooser.getExtensionFilters().addAll(
+					new FileChooser.ExtensionFilter("SQLite database", "*.sqlite", "*.db", "*.sqlite3")
+					, new FileChooser.ExtensionFilter("<all>", "*.*"));
+			file = fileChooser.showOpenDialog(this.stage);
+			if (file == null) {
+				return;
+			}
+		}
+
+		ReadOnlySqliteDatabase db;
+		try {
+			db = ReadOnlySqliteDatabase.open(file);
+		} catch (SQLException e) {
+			AppLog.error("Lighthouse: cannot open " + file + ": " + e.getMessage());
+			Alert alert = new Alert(AlertType.ERROR);
+			alert.setTitle("Lighthouse");
+			alert.setHeaderText("The database could not be opened read-only.");
+			alert.setContentText(file.getName() + ": " + e.getMessage()
+					+ "\n\nIf the file is damaged, open it via \"Open Database...\" instead.");
+			alert.showAndWait();
+			return;
+		}
+		if (!db.isLighthouseDatabase()) {
+			db.close();
+			Alert alert = new Alert(AlertType.INFORMATION);
+			alert.setTitle("Lighthouse");
+			alert.setHeaderText("Not a Lighthouse database.");
+			alert.setContentText(file.getName() + " does not contain the tables response_records "
+					+ "and request_metadata of the ETSI importer.");
+			alert.showAndWait();
+			return;
+		}
+		AppLog.info("Lighthouse: opened " + file + " read-only"
+				+ (db.isImmutable() ? " (immutable)" : " (with -wal file)"));
+		RecentFiles.add(RecentFiles.Mode.LIGHTHOUSE, file);
+
+		LocationWindow mapview = new LocationWindow(db);
+		Stage mapStage = new Stage();
+		initLlmForMapView(mapview, db);
+		mapview.start(mapStage);
+	}
+
+	/** Above this size, the user is offered to open an imported database directly in Lighthouse. */
+	private static final long LIGHTHOUSE_DIRECT_THRESHOLD = 512L * 1024 * 1024;
+
+	/**
+	 * For large Lighthouse databases (after an ETSI import, or when such a file
+	 * is opened), asks whether to open it directly in Lighthouse (read-only,
+	 * streamed) instead of running fqlite's full recovery on it, which keeps
+	 * every record in memory.
+	 *
+	 * @return {@code true} if the database was opened in Lighthouse
+	 */
+	private boolean offerLighthouseDirect(File db) {
+		if (db.length() < LIGHTHOUSE_DIRECT_THRESHOLD) {
+			return false;
+		}
+		try (ReadOnlySqliteDatabase probe = ReadOnlySqliteDatabase.open(db)) {
+			if (!probe.isLighthouseDatabase()) {
+				return false;
+			}
+		} catch (SQLException e) {
+			return false;   // damaged, encrypted or no SQLite file: normal recovery
+		}
+		ButtonType direct = new ButtonType("Open in Lighthouse", ButtonBar.ButtonData.YES);
+		ButtonType full = new ButtonType("Full FQLite analysis", ButtonBar.ButtonData.NO);
+		Alert alert = new Alert(AlertType.CONFIRMATION, "", direct, full);
+		alert.setTitle("Lighthouse");
+		alert.setHeaderText(String.format("%s is a large Lighthouse database (%,d MB).", db.getName(), db.length() / (1024 * 1024)));
+		alert.setContentText("Open it directly and read-only in Lighthouse? Records are read from the file "
+				+ "instead of being loaded into memory.\n\n"
+				+ "A full FQLite analysis (recovery of deleted records, table view) keeps all records "
+				+ "in memory and may need a multiple of the file size in RAM.");
+		alert.initOwner(this.stage);
+		Optional<ButtonType> answer = alert.showAndWait();
+		if (answer.isPresent() && answer.get() == direct) {
+			openLighthouseDirect(db);
+			return true;
+		}
+		return false;
+	}
 
 	private void showPropertyWindow() {
 
@@ -1109,6 +1274,7 @@ public class GUI extends Application {
 		ConcurrentHashMap<String, ObservableList<ObservableList<String>>> data = null;
 
 		if (ft == FileType.SQLiteDB) {
+			no.getValue().job.loadAllDeferredIndexes();
 			data = no.getValue().job.resultlist;
 		}
 		else if (ft == FileType.WriteAheadLog) {
@@ -3100,6 +3266,7 @@ public class GUI extends Application {
 			}
 
 			NodeObject node = selectedItem.getValue();
+			loadDeferredIndexOf(node);
 			if (null != node.tablePane) {
 				Platform.runLater(() -> {
 
@@ -3297,7 +3464,7 @@ public class GUI extends Application {
 		if (converted == null) {
 			return;
 		}
-		open_db(converted);
+		open_db(converted);   // offers the direct Lighthouse mode for large results
 	}
 
 	/**
@@ -3378,6 +3545,11 @@ public class GUI extends Application {
 			return;
 		}
 
+		/* Large Lighthouse (ETSI) database: offer the read-only direct mode */
+		if (offerLighthouseDirect(file)) {
+			return;
+		}
+
 		/* Check if this database is already loaded */
 		final String canonicalPath;
 		try {
@@ -3423,6 +3595,7 @@ public class GUI extends Application {
 		}
 
 		File dbFile = file;
+		RecentFiles.add(RecentFiles.Mode.DATABASE, file);
 
 		boolean encrypted = looksEncrypted(dbFile);
 		AppLog.info("File: " + dbFile.getName() + " | encrypted: " + encrypted);
@@ -3946,6 +4119,120 @@ public class GUI extends Application {
 	 * @param rows       String array with data rows
 	 * @param isWALTable this table to fill is a WAL-Table
 	 */
+	/** table items (the list behind FilteredList/SortedList) of every table view, by tree path */
+	private final ConcurrentHashMap<String, ObservableList<ObservableList>> tableItems = new ConcurrentHashMap<>();
+
+	/**
+	 * Prepares a row that is added to a table after {@link #update_table}: BLOB format icons
+	 * and the line number in front, exactly as update_table() does for the initial rows.
+	 */
+	public static void prepareRow(ObservableList<String> row, List<byte[]> raw, int lineno) {
+		int c = 0;
+		for (String cell : row) {
+			if (cell != null && cell.startsWith("[BLOB") && raw != null && c < raw.size()) {
+				byte[] value = raw.get(c);
+				switch (FormatDetector.detect(value)) {
+					case PNG, GIF, BMP, JPEG, TIFF, HEIC -> row.set(c, cell + "\uD83D\uDDBC\uFE0F");
+					case PDF -> row.set(c, cell + "\uD83D\uDCD6");
+					default -> { }
+				}
+			}
+			c++;
+		}
+		row.add(0, lineNumber(lineno));
+	}
+
+	/** status line of a table whose live index entries are not loaded yet */
+	private void setDeferredHint(String treepath, int loaded, int deferred) {
+		Platform.runLater(() -> {
+			try {
+				VBox tablepanel = (VBox) tables.get(treepath);
+				Label statusline = (Label) tablepanel.getChildren().get(2);
+				String text = statusline.getText();
+				int idx = text.indexOf(" | ");
+				String base = idx > 0 ? text.substring(0, idx) : text;
+				statusline.setText(base + " | rows: " + loaded + " deleted/freelist, " + String.format("%,d", deferred)
+						+ " live entries are loaded when the table is opened");
+			} catch (Exception e) {
+				AppLog.debug("status line: " + e.getMessage());
+			}
+		});
+	}
+
+	/**
+	 * Called by {@link Job#loadDeferredIndex} when the live entries of an index were loaded:
+	 * adds them to the open table view.
+	 */
+	public void deferredRowsLoaded(Job job, String table, List<ObservableList<String>> added) {
+		String treepath = job.guitab.get(table);
+		if (treepath == null)
+			return;
+		Runnable r = () -> {
+			ObservableList<ObservableList> items = tableItems.get(treepath);
+			if (items != null)
+				items.addAll(added);
+			try {
+				VBox tablepanel = (VBox) tables.get(treepath);
+				Label statusline = (Label) tablepanel.getChildren().get(2);
+				String text = statusline.getText();
+				int idx = text.indexOf(" | ");
+				String base = idx > 0 ? text.substring(0, idx) : text;
+				ObservableList<ObservableList<String>> rows = job.resultlist.get(table);
+				statusline.setText(base + " | rows: " + (rows == null ? added.size() : rows.size()));
+			} catch (Exception e) {
+				AppLog.debug("status line: " + e.getMessage());
+			}
+		};
+		if (Platform.isFxApplicationThread())
+			r.run();
+		else
+			Platform.runLater(r);
+	}
+
+	/**
+	 * Loads the live entries of the index behind {@code node} in the background if they are
+	 * not loaded yet (called when the table is selected in the tree).
+	 */
+	private void loadDeferredIndexOf(NodeObject node) {
+		if (node == null || node.job == null || !node.job.isIndexDeferred(node.name))
+			return;
+		final Job job = node.job;
+		final String name = node.name;
+		doLog("Loading " + String.format("%,d", job.deferredLiveRows(name)) + " live entries of index " + name + " ...");
+		Thread t = new Thread(() -> {
+			try {
+				job.loadDeferredIndex(name);
+				Platform.runLater(() -> doLog("Live entries of index " + name + " loaded."));
+			} catch (Exception e) {
+				AppLog.error("Loading index " + name + " failed: " + e.getMessage());
+			}
+		}, "load-index-" + name);
+		t.setDaemon(true);
+		t.start();
+	}
+
+	/** shared line-number strings: every table numbers its rows 1..n, so the strings repeat */
+	private static String[] lineNumbers = new String[0];
+
+	/**
+	 * Line number as a shared {@code String} ("1", "2", ...). The tables of a
+	 * database all number their rows from 1, so instead of one new string per
+	 * row (millions for large databases) every number exists once.
+	 */
+	static synchronized String lineNumber(int n) {
+		if (n <= 0)
+			return String.valueOf(n);
+		if (n > lineNumbers.length) {
+			String[] bigger = new String[Math.max(n, lineNumbers.length * 2)];
+			System.arraycopy(lineNumbers, 0, bigger, 0, lineNumbers.length);
+			lineNumbers = bigger;
+		}
+		String s = lineNumbers[n - 1];
+		if (s == null)
+			lineNumbers[n - 1] = s = String.valueOf(n);
+		return s;
+	}
+
 	@SuppressWarnings({"unchecked", "rawtypes"})
 	public void update_table(String treepath, ObservableList<ObservableList<String>> rows, ObservableList<ObservableList<byte[]>> rawbytes, boolean isWALTable) {
 
@@ -3998,7 +4285,7 @@ public class GUI extends Application {
 			// reading the *previous* column's hex value - exactly the
 			// "hexdump shows the column to the left" bug.
 			r++;
-			row.add(0, String.valueOf(++linenumber));
+			row.add(0, lineNumber(++linenumber));
 		}
 
 		// define an array list for all table rows
@@ -4006,6 +4293,7 @@ public class GUI extends Application {
 		for (ObservableList<String> row : rows) {
 			obdata.add(row);
 		}
+		tableItems.put(treepath, obdata);
 		// first get the right table
 		FQTableView tb;
 		TextField filterField;
@@ -4038,7 +4326,14 @@ public class GUI extends Application {
 		// determine the right tree item for a given treepath from the hashtable
 		TreeItem<NodeObject> node = treeitems.get(treepath);
 
-		if (null != node && rows.size() > 0) {
+		// index whose live entries are loaded on demand: it has data, and says so
+		int deferred = 0;
+		if (null != node && node.getValue() != null && node.getValue().job != null)
+			deferred = node.getValue().job.deferredLiveRows(node.getValue().name);
+		if (deferred > 0)
+			setDeferredHint(treepath, rows.size(), deferred);
+
+		if (null != node && (rows.size() > 0 || deferred > 0)) {
 			node.getValue().hasData = true;
 
 			Platform.runLater(() -> {

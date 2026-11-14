@@ -26,7 +26,7 @@ import static java.sql.DriverManager.getConnection;
 ///
 ///
 /// @author D. Pawlaszczyk
-public class InMemoryDatabase {
+public class InMemoryDatabase implements QueryableDatabase {
 
     static{
         // load SQLite JDBC driver
@@ -68,11 +68,13 @@ public class InMemoryDatabase {
         System.out.println("Connection to InMemory SQLite-database successfully created for db " + DB_URL);
     }
 
+    @Override
     public Connection getConnectionObject(){
         return connection;
     }
 
     /** Returns the logical name of this database (= key in {@link DBManager}). */
+    @Override
     public String getDbName() { return dbName; }
     public Stage getStage(){
         return stage;
@@ -393,6 +395,7 @@ public class InMemoryDatabase {
      * @param select_statement the SQL statement to excute
      * @return a set of result objects
      */
+    @Override
     public ResultSet execute(String select_statement) {
 
         try {
@@ -523,7 +526,7 @@ public class InMemoryDatabase {
      * @param stage the stage object of the parent window
      * @param message the message to display
      */
-    private static void showErrorSELECT(Stage stage,String message) {
+    static void showErrorSELECT(Stage stage,String message) {
         Platform.runLater(() -> {
             Alert alert = new Alert(Alert.AlertType.ERROR);
             alert.setTitle("Syntax Error");
@@ -539,7 +542,7 @@ public class InMemoryDatabase {
      * @param stage the stage object of the parent window
      * @param message the message to display
      */
-    private static void showErrorDatabase(Stage stage,String message) {
+    static void showErrorDatabase(Stage stage,String message) {
         Platform.runLater(() -> {
             Alert alert = new Alert(Alert.AlertType.ERROR);
             alert.setTitle("Database Error");
@@ -555,7 +558,7 @@ public class InMemoryDatabase {
      * @param stage the stage object of the parent window
      * @param message the message to display
      */
-    private static void showErrorTableDoesNotExist(Stage stage,String message) {
+    static void showErrorTableDoesNotExist(Stage stage,String message) {
         Platform.runLater(() -> {
             Alert alert = new Alert(Alert.AlertType.ERROR);
             alert.setTitle("Table Does Not Exist");

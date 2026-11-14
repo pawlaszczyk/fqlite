@@ -129,6 +129,30 @@ public class MapView extends BorderPane {
     // -------------------------------------------------------------------------
 
     private List<DataPoint>     geoPoints     = new ArrayList<>();
+
+    /**
+     * Overview of a large database (see {@link #setOverviewData}): records per
+     * entry of {@link #geoPoints}, which then holds one representative per
+     * location. {@code null} when every point is one record.
+     */
+    private long[]              geoWeights    = null;
+
+    /** Records of an identifier read on demand (overview), or {@code null}: then from {@link #geoPoints}. */
+    private IdentifierSource    idSource      = null;
+
+    /** Overview: double-click on a single location (load its records). */
+    private Consumer<DataPoint> locationLoadListener;
+
+    /**
+     * Identifiers and their records for the IMSI path and the IMEI storyboard
+     * when the map shows an overview instead of all records.
+     */
+    public interface IdentifierSource {
+        /** distinct values of "imsi" or "na_device_id", sorted */
+        List<String> distinct(String column);
+        /** records of one value, sorted by time */
+        List<DataPoint> recordsOf(String column, String value);
+    }
     private int                 hoveredMarker = -1;
     private Consumer<DataPoint> selectionListener;
 
@@ -379,6 +403,9 @@ public class MapView extends BorderPane {
     private static final class MarkerCluster {
         final List<DataPoint> members = new ArrayList<>();
 
+        /** records represented by the members (= members.size() unless the map shows an overview) */
+        long weight;
+
         /**
          * Centroid in zoom-space tile coordinates (i.e. {@code lonToTileX}/
          * {@code latToTileY} units at the zoom level the cluster was built
@@ -394,7 +421,7 @@ public class MapView extends BorderPane {
          *  pixel position at the moment of the click. */
         double screenX, screenY;
 
-        boolean isSingle() { return members.size() == 1; }
+        boolean isSingle() { return members.size() == 1 && weight <= 1; }
         DataPoint first()  { return members.get(0); }
     }
 
@@ -442,12 +469,16 @@ public class MapView extends BorderPane {
 
     // Sequence-analysis controls (IMSI selector + result table)
     private final ComboBox<String> imsiCombo;
+    /** keeps the full IMSI list; only a part of it is in {@link #imsiCombo} */
+    private final IdentifierPicker imsiPicker;
     private final Label            seqStatusLabel;
     private final TableView<SequenceAnalyzer.Stop> sequenceTable;
 
     // IMEI storyboard controls (selector + Play/Pause + speed + scrubber)
     private final HBox             storyBar;
     private final ComboBox<String> imeiCombo;
+    /** keeps the full IMEI list; only a part of it is in {@link #imeiCombo} */
+    private final IdentifierPicker imeiPicker;
     private final Button           btnStoryPlay;
     private final Slider           storySpeedSlider;
     private final Slider           storyScrubber;
@@ -548,7 +579,7 @@ public class MapView extends BorderPane {
                 "order, as a numbered path on the map and lists them below as a\n" +
                 "table."));
         imsiCombo.setTooltip(imsiComboTooltip);
-        imsiCombo.setOnAction(e -> onImsiSelected(imsiCombo.getValue()));
+        imsiPicker = new IdentifierPicker(imsiCombo, MapView::noSelectionItem, this::onImsiSelected);
         Lang.addListener(() -> {
             imsiCombo.setPromptText(Lang.t("IMSI wählen …", "Select IMSI …"));
             imsiComboTooltip.setText(Lang.t(
@@ -590,7 +621,7 @@ public class MapView extends BorderPane {
                 "merging identical locations, so every single activity stays\n" +
                 "visible."));
         imeiCombo.setTooltip(imeiComboTooltip);
-        imeiCombo.setOnAction(e -> onImeiSelected(imeiCombo.getValue()));
+        imeiPicker = new IdentifierPicker(imeiCombo, MapView::noSelectionItem, this::onImeiSelected);
         Lang.addListener(() -> {
             imeiCombo.setPromptText(Lang.t("IMEI wählen …", "Select IMEI …"));
             imeiComboTooltip.setText(Lang.t(
@@ -734,14 +765,83 @@ public class MapView extends BorderPane {
      *        narrows the same underlying data further).
      */
     public void setData(List<DataPoint> allPoints, boolean clearSequenceSelection) {
-        geoPoints = allPoints.stream()
-                .filter(p -> p.getCoordinate() != null)
-                .toList();
+        load(allPoints.stream().filter(p -> p.getCoordinate() != null).toList(), null,
+                allPoints.size(), null, allPoints, clearSequenceSelection);
+    }
 
-        long withTs = geoPoints.stream().filter(p -> p.getTimestamp() != null).count();
-        baseStatusText = String.format(
-                "%d geo points  |  %d with timestamp  |  %d total",
-                geoPoints.size(), withTs, allPoints.size());
+    /**
+     * Shows an overview instead of single records: one representative point
+     * per location with the number of records there. Clusters add up these
+     * numbers; the IMSI/IMEI selectors and their paths use {@code source}.
+     *
+     * @param reps    one point per location (with coordinate)
+     * @param weights records per location, parallel to {@code reps}
+     * @param total   records of the overview (status line)
+     * @param source  identifiers and their records, read on demand
+     */
+    public void setOverviewData(List<DataPoint> reps, long[] weights, long total,
+                                IdentifierSource source, boolean clearSequenceSelection) {
+        load(reps, weights.clone(), total, source, null, clearSequenceSelection);
+    }
+
+    /**
+     * Overview: new numbers of records per location (e.g. for a time window),
+     * parallel to the representatives of {@link #setOverviewData}. Keeps the
+     * view (zoom, position, selections).
+     */
+    public void updateWeights(long[] weights) {
+        if (geoWeights == null || weights == null || weights.length != geoWeights.length) return;
+        geoWeights = weights.clone();
+        updateOverviewStatus(-1);
+        renderGeneration.incrementAndGet();
+        hoveredMarker = -1;
+        if (dbCellLayerEnabled) rebuildDbCellSites();
+        render();
+    }
+
+    /** Overview: callback for a double-click on a single location. */
+    public void setLocationLoadListener(Consumer<DataPoint> listener) {
+        this.locationLoadListener = listener;
+    }
+
+    /** true while the map shows an overview (see {@link #setOverviewData}) */
+    public boolean isOverview() { return geoWeights != null; }
+
+    private long overviewTotal;
+
+    private void updateOverviewStatus(long total) {
+        if (total >= 0) overviewTotal = total;
+        long shown = 0;
+        int locations = 0;
+        for (long w : geoWeights) { shown += w; if (w > 0) locations++; }
+        baseStatusText = String.format(Lang.t(
+                "Übersicht: %,d Datensätze mit Koordinate an %,d Standorten  |  %,d gesamt",
+                "Overview: %,d records with coordinate at %,d locations  |  %,d total"),
+                shown, locations, overviewTotal);
+        updateStatusLabel();
+    }
+
+    /** weight of entry {@code i} of {@link #geoPoints} */
+    private long weightOf(int i) {
+        return geoWeights == null ? 1 : geoWeights[i];
+    }
+
+    private void load(List<DataPoint> geo, long[] weights, long total, IdentifierSource source,
+                      List<DataPoint> allPoints, boolean clearSequenceSelection) {
+        geoPoints = geo;
+        geoWeights = weights;
+        idSource = source;
+        hoveredMarker = -1;
+
+        if (weights == null) {
+            long withTs = geoPoints.stream().filter(p -> p.getTimestamp() != null).count();
+            baseStatusText = String.format(
+                    "%d geo points  |  %d with timestamp  |  %d total",
+                    geoPoints.size(), withTs, total);
+            updateStatusLabel();
+        } else {
+            updateOverviewStatus(total);
+        }
         towerStatusText = "";
         updateStatusLabel();
 
@@ -761,15 +861,41 @@ public class MapView extends BorderPane {
         // dataset.
         String previousImsiSelection = clearSequenceSelection ? null : imsiCombo.getValue();
         String previousImeiSelection = clearSequenceSelection ? null : imeiCombo.getValue();
-        imsiCombo.getItems().setAll(noSelectionItem());
-        imsiCombo.getItems().addAll(SequenceAnalyzer.listImsis(allPoints));
-        imeiCombo.getItems().setAll(noSelectionItem());
-        imeiCombo.getItems().addAll(SequenceAnalyzer.listImeis(allPoints));
+        imsiPicker.setAll(List.of());
+        imeiPicker.setAll(List.of());
         clearSequenceOverlay();
-        if (previousImsiSelection != null && imsiCombo.getItems().contains(previousImsiSelection)) {
+        if (source == null) {
+            imsiPicker.setAll(sortedDistinct(SequenceAnalyzer.listImsis(allPoints)));
+            imeiPicker.setAll(sortedDistinct(SequenceAnalyzer.listImeis(allPoints)));
+            restoreSequenceSelection(previousImsiSelection, previousImeiSelection);
+        } else {
+            // distinct identifiers of a large database: read in the background
+            imsiCombo.setValue(null);
+            imeiCombo.setValue(null);
+            seqStatusLabel.setText(Lang.t("Kennungen werden gelesen …", "Reading identifiers …"));
+            Thread t = new Thread(() -> {
+                List<String> imsis = sortedDistinct(source.distinct("imsi"));
+                List<String> imeis = sortedDistinct(source.distinct("na_device_id"));
+                javafx.application.Platform.runLater(() -> {
+                    if (idSource != source) return;   // data changed meanwhile
+                    imsiPicker.setAll(imsis);
+                    imeiPicker.setAll(imeis);
+                    seqStatusLabel.setText("");
+                    restoreSequenceSelection(previousImsiSelection, previousImeiSelection);
+                });
+            }, "mapview-identifiers");
+            t.setDaemon(true);
+            t.start();
+        }
+
+        render();
+    }
+
+    private void restoreSequenceSelection(String previousImsiSelection, String previousImeiSelection) {
+        if (previousImsiSelection != null && imsiPicker.contains(previousImsiSelection)) {
             imsiCombo.setValue(previousImsiSelection);
             onImsiSelected(previousImsiSelection);
-        } else if (previousImeiSelection != null && imeiCombo.getItems().contains(previousImeiSelection)) {
+        } else if (previousImeiSelection != null && imeiPicker.contains(previousImeiSelection)) {
             imeiCombo.setValue(previousImeiSelection);
             onImeiSelected(previousImeiSelection);
         } else {
@@ -777,8 +903,6 @@ public class MapView extends BorderPane {
             imeiCombo.setValue(null);
             seqStatusLabel.setText("");
         }
-
-        render();
     }
 
     /** Registers a callback invoked when the user clicks a marker. */
@@ -871,7 +995,7 @@ public class MapView extends BorderPane {
      */
     public void selectImsiForPath(String imsi) {
         if (imsi == null || imsi.isBlank()) return;
-        if (!imsiCombo.getItems().contains(imsi)) return;
+        if (!imsiPicker.contains(imsi)) return;
         imsiCombo.setValue(imsi);
         onImsiSelected(imsi);
     }
@@ -991,6 +1115,14 @@ public class MapView extends BorderPane {
         if (cellTowerLayerEnabled && !cellTowers.isEmpty())
             drawCellTowers(gc, W, H, tlTX, tlTY, tPx);
         drawMarkers(gc, W, H, tlTX, tlTY, tPx);
+        if (geoWeights != null && focusedPoint != null && focusedPoint.getCoordinate() != null) {
+            // overview: ring at the location of the selected record
+            double fx = (lonToTileX(focusedPoint.getCoordinate().getLongitude(), zoom) - tlTX) * tPx;
+            double fy = (latToTileY(focusedPoint.getCoordinate().getLatitude(), zoom) - tlTY) * tPx;
+            gc.setStroke(theme.selected);
+            gc.setLineWidth(2.5);
+            gc.strokeOval(fx - MARKER_R * 2.2, fy - MARKER_R * 2.2, MARKER_R * 4.4, MARKER_R * 4.4);
+        }
         // Drawn last (on top): the dataset cell-site ring sits exactly at the
         // same coordinate as the regular data marker it belongs to, so it must
         // render after drawMarkers and as a hollow outline — otherwise it would
@@ -1103,7 +1235,7 @@ public class MapView extends BorderPane {
             if (sx < -40 || sx > W + 40 || sy < -40 || sy > H + 40) continue;
 
             boolean hovered = (ci == hoveredMarker);
-            int     count   = c.members.size();
+            long    count   = c.weight;
 
             if (c.isSingle()) {
                 // ── Single marker (unchanged appearance) ─────────────────────
@@ -1140,7 +1272,7 @@ public class MapView extends BorderPane {
                 // ── Cluster bubble ────────────────────────────────────────────
                 // Radius scales with log(count) so even large clusters stay legible.
                 double r = MARKER_R * (1.0 + 0.45 * Math.log(count));
-                Color fill = hovered ? theme.hover : theme.accent1;
+                Color fill = hovered ? theme.hover : clusterColor(c);
 
                 // Shadow
                 gc.setFill(Color.rgb(0, 0, 0, 0.28));
@@ -1187,6 +1319,22 @@ public class MapView extends BorderPane {
      * {@code CLUSTER_RADIUS_PX} threshold into the equivalent tile-space
      * distance for the grouping comparison.
      */
+    /**
+     * Colour of a cluster bubble: in an overview the colour override of the
+     * members if they all share it (e.g. MOC/MTC per location), else the
+     * normal cluster colour.
+     */
+    private Color clusterColor(MarkerCluster c) {
+        if (geoWeights == null || markerColorOverride == null) return theme.accent1;
+        Color first = null;
+        for (DataPoint dp : c.members) {
+            Color col = markerColorOverride.apply(dp);
+            if (first == null) first = col;
+            else if (!first.equals(col)) return theme.accent1;
+        }
+        return first != null ? first : theme.accent1;
+    }
+
     private void rebuildClusters(int tPx) {
         // Tile-space equivalent of the on-screen cluster radius.
         final double cellTile = CLUSTER_RADIUS_PX / tPx;
@@ -1196,6 +1344,8 @@ public class MapView extends BorderPane {
 
         for (int i = 0; i < geoPoints.size(); i++) {
             DataPoint dp = geoPoints.get(i);
+            long w = weightOf(i);
+            if (w <= 0) continue;                 // overview: no records in the time window
             double x = lonToTileX(dp.getCoordinate().getLongitude(), zoom);
             double y = latToTileY(dp.getCoordinate().getLatitude(),  zoom);
             long gx = (long) Math.floor(x / cellTile);
@@ -1221,12 +1371,14 @@ public class MapView extends BorderPane {
             if (target == null) {
                 target = new MarkerCluster();
                 target.members.add(dp);
+                target.weight = w;
                 target.tileX = x;
                 target.tileY = y;
                 built.add(target);
                 grid.computeIfAbsent(gridKey(gx, gy), k -> new ArrayList<>()).add(target);
             } else {
                 target.members.add(dp);
+                target.weight += w;
                 int n = target.members.size();
                 // Update centroid of the cluster. The centroid can drift
                 // slightly outside its original grid cell as more points are
@@ -1346,8 +1498,11 @@ public class MapView extends BorderPane {
     private void rebuildDbCellSites() {
         final double DEDUP_DIST_DEG = 0.0005; // ~50 m
         List<DbCellSite> sites = new ArrayList<>();
-        for (DataPoint dp : geoPoints) {
-            if (dp.getCoordinate() == null) continue;
+        Map<Long, List<Integer>> grid = new HashMap<>();
+        for (int gi = 0; gi < geoPoints.size(); gi++) {
+            DataPoint dp = geoPoints.get(gi);
+            long weight = weightOf(gi);
+            if (dp.getCoordinate() == null || weight <= 0) continue;
             double lat = dp.getCoordinate().getLatitude();
             double lon = dp.getCoordinate().getLongitude();
             UliDecoder.CellInfo ci = (dp instanceof ResponseRecordDataPoint rrdp) ? rrdp.getCellInfo() : null;
@@ -1357,17 +1512,31 @@ public class MapView extends BorderPane {
                     && rrdp.getCellTower().rangeMetres > 0) {
                 range = rrdp.getCellTower().rangeMetres;
             }
+            // first site (in creation order) within DEDUP_DIST_DEG with a matching
+            // azimuth - looked up in a grid of DEDUP_DIST_DEG cells instead of
+            // comparing with every site (same result, linear instead of quadratic)
+            long gx = (long) Math.floor(lat / DEDUP_DIST_DEG), gy = (long) Math.floor(lon / DEDUP_DIST_DEG);
             DbCellSite existing = null;
-            for (DbCellSite s : sites) {
-                if (Math.abs(s.lat - lat) < DEDUP_DIST_DEG
-                        && Math.abs(s.lon - lon) < DEDUP_DIST_DEG
-                        && azimuthMatches(s.azimuthDeg, az)) {
-                    existing = s;
-                    break;
+            int existingIdx = Integer.MAX_VALUE;
+            for (long nx = gx - 1; nx <= gx + 1; nx++) {
+                for (long ny = gy - 1; ny <= gy + 1; ny++) {
+                    List<Integer> bucket = grid.get(gridKey(nx, ny));
+                    if (bucket == null) continue;
+                    for (int si : bucket) {
+                        if (si >= existingIdx) break;     // buckets are in creation order
+                        DbCellSite s = sites.get(si);
+                        if (Math.abs(s.lat - lat) < DEDUP_DIST_DEG
+                                && Math.abs(s.lon - lon) < DEDUP_DIST_DEG
+                                && azimuthMatches(s.azimuthDeg, az)) {
+                            existing = s;
+                            existingIdx = si;
+                            break;
+                        }
+                    }
                 }
             }
             if (existing != null) {
-                existing.count++;
+                existing.count += (int) Math.min(Integer.MAX_VALUE - existing.count, weight);
                 // Keep the first decodable cellInfo/range found at this site;
                 // later records at the same position are expected to report
                 // the same physical cell, so there's nothing to gain by
@@ -1376,10 +1545,12 @@ public class MapView extends BorderPane {
                 if (existing.rangeMetres == null && range != null) existing.rangeMetres = range;
             } else {
                 DbCellSite site = new DbCellSite(lat, lon);
+                site.count = (int) Math.min(Integer.MAX_VALUE, weight);
                 site.cellInfo = ci;
                 site.azimuthDeg = az;
                 site.rangeMetres = range;
                 site.label = siteLabel(sites.size());
+                grid.computeIfAbsent(gridKey(gx, gy), k -> new ArrayList<>()).add(sites.size());
                 sites.add(site);
             }
         }
@@ -1595,6 +1766,21 @@ public class MapView extends BorderPane {
      * Recomputed on every call (rather than cached) so it always reflects
      * the current {@link Lang} setting.
      */
+    /**
+     * {@code ids} sorted, without duplicates and blanks, as the
+     * {@link IdentifierPicker} needs it (binary search); a list that already
+     * is sorted is kept as it is.
+     */
+    private static List<String> sortedDistinct(List<String> ids) {
+        boolean ok = true;
+        for (int i = 0; i < ids.size() && ok; i++) {
+            String v = ids.get(i);
+            ok = v != null && !v.isBlank() && (i == 0 || ids.get(i - 1).compareTo(v) < 0);
+        }
+        if (ok) return ids;
+        return new ArrayList<>(new java.util.TreeSet<>(ids.stream().filter(v -> v != null && !v.isBlank()).toList()));
+    }
+
     private static String noSelectionItem() {
         return Lang.t("\u2014 Keine Auswahl \u2014", "\u2014 No selection \u2014");
     }
@@ -1624,7 +1810,7 @@ public class MapView extends BorderPane {
             return;
         }
 
-        imsiStops = SequenceAnalyzer.buildSequence(geoPoints, imsi);
+        imsiStops = SequenceAnalyzer.buildSequence(idSource != null ? idSource.recordsOf("imsi", imsi) : geoPoints, imsi);
         imsiScreenX = new double[imsiStops.size()];
         imsiScreenY = new double[imsiStops.size()];
         updateSequenceTable();
@@ -1656,7 +1842,8 @@ public class MapView extends BorderPane {
             return;
         }
 
-        sequenceStops = SequenceAnalyzer.buildImeiActivitySequence(geoPoints, imei);
+        sequenceStops = SequenceAnalyzer.buildImeiActivitySequence(
+                idSource != null ? idSource.recordsOf("na_device_id", imei) : geoPoints, imei);
         storyboardActive = true;
         updateSequenceTable();
 
@@ -1941,7 +2128,7 @@ public class MapView extends BorderPane {
         });
 
         // Copy selected cells to clipboard via context menu or Ctrl/Cmd+C.
-        TableClipboardSupport.install(table);
+        TableClipboardSupport.install(table, "lighthouse_bewegungsverlauf.csv");
 
         return table;
     }
@@ -2864,6 +3051,16 @@ public class MapView extends BorderPane {
     private void onMouseClicked(MouseEvent e) {
         if (wasDragged) return;
         int hit = hitTest(e.getX(), e.getY());
+        if (geoWeights != null && hit >= 0 && e.getClickCount() == 2) {
+            // overview: a single location loads its records, several zoom in
+            MarkerCluster c = clusters.get(hit);
+            if (c.members.size() == 1) {
+                if (locationLoadListener != null) locationLoadListener.accept(c.first());
+            } else {
+                changeZoom(+2, e.getX(), e.getY());
+            }
+            return;
+        }
         if (hit >= 0 && selectionListener != null) {
             MarkerCluster c = clusters.get(hit);
             // For a cluster, fire the event for the first (earliest) member.
@@ -2878,7 +3075,7 @@ public class MapView extends BorderPane {
             // Hit radius grows with cluster size, matching the drawn bubble.
             double r = c.isSingle()
                     ? HIT_R
-                    : HIT_R * (1.0 + 0.45 * Math.log(c.members.size()));
+                    : HIT_R * (1.0 + 0.45 * Math.log(c.weight));
             double dx = mx - c.screenX;
             double dy = my - c.screenY;
             if (Math.sqrt(dx * dx + dy * dy) <= r) return i;
@@ -2955,6 +3152,7 @@ public class MapView extends BorderPane {
 
     private String buildClusterTooltip(MarkerCluster c) {
         if (c.isSingle()) return buildTooltip(c.first());
+        if (geoWeights != null) return buildOverviewTooltip(c);
         StringBuilder sb = new StringBuilder();
         sb.append(c.members.size()).append(" overlapping points");
         // Show time range if all members have timestamps
@@ -2976,6 +3174,30 @@ public class MapView extends BorderPane {
             sb.append("  … and ").append(c.members.size() - show).append(" more\n");
         sb.append("Geo: ").append(c.first().getCoordinate());
         return sb.toString().trim();
+    }
+
+    /** tooltip of a location or cluster in an overview */
+    private String buildOverviewTooltip(MarkerCluster c) {
+        StringBuilder sb = new StringBuilder();
+        if (c.members.size() == 1) {
+            DataPoint dp = c.first();
+            sb.append(String.format(Lang.t("%,d Datensätze an diesem Standort", "%,d records at this location"), c.weight)).append('\n');
+            sb.append("Geo:   ").append(dp.getCoordinate()).append('\n');
+            if (dp instanceof ResponseRecordDataPoint rr) {
+                if (rr.getAzimuth() != null) sb.append(Lang.t("Azimut: ", "Azimuth: ")).append(rr.getAzimuth()).append('\n');
+                if (rr.getCellInfo() != null) sb.append(Lang.t("Zelle: ", "Cell: ")).append(rr.getCellInfo()).append('\n');
+            }
+            if (dp.getTimestamp() != null)
+                sb.append(Lang.t("Erster Datensatz: ", "First record: ")).append(dp.getFormattedTimestamp()).append(" UTC\n");
+            sb.append(Lang.t("Klick: ersten Datensatz zeigen  ·  Doppelklick: Datensätze laden",
+                    "Click: show first record  ·  Double-click: load the records"));
+        } else {
+            sb.append(String.format(Lang.t("%,d Datensätze an %,d Standorten", "%,d records at %,d locations"),
+                    c.weight, c.members.size())).append('\n');
+            sb.append("Geo:   ").append(c.first().getCoordinate()).append(" …\n");
+            sb.append(Lang.t("Doppelklick: hineinzoomen", "Double-click: zoom in"));
+        }
+        return sb.toString();
     }
 
     private String buildTooltip(DataPoint dp) {

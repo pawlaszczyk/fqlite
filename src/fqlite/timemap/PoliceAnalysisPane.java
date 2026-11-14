@@ -1,6 +1,6 @@
 package fqlite.timemap;
 
-import fqlite.sql.InMemoryDatabase;
+import fqlite.sql.QueryableDatabase;
 import fqlite.timemap.PoliceAnalysisQueries.AnalysisType;
 import fqlite.timemap.PoliceAnalysisQueries.Params;
 import javafx.application.Platform;
@@ -48,7 +48,7 @@ import java.util.logging.Logger;
  *
  * <p>Every analysis is a fixed SQL template from {@link PoliceAnalysisQueries}
  * — never LLM-generated — executed against {@code response_records} via
- * {@link InMemoryDatabase}. Results are shown in a generic table whose
+ * {@link QueryableDatabase} (in-memory copy or the database file itself). Results are shown in a generic table whose
  * columns are built dynamically from the query's {@link ResultSetMetaData},
  * the same approach used by {@code fqlite.sql.SQLParser#fillTable}.</p>
  *
@@ -72,8 +72,10 @@ public class PoliceAnalysisPane extends BorderPane {
     private final Label descriptionLabel = new Label();
 
     private final CheckBox timeFilterEnabled = new CheckBox();
-    private final TextField fromField = new TextField();
-    private final TextField toField   = new TextField();
+    /** take the identifiers of a result over to "Map & Timeline" */
+    private final CheckBox mapTransfer = new CheckBox();
+    private final DateTimeField fromField = new DateTimeField();
+    private final DateTimeField toField   = new DateTimeField();
 
     // Identifier/Gebiet-Eingabe — nur sichtbar/benötigt für Auswertungen mit
     // AnalysisType#requiresIdentifier bzw. #requiresArea, siehe
@@ -93,7 +95,7 @@ public class PoliceAnalysisPane extends BorderPane {
     private final Label resultTablePlaceholder = new Label();
     private final Label statusLabel = new Label();
 
-    private InMemoryDatabase inMemoryDB = null;
+    private QueryableDatabase database = null;
     private Theme theme = Theme.DARK;
 
     /** Column names of the current {@link #resultTable} contents, set by {@link #fillResultTable}. */
@@ -145,10 +147,19 @@ public class PoliceAnalysisPane extends BorderPane {
         updateDescription();
 
         timeFilterEnabled.setText(Lang.t("Zeitraum einschränken", "Restrict time range"));
-        fromField.setPromptText(Lang.t("JJJJ-MM-TT HH:MM:SS (von)", "YYYY-MM-DD HH:MM:SS (from)"));
-        toField.setPromptText(Lang.t("JJJJ-MM-TT HH:MM:SS (bis)", "YYYY-MM-DD HH:MM:SS (to)"));
-        fromField.setFont(Font.font("Monospace", 14));
-        toField.setFont(Font.font("Monospace", 14));
+        mapTransfer.setText(Lang.t("Ergebnis in Karte & Zeitleiste übernehmen", "Show result in Map & Timeline"));
+        mapTransfer.setSelected(true);
+        mapTransfer.setTooltip(new Tooltip(Lang.t(
+                "Zeigt im Tab \"Karte & Zeitleiste\" die Datensätze der Kennungen des Ergebnisses\n"
+                        + "(im eingestellten Zeitraum), z. B. alle Datensätze der gefundenen Wanderer.\n"
+                        + "Übersichtsauswertungen (alle Rufnummern, Funkzellen, Länder, …) ändern die Karte nicht.",
+                "Shows the records of the identifiers in the result (within the time range)\n"
+                        + "in the \"Map & Timeline\" tab, e.g. all records of the roamers found.\n"
+                        + "Overview analyses (all numbers, cell sites, countries, …) leave the map unchanged.")));
+        fromField.setPromptText(Lang.t("JJJJ-MM-TT (von)", "YYYY-MM-DD (from)"));
+        toField.setPromptText(Lang.t("JJJJ-MM-TT (bis)", "YYYY-MM-DD (to)"));
+        fromField.setFieldFont(Font.font("Monospace", 14));
+        toField.setFieldFont(Font.font("Monospace", 14));
         fromField.setDisable(true);
         toField.setDisable(true);
 
@@ -178,7 +189,10 @@ public class PoliceAnalysisPane extends BorderPane {
         runButton.setText(Lang.t("▶ Ausführen", "▶ Run"));
         runButton.setFont(Font.font("Monospace", FontWeight.BOLD, 14));
         runButton.setDisable(true);   // enabled by setDatabase()
-        runButton.setOnAction(e -> runAnalysis());
+        runButton.setOnAction(e -> {
+            if (running) cancelAnalysis();
+            else runAnalysis();
+        });
 
         HBox timeBox = new HBox(8, timeFilterEnabled, fromField, new Label("→"), toField);
         timeBox.setAlignment(Pos.CENTER_LEFT);
@@ -187,7 +201,7 @@ public class PoliceAnalysisPane extends BorderPane {
         paramBox.setAlignment(Pos.CENTER_LEFT);
         HBox.setHgrow(identifierField, Priority.ALWAYS);
 
-        HBox controls = new HBox(10, typeBox, runButton);
+        HBox controls = new HBox(10, typeBox, runButton, mapTransfer);
         controls.setAlignment(Pos.CENTER_LEFT);
         HBox.setHgrow(typeBox, Priority.ALWAYS);
 
@@ -212,11 +226,15 @@ public class PoliceAnalysisPane extends BorderPane {
             MenuItem showOnMapItem = new MenuItem(Lang.t("📍 Auf Karte anzeigen", "📍 Show on map"));
             Lang.addListener(() -> showOnMapItem.setText(Lang.t("📍 Auf Karte anzeigen", "📍 Show on map")));
             showOnMapItem.setOnAction(e -> showSelectedRowOnMap(row.getItem()));
-            ContextMenu rowMenu = new ContextMenu(showOnMapItem, TableClipboardSupport.copyMenuItem(resultTable));
+            ContextMenu rowMenu = new ContextMenu(showOnMapItem, TableClipboardSupport.copyMenuItem(resultTable),
+                    TableClipboardSupport.exportMenuItem(resultTable, this::csvFileName, () -> resultCsv));
             row.contextMenuProperty().bind(
                     Bindings.when(row.emptyProperty()).then((ContextMenu) null).otherwise(rowMenu));
             return row;
         });
+        // also on the empty area below the rows
+        resultTable.setContextMenu(new ContextMenu(TableClipboardSupport.copyMenuItem(resultTable),
+                TableClipboardSupport.exportMenuItem(resultTable, this::csvFileName, () -> resultCsv)));
         setCenter(resultTable);
 
         statusLabel.setText(Lang.t("⚪ Keine Datenbank verbunden", "⚪ No database connected"));
@@ -236,11 +254,12 @@ public class PoliceAnalysisPane extends BorderPane {
         Lang.addListener(() -> {
             title.setText(Lang.t("🔎 Statistiken", "🔎 Statistics"));
             timeFilterEnabled.setText(Lang.t("Zeitraum einschränken", "Restrict time range"));
-            fromField.setPromptText(Lang.t("JJJJ-MM-TT HH:MM:SS (von)", "YYYY-MM-DD HH:MM:SS (from)"));
-            toField.setPromptText(Lang.t("JJJJ-MM-TT HH:MM:SS (bis)", "YYYY-MM-DD HH:MM:SS (to)"));
+            mapTransfer.setText(Lang.t("Ergebnis in Karte & Zeitleiste übernehmen", "Show result in Map & Timeline"));
+            fromField.setPromptText(Lang.t("JJJJ-MM-TT (von)", "YYYY-MM-DD (from)"));
+            toField.setPromptText(Lang.t("JJJJ-MM-TT (bis)", "YYYY-MM-DD (to)"));
             areaLabel.setText(Lang.t("Gebiet (Breitengrad,Längengrad):", "Area (latitude,longitude):"));
             radiusLabel.setText(Lang.t("Radius (m):", "Radius (m):"));
-            runButton.setText(Lang.t("▶ Ausführen", "▶ Run"));
+            runButton.setText(running ? Lang.t("■ Abbrechen", "■ Cancel") : Lang.t("▶ Ausführen", "▶ Run"));
             resultTablePlaceholder.setText(Lang.t(
                     "Auswertungstyp wählen und auf \"Ausführen\" klicken.",
                     "Select an analysis type and click \"Run\"."));
@@ -254,9 +273,12 @@ public class PoliceAnalysisPane extends BorderPane {
         });
     }
 
-    /** Connects the in-memory database that backs the current case. Call this whenever the underlying data changes. */
-    public void setDatabase(InMemoryDatabase mdb) {
-        this.inMemoryDB = mdb;
+    /** Connects the database that backs the current case. Call this whenever the underlying data changes. */
+    public void setDatabase(QueryableDatabase mdb) {
+        this.database = mdb;
+        this.tableRows = -1;
+        this.rangeCounts.clear();
+        if (mdb != null) presetTimeRange(mdb);
         Platform.runLater(() -> {
             runButton.setDisable(mdb == null);
             setStatus(mdb == null
@@ -266,12 +288,49 @@ public class PoliceAnalysisPane extends BorderPane {
         });
     }
 
+    /**
+     * Presets the time range with the first and last start_time of the
+     * records (read through the index in the background) and marks the days
+     * of the data in the calendars. Values the analyst already chose stay.
+     */
+    private void presetTimeRange(QueryableDatabase mdb) {
+        Thread t = new Thread(() -> {
+            String min = null, max = null;
+            try {
+                ResultSet rs = mdb.execute("SELECT start_time FROM response_records WHERE start_time >= '' "
+                        + "AND typeof(start_time) = 'text' ORDER BY start_time LIMIT 1");
+                if (rs != null) { if (rs.next()) min = rs.getString(1); rs.close(); }
+                rs = mdb.execute("SELECT start_time FROM response_records WHERE start_time >= '' "
+                        + "AND typeof(start_time) = 'text' ORDER BY start_time DESC LIMIT 1");
+                if (rs != null) { if (rs.next()) max = rs.getString(1); rs.close(); }
+            } catch (Exception e) {
+                return;
+            }
+            java.time.Instant a = min == null ? null : DataAnalyzer.parseIsoSeconds(min.trim());
+            java.time.Instant z = max == null ? null : DataAnalyzer.parseIsoSeconds(max.trim());
+            if (a == null || z == null) return;
+            java.time.LocalDateTime from = java.time.LocalDateTime.ofInstant(a, java.time.ZoneOffset.UTC);
+            java.time.LocalDateTime to = java.time.LocalDateTime.ofInstant(z, java.time.ZoneOffset.UTC);
+            Platform.runLater(() -> {
+                if (database != mdb) return;
+                fromField.setRange(from, to);
+                toField.setRange(from, to);
+                if (fromField.isEmpty()) fromField.setValue(from);
+                if (toField.isEmpty()) toField.setValue(to);
+            });
+        }, "statistics-time-range");
+        t.setDaemon(true);
+        t.start();
+    }
+
     public void applyTheme(Theme t) {
         this.theme = t;
         setStyle(t.bgStyle());
         descriptionLabel.setTextFill(t.label);
-        fromField.setStyle(fieldStyle(t));
-        toField.setStyle(fieldStyle(t));
+        fromField.setFieldStyle(fieldStyle(t));
+        toField.setFieldStyle(fieldStyle(t));
+        fromField.setLabelColor(t.label);
+        toField.setLabelColor(t.label);
         identifierField.setStyle(fieldStyle(t));
         areaField.setStyle(fieldStyle(t));
         radiusField.setStyle(fieldStyle(t));
@@ -279,6 +338,7 @@ public class PoliceAnalysisPane extends BorderPane {
         areaLabel.setTextFill(t.label);
         radiusLabel.setTextFill(t.label);
         deviceInfoLabel.setTextFill(t.label);
+        mapTransfer.setTextFill(t.label);
         runButton.setStyle(
                 "-fx-background-color: " + Theme.hex(t.accent1) + ";" +
                 "-fx-text-fill: "        + Theme.hex(t.bg) + ";" +
@@ -381,7 +441,7 @@ public class PoliceAnalysisPane extends BorderPane {
      */
     private void runAnalysis() {
         AnalysisType type = typeBox.getSelectionModel().getSelectedItem();
-        if (type == null || inMemoryDB == null) return;
+        if (type == null || database == null) return;
 
         Params params = new Params();
 
@@ -435,18 +495,53 @@ public class PoliceAnalysisPane extends BorderPane {
 
         final String lookupIdentifier = (type == AnalysisType.DEVICE_INFO_LOOKUP) ? params.identifier : null;
 
-        runButton.setDisable(true);
+        setRunning(true);
         setStatus(Lang.t("⏳ Führe Auswertung aus…", "⏳ Running analysis…"), theme.label);
         deviceInfoLabel.setManaged(false);
         deviceInfoLabel.setVisible(false);
+        final QueryableDatabase db = database;
+        final String preset0 = fromField.getText(), preset1 = toField.getText();
+        final boolean canRestrict = true;
+        final boolean transfer = mapTransfer.isSelected() && resultListener != null && ResultIds.isTransferable(type);
 
         Thread worker = new Thread(() -> {
             try {
-                ResultSet rs = inMemoryDB.execute(sql);
+                // large database opened directly: estimate and ask before a long run
+                if (db instanceof fqlite.sql.ReadOnlySqliteDatabase) {
+                    java.sql.Connection c = db.getConnectionObject();
+                    if (tableRows < 0) tableRows = QueryCost.tableRows(c);
+                    QueryCost.Estimate est = QueryCost.estimate(c, List.of(sql), tableRows, rangeCounts);
+                    if (QueryCost.needsConfirmation(est)) {
+                        QueryCost.Decision d = QueryCost.ask(getScene() != null ? getScene().getWindow() : null,
+                                type.label(), est, canRestrict && !preset0.isEmpty() && !preset1.isEmpty()
+                                        ? new String[] { preset0, preset1 } : null);
+                        if (d instanceof QueryCost.Cancel) {
+                            Platform.runLater(() -> {
+                                setStatus(Lang.t("⏹ Nicht ausgeführt", "⏹ Not run"), theme.label);
+                                setRunning(false);
+                            });
+                            return;
+                        }
+                        if (d instanceof QueryCost.Restrict r) {
+                            Platform.runLater(() -> {
+                                setRunning(false);
+                                timeFilterEnabled.setSelected(true);
+                                fromField.setDisable(false);
+                                toField.setDisable(false);
+                                fromField.setValue(java.time.LocalDateTime.parse(r.from().replace(' ', 'T')));
+                                toField.setValue(java.time.LocalDateTime.parse(r.to().replace(' ', 'T')));
+                                runAnalysis();
+                            });
+                            return;
+                        }
+                    }
+                }
+                ResultSet rs = db.execute(sql);
                 if (rs == null) {
                     Platform.runLater(() -> {
-                        setStatus(Lang.t("⚠️ Kein Ergebnis", "⚠️ No result"), theme.hover);
-                        runButton.setDisable(false);
+                        setStatus(cancelled ? Lang.t("⏹ Abgebrochen", "⏹ Cancelled")
+                                : Lang.t("⚠️ Kein Ergebnis", "⚠️ No result"), cancelled ? theme.label : theme.hover);
+                        setRunning(false);
                     });
                     return;
                 }
@@ -456,13 +551,36 @@ public class PoliceAnalysisPane extends BorderPane {
                 List<String> colNames = new java.util.ArrayList<>();
                 for (int i = 1; i <= cols; i++) colNames.add(meta.getColumnName(i));
 
+                // At most MAX_RESULT_ROWS rows are kept: pair analyses of dense
+                // cell dumps return tens of millions of rows, which as table
+                // rows took more than 30 GB. The remaining rows are only
+                // counted (the results are sorted, the first rows are the
+                // relevant ones).
+                // every row also goes into a CSV file: "Export to CSV…" then
+                // writes the complete result, also beyond MAX_RESULT_ROWS
+                java.nio.file.Path csv = java.nio.file.Files.createTempFile("fqlite-statistics-", ".csv");
+                csv.toFile().deleteOnExit();
+                java.io.Writer csvOut = TableClipboardSupport.csvWriter(csv);
+                csvOut.write(TableClipboardSupport.csvLine(colNames));
+                List<String> csvCells = new java.util.ArrayList<>(cols);
                 ObservableList<ObservableList<String>> rows = FXCollections.observableArrayList();
+                ResultIds ids = transfer ? ResultIds.forResult(type, colNames, params) : null;
+                long total = 0;
                 while (rs.next()) {
+                    if (ids != null && !ids.add(rs)) ids = null;   // too many identifiers
+                    csvCells.clear();
+                    for (int i = 1; i <= cols; i++) csvCells.add(rs.getString(i));
+                    csvOut.write(TableClipboardSupport.csvLine(csvCells));
+                    if (++total > MAX_RESULT_ROWS) continue;
                     ObservableList<String> row = FXCollections.observableArrayList();
                     for (int i = 1; i <= cols; i++) row.add(rs.getString(i));
                     rows.add(row);
                 }
                 rs.close();
+                csvOut.close();
+                final long totalRows = total;
+                final ResultIds mapIds = ids;
+                final boolean tooMany = transfer && ids == null && ResultIds.isTransferable(type);
 
                 // Online device-info lookup, if applicable, also happens on
                 // this background thread (it's a blocking HTTP call).
@@ -470,21 +588,183 @@ public class PoliceAnalysisPane extends BorderPane {
                         (lookupIdentifier != null) ? TacLookupService.lookup(lookupIdentifier) : null;
 
                 Platform.runLater(() -> {
+                    setResultCsv(csv);
                     fillResultTable(colNames, rows);
                     if (deviceInfo != null) showDeviceInfo(deviceInfo);
-                    setStatus("✅ " + rows.size() + " " + Lang.t("Zeile(n)", "row(s)") + " | " + type.label(), theme.accent2);
-                    runButton.setDisable(false);
+                    if (mapIds != null && resultListener != null && !mapIds.isEmpty()) resultListener.accept(mapIds);
+                    if (totalRows > rows.size()) {
+                        setStatus(String.format(Lang.t("⚠️ %,d Zeilen – angezeigt werden die ersten %,d (nach Sortierung) | %s",
+                                "⚠️ %,d rows – the first %,d (in sort order) are shown | %s"), totalRows, rows.size(), type.label()), theme.hover);
+                    } else {
+                        setStatus("✅ " + rows.size() + " " + Lang.t("Zeile(n)", "row(s)") + " | " + type.label(), theme.accent2);
+                    }
+                    if (tooMany) statusLabel.setText(statusLabel.getText() + Lang.t(
+                            "  |  zu viele Kennungen für die Karte", "  |  too many identifiers for the map"));
+                    setRunning(false);
                 });
             } catch (Exception ex) {
-                LOG.warning("PoliceAnalysisPane: query failed for " + type + ": " + ex.getMessage());
+                boolean stop = cancelled || QueryCost.isInterrupt(ex);
+                if (!stop) LOG.warning("PoliceAnalysisPane: query failed for " + type + ": " + ex.getMessage());
                 Platform.runLater(() -> {
-                    setStatus("❌ " + ex.getMessage(), theme.hover);
-                    runButton.setDisable(false);
+                    setStatus(stop ? Lang.t("⏹ Abgebrochen", "⏹ Cancelled") : "❌ " + ex.getMessage(),
+                            stop ? theme.label : theme.hover);
+                    setRunning(false);
                 });
             }
         }, "police-analysis-worker");
         worker.setDaemon(true);
         worker.start();
+    }
+
+    private java.util.function.Consumer<ResultIds> resultListener;
+
+    /** complete result of the last analysis as CSV (temporary file), or null */
+    private volatile java.nio.file.Path resultCsv;
+    private volatile AnalysisType resultType;
+
+    private void setResultCsv(java.nio.file.Path csv) {
+        java.nio.file.Path old = resultCsv;
+        resultCsv = csv;
+        resultType = typeBox.getSelectionModel().getSelectedItem();
+        if (old != null && !old.equals(csv)) {
+            try { java.nio.file.Files.deleteIfExists(old); } catch (java.io.IOException ignored) { }
+        }
+    }
+
+    /** proposed file name for "Export to CSV…" */
+    private String csvFileName() {
+        AnalysisType t = resultType != null ? resultType : typeBox.getSelectionModel().getSelectedItem();
+        String name = t == null ? "statistik" : t.label().replaceAll("[^\\p{L}\\p{N}]+", "_").replaceAll("^_|_$", "");
+        return "lighthouse_" + name + ".csv";
+    }
+
+    /**
+     * Called (on the FX thread) after an analysis whose result names
+     * identifiers, if "Show result in Map & Timeline" is selected.
+     */
+    public void setResultListener(java.util.function.Consumer<ResultIds> listener) {
+        this.resultListener = listener;
+    }
+
+    /**
+     * The identifiers named by the result of an analysis, by column of
+     * {@code response_records}, and its time range: the records to show in
+     * "Map & Timeline" are those in the time range whose phone number, IMSI
+     * or IMEI is one of them.
+     */
+    public static final class ResultIds {
+        /** identifiers taken over at most (memory, and a map of them would be unreadable) */
+        static final int MAX_IDS = 2_000_000;
+
+        public final String label, fromIso, toIso;
+        public final java.util.Set<String> msisdn = new java.util.HashSet<>(), imsi = new java.util.HashSet<>(), imei = new java.util.HashSet<>();
+        /** per result column: target set, or null */
+        private java.util.Set<String>[] target;
+        /** per result column: values are comma-separated lists */
+        private boolean[] list;
+        /** column with the identifier type of a "Kennung" column (CROSS_HITS, DEVICE_SIM_SWAP), or -1 */
+        private int typeCol = -1, idCol = -1;
+        private final AnalysisType type;
+
+        private ResultIds(AnalysisType type, String label, String fromIso, String toIso) {
+            this.type = type;
+            this.label = label;
+            this.fromIso = fromIso;
+            this.toIso = toIso;
+        }
+
+        /** false for overview analyses whose result does not single out identifiers */
+        static boolean isTransferable(AnalysisType type) {
+            return switch (type) {
+                case ALL_NUMBERS, DOMESTIC_FOREIGN, PARTY_ROLE, PARTICIPANTS_PER_CELL, CONNECTION_TYPE,
+                     CELL_SITES, IDENTIFIER_INVENTORY, COUNTRY_HISTOGRAM -> false;
+                default -> true;
+            };
+        }
+
+        @SuppressWarnings("unchecked")
+        static ResultIds forResult(AnalysisType type, List<String> cols, Params params) {
+            ResultIds r = new ResultIds(type, type.label(), params.fromIso, params.toIso);
+            r.target = new java.util.Set[cols.size()];
+            r.list = new boolean[cols.size()];
+            for (int i = 0; i < cols.size(); i++) {
+                String c = cols.get(i);
+                switch (c) {
+                    case "IMSI", "Begleiter_IMSI", "Companion_IMSI", "Gegenpart_IMSI", "Counterpart_IMSI" -> r.target[i] = r.imsi;
+                    case "IMEI", "Begleiter_IMEI", "Companion_IMEI", "Gegenpart_IMEI", "Counterpart_IMEI" -> r.target[i] = r.imei;
+                    case "Rufnummer", "Phone_Number", "Rufnummer_A", "Rufnummer_B", "Phone_Number_A", "Phone_Number_B",
+                         "Begleiter_Rufnummer", "Companion_Phone_Number", "Gegenpart_Rufnummer", "Counterpart_Phone_Number" -> r.target[i] = r.msisdn;
+                    case "Rufnummern", "Phone_Numbers" -> { r.target[i] = r.msisdn; r.list[i] = true; }
+                    case "Kennung", "Identifier" -> r.idCol = i;
+                    case "Kennungstyp", "Identifier_Type", "Wechseltyp", "Swap_Type" -> r.typeCol = i;
+                    default -> { }
+                }
+            }
+            // Wanderer: the IMSI is the subscriber found; its phone number would add other SIMs
+            if (type == AnalysisType.ROAMERS) {
+                for (int i = 0; i < r.target.length; i++) if (r.target[i] != r.imsi) r.target[i] = null;
+            }
+            // the entered identifier belongs to the result (its own records)
+            if (params.identifier != null && !params.identifier.isBlank() && type != AnalysisType.FILTER_BY_COUNTRY) {
+                String id = params.identifier.trim();
+                r.msisdn.add(id);
+                r.imsi.add(id);
+                r.imei.add(id);
+            }
+            return r;
+        }
+
+        /** adds the identifiers of the current row; false if there are too many */
+        boolean add(ResultSet rs) throws java.sql.SQLException {
+            for (int i = 0; i < target.length; i++) {
+                if (target[i] == null) continue;
+                String v = rs.getString(i + 1);
+                if (v == null || v.isEmpty()) continue;
+                if (list[i]) {
+                    for (String p : v.split(",")) if (!p.isEmpty()) target[i].add(p);
+                } else {
+                    target[i].add(v);
+                }
+            }
+            if (idCol >= 0) {
+                String v = rs.getString(idCol + 1);
+                String t = typeCol >= 0 ? rs.getString(typeCol + 1) : null;
+                if (v != null && !v.isEmpty() && t != null) {
+                    if (t.startsWith("IMSI") || t.startsWith("Geräte-Wechsel") || t.startsWith("Device swap")) imsi.add(v);
+                    else if (t.startsWith("IMEI") || t.startsWith("SIM")) imei.add(v);
+                    else if (t.startsWith("Rufnummer") || t.startsWith("Phone")) msisdn.add(v);
+                }
+            }
+            return msisdn.size() + imsi.size() + imei.size() <= MAX_IDS;
+        }
+
+        public boolean isEmpty() { return msisdn.isEmpty() && imsi.isEmpty() && imei.isEmpty(); }
+
+        /** number of identifiers */
+        public int size() { return msisdn.size() + imsi.size() + imei.size(); }
+    }
+
+    /** result rows kept for the table at most (the rest is only counted) */
+    static final int MAX_RESULT_ROWS = 100_000;
+
+    /** an analysis is running (the run button then cancels it) */
+    private volatile boolean running;
+    private volatile boolean cancelled;
+    private volatile long tableRows = -1;
+    private final java.util.Map<String, Long> rangeCounts = QueryCost.newRangeCache();
+
+    private void setRunning(boolean on) {
+        running = on;
+        if (on) cancelled = false;
+        runButton.setDisable(database == null);
+        runButton.setText(on ? Lang.t("■ Abbrechen", "■ Cancel") : Lang.t("▶ Ausführen", "▶ Run"));
+    }
+
+    /** Stops the running analysis (interrupts its statement). */
+    private void cancelAnalysis() {
+        cancelled = true;
+        setStatus(Lang.t("⏹ Wird abgebrochen…", "⏹ Cancelling…"), theme.label);
+        if (database != null) QueryCost.interrupt(database.getConnectionObject());
     }
 
     /** Rebuilds {@link #resultTable}'s columns from scratch — query shapes differ per analysis type. */

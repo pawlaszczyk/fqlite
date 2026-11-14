@@ -56,8 +56,10 @@ public final class CaseSearch {
 		for (Target tg : targets) {
 			Job job = tg.job();
 			List<Object[]> sources = new ArrayList<>();
-			if (job.resultlist != null)
+			if (job.resultlist != null) {
+				job.loadAllDeferredIndexes();     // the live index entries are searched as well
 				sources.add(new Object[] { job.resultlist, 0 });
+			}
 			if (recovered && job.wal != null && job.wal.resultlist != null)
 				sources.add(new Object[] { job.wal.resultlist, 1 });
 			if (recovered && job.rol != null && job.rol.resultlist != null)

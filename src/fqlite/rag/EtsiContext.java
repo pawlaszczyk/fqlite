@@ -119,12 +119,32 @@ public final class EtsiContext {
         }
     }
 
-    /** Legt die Hilfs-Views an (idempotent). Nur auf der In-Memory-Kopie aufrufen! */
+    /**
+     * Join-Bedingung von call_pairs/sms_pairs. Auf Datenbanken des aktuellen
+     * Importers (Index idx_source_file) wuerde SQLite fuer jeden Datensatz
+     * ueber den Index alle Datensaetze derselben Quelldatei durchsuchen
+     * (quadratisch, bei Millionen Datensaetzen praktisch ohne Ende). Mit dem
+     * unaeren "+" bleibt die Bedingung gleich, SQLite verknuepft dann ueber
+     * einen automatischen Index auf record_number - wie bisher auf der
+     * In-Memory-Kopie ohne Indizes. VIEW_DDL selbst bleibt unveraendert.
+     */
+    private static final String PAIR_JOIN = "ON a.record_number = b.record_number AND a.source_file = b.source_file";
+    private static final String PAIR_JOIN_NO_INDEX = "ON a.record_number = b.record_number AND +a.source_file = +b.source_file";
+
+    /**
+     * Legt die Hilfs-Views an (idempotent). Die Views werden als TEMP-Views
+     * angelegt: sie existieren nur in dieser Verbindung und werden nie in die
+     * Datenbankdatei geschrieben. Dadurch funktioniert das sowohl auf der
+     * In-Memory-Kopie als auch auf einer direkt und schreibgeschuetzt
+     * geoeffneten Datei ({@link fqlite.sql.ReadOnlySqliteDatabase}).
+     */
     public static void createViews(Connection conn) throws SQLException {
         try (Statement st = conn.createStatement()) {
             for (Map.Entry<String, String> e : VIEW_DDL.entrySet()) {
-                st.execute("DROP VIEW IF EXISTS " + e.getKey());
-                st.execute(e.getValue());
+                st.execute("DROP VIEW IF EXISTS temp." + e.getKey());
+                st.execute(e.getValue()
+                        .replaceFirst("^CREATE VIEW ", "CREATE TEMP VIEW ")
+                        .replace(PAIR_JOIN, PAIR_JOIN_NO_INDEX));
             }
         }
     }
@@ -161,7 +181,9 @@ public final class EtsiContext {
         L.add(IND + "-- Ein Anruf = zwei Zeilen (MOC + MTC) mit gleicher record_number und source_file;");
         L.add(IND + "-- eine SMS = zwei MOM-Zeilen (party_role smsOriginator + smsRecipient), ebenso verknuepft.");
         L.add(IND + "-- Rang N (z.B. zweithaeufigste): ORDER BY n DESC LIMIT 1 OFFSET N-1");
-        Set<String> present = new HashSet<>(column(conn, "SELECT name FROM sqlite_master WHERE type='view'"));
+        Set<String> present = new HashSet<>(column(conn,
+                "SELECT name FROM sqlite_master WHERE type='view' "
+                + "UNION SELECT name FROM sqlite_temp_master WHERE type='view'"));
         present.retainAll(VIEW_DDL.keySet());
         if (!present.isEmpty()) {
             L.add(IND + "-- \u2500\u2500 Hilfs-Views (read-only, in der DB vorhanden) \u2500\u2500");

@@ -322,6 +322,7 @@ public class CaseWindow {
 							r.live++;
 						else
 							r.recovered++;
+			r.live += job.deferredLiveRows();     // live index entries not loaded yet
 			r.hasWal = job.wal != null;
 			if (job.wal != null && job.wal.resultlist != null)
 				r.wal = job.wal.resultlist.values().stream().mapToLong(List::size).sum();

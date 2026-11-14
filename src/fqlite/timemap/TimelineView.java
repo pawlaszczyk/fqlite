@@ -1,6 +1,7 @@
 package fqlite.timemap;
 
 import fqlite.timemap.DataAnalyzer.DataPoint;
+import javafx.animation.PauseTransition;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
 import javafx.scene.canvas.Canvas;
@@ -20,8 +21,11 @@ import java.time.Instant;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
+import java.util.function.BiConsumer;
 import java.util.function.Consumer;
+import java.util.function.Function;
 import java.util.stream.Collectors;
+import javafx.util.Duration;
 
 /**
  * Interactive <b>vertical</b> timeline with subscriber labels and a live filter bar.
@@ -134,6 +138,48 @@ public class TimelineView extends BorderPane {
      */
     private double[] dotLogicalYCache = new double[0];
 
+    // ── Paged mode (overview of a large database) ────────────────────────────
+
+    /**
+     * All records of a large database in time order, read page by page: the
+     * timeline shows every record but keeps only the visible pages in memory.
+     */
+    public interface PagedSource {
+        int size();
+        /** record at position {@code idx} (may read a page from the file) */
+        DataPoint get(int idx);
+        /** approximate time of position {@code idx}, or null */
+        Instant timeAt(int idx);
+        /** position of {@code dp}, or -1 */
+        int indexOf(DataPoint dp);
+    }
+
+    /** kind of filter set in the filter bar (see {@link FilterHandler}) */
+    public enum FilterKind { ID, TABLE, TIMESTAMP, ALL, PICK }
+
+    /**
+     * Runs the filter of the filter bar outside this view (e.g. as SQL on a
+     * large database) instead of filtering the loaded points.
+     */
+    public interface FilterHandler {
+        /** @param value the search term, or the picked identifier for {@link FilterKind#PICK} */
+        void filter(FilterKind kind, String value, IdMode mode);
+    }
+
+    private PagedSource paged;
+    /** paged mode: timeline position of each drawn dot (parallel to {@link #dotX}/{@link #dotY}) */
+    private int[] dotIdx = new int[0];
+    private FilterHandler externalFilter;
+    /** identifiers for the pick list when they are not taken from the loaded points */
+    private Function<IdMode, List<String>> pickSource;
+    private BiConsumer<Instant, Instant> windowListener;
+    private final CheckBox windowBox = new CheckBox();
+    private HBox windowRow;
+    private boolean suppressFilterEvents;
+    private final PauseTransition filterDelay = new PauseTransition(Duration.millis(700));
+    private final PauseTransition windowDelay = new PauseTransition(Duration.millis(250));
+    private int pickGeneration;
+
     // ── Filter field options ─────────────────────────────────────────────────
 
     private static final String FF_TABLE     = "Table";
@@ -225,6 +271,16 @@ public class TimelineView extends BorderPane {
         filterCount = new Label();
         filterCount.setFont(Font.font("Monospace", 13));
 
+        windowBox.setText(Lang.t("Karte: sichtbarer Zeitraum", "Map: visible period"));
+        Lang.addListener(() -> windowBox.setText(Lang.t("Karte: sichtbarer Zeitraum", "Map: visible period")));
+        windowBox.setFont(Font.font("Monospace", 13));
+        windowBox.setTooltip(new Tooltip(Lang.t(
+                "Karte zeigt nur die Anzahl der Datensätze im sichtbaren Ausschnitt der Zeitleiste (stundengenau)",
+                "Map shows only the number of records in the visible part of the timeline (per hour)")));
+        windowBox.selectedProperty().addListener((o, a, b) -> fireWindow());
+        windowDelay.setOnFinished(e -> fireWindow());
+        filterDelay.setOnFinished(e -> runExternalFilter());
+
         HBox filterBar = new HBox(6, filterField, filterText, clearBtn, filterCount);
         filterBar.setAlignment(Pos.CENTER_LEFT);
         filterBar.setPadding(new Insets(5, 8, 5, 8));
@@ -273,11 +329,16 @@ public class TimelineView extends BorderPane {
         vScrollBar.valueProperty().addListener((obs, o, n) -> {
             scrollOffset = n.doubleValue();
             render();
+            if (paged != null && windowBox.isSelected()) windowDelay.playFromStart();
         });
 
         // Layout assembly: filterBar on top, then canvas+scrollbar
         BorderPane inner = new BorderPane();
-        inner.setTop(new VBox(idBar, filterBar));
+        windowRow = new HBox(windowBox);
+        windowRow.setPadding(new Insets(0, 8, 5, 8));
+        windowRow.setManaged(false);
+        windowRow.setVisible(false);
+        inner.setTop(new VBox(idBar, filterBar, windowRow));
         inner.setCenter(canvasWrapper);
         inner.setRight(vScrollBar);
         setCenter(inner);
@@ -294,8 +355,9 @@ public class TimelineView extends BorderPane {
         contextMenu.getItems().add(copyImsiItem);
 
         // Filter listeners – re-apply filter on any change
-        filterField.valueProperty().addListener((obs, o, n) -> applyFilter());
-        filterText.textProperty().addListener((obs, o, n) -> applyFilter());
+        filterField.valueProperty().addListener((obs, o, n) -> onFilterUi(true));
+        filterText.textProperty().addListener((obs, o, n) -> onFilterUi(false));
+        filterText.setOnAction(e -> onFilterUi(true));
 
         applyTheme(Theme.DARK);
     }
@@ -303,6 +365,10 @@ public class TimelineView extends BorderPane {
     // ── Public API ───────────────────────────────────────────────────────────
 
     public void setData(List<DataPoint> allPoints) {
+        this.paged = null;
+        this.dotIdx = new int[0];
+        windowRow.setManaged(false);
+        windowRow.setVisible(false);
         this.allTimestamped = allPoints.stream()
                 .filter(p -> p.getTimestamp() != null)
                 .collect(Collectors.toCollection(ArrayList::new));
@@ -318,6 +384,105 @@ public class TimelineView extends BorderPane {
     }
 
     /**
+     * Shows all records of a large database page by page (see
+     * {@link PagedSource}); the filter bar then works through the
+     * {@link #setExternalFilter external filter}.
+     */
+    public void setPagedData(PagedSource source) {
+        this.paged = source;
+        this.allTimestamped = List.of();
+        this.visible = List.of();
+        this.allPointsCache = List.of();
+        minTs = maxTs = null;
+        hoveredIdx = selectedIdx = contextMenuIdx = -1;
+        scrollOffset = 0;
+        dotX = dotY = new double[0];
+        dotIdx = new int[0];
+        boolean win = windowListener != null;
+        windowRow.setManaged(win);
+        windowRow.setVisible(win);
+        populateImsiPicker(List.of());
+        filterCount.setText(String.format("%,d", source.size()));
+        updateVirtualHeight();
+        render();
+        if (windowBox.isSelected()) fireWindow();
+    }
+
+    /** true while the timeline shows a {@link PagedSource} */
+    public boolean isPaged() { return paged != null; }
+
+    /**
+     * Filter bar changes are passed to {@code handler} instead of filtering the
+     * loaded points ({@code null}: filter the loaded points as usual).
+     */
+    public void setExternalFilter(FilterHandler handler) { this.externalFilter = handler; }
+
+    /** identifiers of the pick list ({@code null}: from the loaded points) */
+    public void setPickSource(Function<IdMode, List<String>> source) { this.pickSource = source; }
+
+    /**
+     * Paged mode: called with the time span visible in the timeline when
+     * "Map: visible period" is on, with {@code (null, null)} when it is off.
+     */
+    public void setWindowListener(BiConsumer<Instant, Instant> listener) { this.windowListener = listener; }
+
+    /** Clears the filter bar without running the filter. */
+    public void clearFilterSilently() {
+        suppressFilterEvents = true;
+        try {
+            filterDelay.stop();
+            filterText.clear();
+            filterField.setValue(ffId());
+        } finally {
+            suppressFilterEvents = false;
+        }
+    }
+
+    private void onFilterUi(boolean immediate) {
+        if (suppressFilterEvents) return;
+        if (externalFilter == null) { applyFilter(); return; }
+        if (immediate) { filterDelay.stop(); runExternalFilter(); }
+        else filterDelay.playFromStart();
+    }
+
+    private void runExternalFilter() {
+        if (externalFilter == null) return;
+        String field = filterField.getValue();
+        String term = filterText.getText().trim();
+        if (field != null && field.startsWith("──")) return;
+        if (field != null && !field.equals(ffId()) && !field.equals(FF_TABLE)
+                && !field.equals(FF_TIMESTAMP) && !field.equals(FF_ALL)) {
+            externalFilter.filter(FilterKind.PICK, field, idMode);
+            return;
+        }
+        FilterKind kind = field == null || field.equals(FF_ALL) ? FilterKind.ALL
+                : field.equals(ffId()) ? FilterKind.ID
+                : field.equals(FF_TABLE) ? FilterKind.TABLE : FilterKind.TIMESTAMP;
+        externalFilter.filter(kind, term, idMode);
+    }
+
+    private void fireWindow() {
+        if (windowListener == null) return;
+        if (paged == null || !windowBox.isSelected() || paged.size() == 0) {
+            windowListener.accept(null, null);
+            return;
+        }
+        double viewH = canvas.getHeight() > 0 ? canvas.getHeight() : 600;
+        int first = (int) Math.max(0, Math.floor((scrollOffset - PADDING_TOP) / MIN_DOT_SPACING));
+        int last = (int) Math.min(paged.size() - 1, Math.ceil((scrollOffset + viewH - PADDING_TOP) / MIN_DOT_SPACING));
+        Instant from = paged.timeAt(Math.min(first, paged.size() - 1));
+        Instant to = paged.timeAt(Math.max(0, last));
+        if (from == null || to == null) { windowListener.accept(null, null); return; }
+        windowListener.accept(from, to.plusSeconds(59));
+    }
+
+    /** number of dots (paged: all records) */
+    private int count() { return paged != null ? paged.size() : visible.size(); }
+
+    /** point of dot {@code i} */
+    private DataPoint pointAt(int i) { return paged != null ? paged.get(i) : visible.get(i); }
+
+    /**
      * Switches the identifier shown under each dot (and used by filter, pick
      * list, tooltip and copy action) between IMSI, IMEI and phone number.
      */
@@ -329,10 +494,17 @@ public class TimelineView extends BorderPane {
         }
         styleIdButtons();
         // Rebuild pick list for the new identifier and fall back to the plain id filter
-        filterField.setValue(null);
-        populateImsiPicker(allPointsCache);
-        filterField.setValue(ffId());
-        applyFilter();
+        suppressFilterEvents = true;
+        try {
+            filterField.setValue(null);
+            populateImsiPicker(allPointsCache);
+            filterField.setValue(ffId());
+        } finally {
+            suppressFilterEvents = false;
+        }
+        if (externalFilter != null) runExternalFilter();
+        else applyFilter();
+        render();
     }
 
     public IdMode getIdMode() { return idMode; }
@@ -378,6 +550,14 @@ public class TimelineView extends BorderPane {
      * filter is cleared first.
      */
     public void selectPoint(DataPoint dp) {
+        if (paged != null) {
+            int idx = paged.indexOf(dp);
+            if (idx < 0) return;
+            selectedIdx = idx;
+            scrollToIndex(idx);
+            render();
+            return;
+        }
         // If dp is not in the current visible list, clear the filter so it appears.
         if (!visible.contains(dp) && allTimestamped.contains(dp)) {
             filterText.clear();          // triggers applyFilter() via listener
@@ -413,6 +593,7 @@ public class TimelineView extends BorderPane {
             top.setStyle(t.bgStyle() + t.borderBottomStyle());
         }
         idBarLabel.setTextFill(t.label);
+        windowBox.setTextFill(t.label);
         styleIdButtons();
 
         rebuildLegend();
@@ -434,17 +615,67 @@ public class TimelineView extends BorderPane {
         List<String> items = new ArrayList<>(List.of(ffId(), FF_TABLE, FF_TIMESTAMP, FF_ALL));
         // Separator-style entry
         items.add("── Pick " + ffId() + " ──");
-        allPoints.stream()
+        int gen = ++pickGeneration;
+        if (pickSource != null) {
+            // identifiers of a large database: read in the background
+            setPickItems(items, true);
+            Function<IdMode, List<String>> src = pickSource;
+            IdMode mode = idMode;
+            Thread t = new Thread(() -> {
+                List<String> ids = src.apply(mode);
+                javafx.application.Platform.runLater(() -> {
+                    if (gen != pickGeneration || mode != idMode) return;
+                    setPickItems(withIds(items, ids), true);
+                });
+            }, "timeline-identifiers");
+            t.setDaemon(true);
+            t.start();
+            return;
+        }
+        List<String> ids = allPoints.stream()
                 .map(this::idOf)
                 .filter(m -> m != null && !m.isBlank())
                 .distinct()
                 .sorted()
-                .forEach(items::add);
+                .toList();
+        setPickItems(withIds(items, ids), false);
+    }
 
+    /** identifiers listed in the pick list at most; a longer popup list blocks the UI when it opens */
+    private static final int MAX_PICK_IDS = 1000;
+
+    /**
+     * {@code fixed} plus the first {@link #MAX_PICK_IDS} of {@code ids}; if
+     * there are more, a note says to type the identifier into the filter
+     * field (which searches all of them).
+     */
+    private List<String> withIds(List<String> fixed, List<String> ids) {
+        List<String> all = new ArrayList<>(fixed.size() + Math.min(ids.size(), MAX_PICK_IDS) + 1);
+        all.addAll(fixed);
+        if (ids.size() <= MAX_PICK_IDS) {
+            all.addAll(ids);
+        } else {
+            all.addAll(ids.subList(0, MAX_PICK_IDS));
+            all.add(String.format(Lang.t("── %,d weitere: Kennung ins Filterfeld eingeben ──",
+                    "── %,d more: type the identifier into the filter field ──"), ids.size() - MAX_PICK_IDS));
+        }
+        return all;
+    }
+
+    private void setPickItems(List<String> items, boolean keepPick) {
         String current = filterField.getValue();
-        filterField.getItems().setAll(items);
-        // Restore selection if still valid, else default to the identifier filter
-        filterField.setValue(items.contains(current) ? current : ffId());
+        boolean prev = suppressFilterEvents;
+        suppressFilterEvents = true;
+        try {
+            filterField.getItems().setAll(items);
+            // Restore selection if still valid, else default to the identifier filter
+            if (current != null && (items.contains(current) || keepPick && !current.startsWith("──")))
+                filterField.setValue(current);
+            else
+                filterField.setValue(ffId());
+        } finally {
+            suppressFilterEvents = prev;
+        }
     }
 
     /**
@@ -453,6 +684,11 @@ public class TimelineView extends BorderPane {
      * a full re-render.
      */
     private void applyFilter() {
+        if (paged != null) {
+            filterCount.setText(String.format("%,d", paged.size()));
+            render();
+            return;
+        }
         String field = filterField.getValue();
         String term  = filterText.getText().trim().toLowerCase();
 
@@ -524,7 +760,11 @@ public class TimelineView extends BorderPane {
         double viewH = canvas.getHeight() > 0 ? canvas.getHeight() : 600;
         int    n     = visible.size();
 
-        if (n == 0 || minTs == null) {
+        if (paged != null) {
+            // every record one row (equal spacing), only visible rows are read
+            virtualHeight    = PADDING_TOP + PADDING_BOTTOM + (double) paged.size() * MIN_DOT_SPACING;
+            dotLogicalYCache = new double[0];
+        } else if (n == 0 || minTs == null) {
             virtualHeight    = viewH;
             dotLogicalYCache = new double[0];
         } else {
@@ -585,6 +825,7 @@ public class TimelineView extends BorderPane {
 
     /** Pre-computed, collision-resolved logical Y position for {@code visible.get(i)}. */
     private double dotLogicalY(int i) {
+        if (paged != null) return PADDING_TOP + MIN_DOT_SPACING / 2 + (double) i * MIN_DOT_SPACING;
         if (dotLogicalYCache == null || i < 0 || i >= dotLogicalYCache.length) return PADDING_TOP;
         return dotLogicalYCache[i];
     }
@@ -600,10 +841,12 @@ public class TimelineView extends BorderPane {
         gc.setFill(theme.bg);
         gc.fillRect(0, 0, W, H);
 
-        if (visible.isEmpty()) {
+        if (count() == 0) {
+            dotX = dotY = new double[0];
+            dotIdx = new int[0];
             gc.setFill(theme.label);
             gc.setFont(Font.font("Monospace", 14));
-            String msg = allTimestamped.isEmpty()
+            String msg = paged != null ? "No records." : allTimestamped.isEmpty()
                     ? "No timestamps found."
                     : "No matches for current filter.";
             gc.fillText(msg, 10, H / 2);
@@ -645,6 +888,7 @@ public class TimelineView extends BorderPane {
     }
 
     private void drawTicks(GraphicsContext gc, double W, double H, double axisX) {
+        if (paged != null) { drawPagedTicks(gc, H, axisX); return; }
         if (minTs == null) return;
         long rangeMs = maxTs.toEpochMilli() - minTs.toEpochMilli();
         int  ticks   = numTicks(H);
@@ -664,7 +908,56 @@ public class TimelineView extends BorderPane {
         }
     }
 
+    /** paged mode: one tick per screen interval, labelled with the time of the record there */
+    private void drawPagedTicks(GraphicsContext gc, double H, double axisX) {
+        int n = paged.size();
+        if (n == 0) return;
+        Instant a = paged.timeAt(0), z = paged.timeAt(n - 1);
+        long rangeMs = a != null && z != null ? z.toEpochMilli() - a.toEpochMilli() : 0;
+        DateTimeFormatter fmt = DateTimeFormatter.ofPattern(rangeMs < 2L * 86_400_000 ? "MM-dd HH:mm" : "yyyy-MM-dd HH:mm");
+        gc.setStroke(theme.tick);
+        gc.setFill(theme.label);
+        gc.setFont(Font.font("Monospace", 12));
+        gc.setLineWidth(1);
+        // one tick every 10 rows, between two rows (clear of the dot labels)
+        int every = 10;
+        int firstRow = (int) Math.max(0, Math.floor((scrollOffset - PADDING_TOP) / MIN_DOT_SPACING));
+        int r0 = (firstRow / every) * every;
+        for (int idx = r0; idx < n; idx += every) {
+            double ly = PADDING_TOP + (double) idx * MIN_DOT_SPACING;
+            if (ly > scrollOffset + H) break;
+            Instant t = paged.timeAt(idx);
+            if (t == null) continue;
+            double scrY = toScreen(ly);
+            gc.strokeLine(axisX - 4, scrY, axisX + 4, scrY);
+            gc.fillText(fmt.format(t.atZone(ZoneOffset.UTC)), axisX + 7, scrY + 4);
+        }
+    }
+
+    /** paged mode: draws only the rows on screen */
+    private void drawPagedDots(GraphicsContext gc, double H, double axisX) {
+        int n = paged.size();
+        int first = (int) Math.max(0, Math.floor((scrollOffset - PADDING_TOP) / MIN_DOT_SPACING) - 1);
+        int last = (int) Math.min(n - 1, Math.ceil((scrollOffset + H - PADDING_TOP) / MIN_DOT_SPACING) + 1);
+        int m = Math.max(0, last - first + 1);
+        dotX = new double[m];
+        dotY = new double[m];
+        dotIdx = new int[m];
+        for (int k = 0; k < m; k++) {
+            int i = first + k;
+            double scrY = toScreen(dotLogicalY(i));
+            boolean left = (i % 2 == 0);
+            double scrX = axisX + (left ? -DOT_OFFSET_X : DOT_OFFSET_X);
+            dotX[k] = scrX;
+            dotY[k] = scrY;
+            dotIdx[k] = i;
+            DataPoint dp = paged.get(i);
+            if (dp != null) drawDot(gc, dp, i, scrX, scrY, axisX, left);
+        }
+    }
+
     private void drawDots(GraphicsContext gc, double W, double H, double axisX) {
+        if (paged != null) { drawPagedDots(gc, H, axisX); return; }
         if (visible.isEmpty()) {
             // Drop any stale hit-test arrays from a previous (larger) data set —
             // otherwise hitTest() can still return an index that's valid against
@@ -688,67 +981,72 @@ public class TimelineView extends BorderPane {
             dotY[i] = scrY;
 
             if (scrY < -DOT_R * 6 || scrY > H + DOT_R * 6) continue;
+            drawDot(gc, dp, i, scrX, scrY, axisX, left);
+        }
+    }
 
-            // Connector line axis → dot
-            gc.setStroke(theme.connector);
-            gc.setLineWidth(1);
-            gc.strokeLine(axisX, scrY, scrX, scrY);
+    /** draws dot {@code i} with its connector line and labels */
+    private void drawDot(GraphicsContext gc, DataPoint dp, int i, double scrX, double scrY, double axisX, boolean left) {
+        // Connector line axis → dot
+        gc.setStroke(theme.connector);
+        gc.setLineWidth(1);
+        gc.strokeLine(axisX, scrY, scrX, scrY);
 
-            // Dot colour and radius
-            Color  fill;
-            double r = DOT_R;
-            if (i == selectedIdx)     { fill = theme.selected; r = DOT_R * 1.5; }
-            else if (i == hoveredIdx) { fill = theme.hover;    r = DOT_R * 1.4; }
-            else { fill = dp.getCoordinate() != null ? theme.accent2 : theme.accent1; }
+        // Dot colour and radius
+        Color  fill;
+        double r = DOT_R;
+        if (i == selectedIdx)     { fill = theme.selected; r = DOT_R * 1.5; }
+        else if (i == hoveredIdx) { fill = theme.hover;    r = DOT_R * 1.4; }
+        else { fill = dp.getCoordinate() != null ? theme.accent2 : theme.accent1; }
 
-            // Glow ring
-            if (i == hoveredIdx || i == selectedIdx) {
-                gc.setFill(fill.deriveColor(0, 1, 1, 0.25));
-                gc.fillOval(scrX - r * 2.5, scrY - r * 2.5, r * 5, r * 5);
+        // Glow ring
+        if (i == hoveredIdx || i == selectedIdx) {
+            gc.setFill(fill.deriveColor(0, 1, 1, 0.25));
+            gc.fillOval(scrX - r * 2.5, scrY - r * 2.5, r * 5, r * 5);
+        }
+
+        gc.setFill(fill);
+        gc.fillOval(scrX - r, scrY - r, r * 2, r * 2);
+        gc.setStroke(fill.brighter());
+        gc.setLineWidth(1);
+        gc.strokeOval(scrX - r, scrY - r, r * 2, r * 2);
+
+        // ── Labels ───────────────────────────────────────────────────────
+        // Line 1: timestamp  (grey)
+        String timeStr   = dp.getTimestamp() == null ? "\u2013"
+                : DateTimeFormatter.ofPattern("MM-dd HH:mm:ss")
+                .withZone(ZoneOffset.UTC).format(dp.getTimestamp());
+        // Line 2: IMSI / IMEI / phone number (accent colour, see idMode); empty when unavailable
+        String idVal   = idOf(dp);
+        String imsiStr = idVal != null ? idVal : "";
+
+        gc.setFont(Font.font("Monospace", 12));
+
+        // Vertical anchor: centre between the two text lines
+        double lineH   = 11;           // approximate line height at size 9
+        double textTop = scrY - lineH / 2.0 + 1;
+
+        if (left) {
+            // Left-side dots: labels to the LEFT of the dot, right-aligned
+            double twTime = timeStr.length() * 5.5;
+            double twImsi = imsiStr.length() * 5.5;
+            double textX  = scrX - DOT_R - 4;
+
+            gc.setFill(theme.label);
+            gc.fillText(timeStr, textX - twTime, textTop);
+            if (!imsiStr.isEmpty()) {
+                gc.setFill(theme.accent1);
+                gc.fillText(imsiStr, textX - twImsi, textTop + lineH);
             }
+        } else {
+            // Right-side dots: labels to the RIGHT of the dot, left-aligned
+            double textX = scrX + DOT_R + 4;
 
-            gc.setFill(fill);
-            gc.fillOval(scrX - r, scrY - r, r * 2, r * 2);
-            gc.setStroke(fill.brighter());
-            gc.setLineWidth(1);
-            gc.strokeOval(scrX - r, scrY - r, r * 2, r * 2);
-
-            // ── Labels ───────────────────────────────────────────────────────
-            // Line 1: timestamp  (grey)
-            String timeStr   = DateTimeFormatter.ofPattern("MM-dd HH:mm:ss")
-                    .withZone(ZoneOffset.UTC).format(dp.getTimestamp());
-            // Line 2: IMSI / IMEI / phone number (accent colour, see idMode); empty when unavailable
-            String idVal   = idOf(dp);
-            String imsiStr = idVal != null ? idVal : "";
-
-            gc.setFont(Font.font("Monospace", 12));
-
-            // Vertical anchor: centre between the two text lines
-            double lineH   = 11;           // approximate line height at size 9
-            double textTop = scrY - lineH / 2.0 + 1;
-
-            if (left) {
-                // Left-side dots: labels to the LEFT of the dot, right-aligned
-                double twTime = timeStr.length() * 5.5;
-                double twImsi = imsiStr.length() * 5.5;
-                double textX  = scrX - DOT_R - 4;
-
-                gc.setFill(theme.label);
-                gc.fillText(timeStr, textX - twTime, textTop);
-                if (!imsiStr.isEmpty()) {
-                    gc.setFill(theme.accent1);
-                    gc.fillText(imsiStr, textX - twImsi, textTop + lineH);
-                }
-            } else {
-                // Right-side dots: labels to the RIGHT of the dot, left-aligned
-                double textX = scrX + DOT_R + 4;
-
-                gc.setFill(theme.label);
-                gc.fillText(timeStr, textX, textTop);
-                if (!imsiStr.isEmpty()) {
-                    gc.setFill(theme.accent1);
-                    gc.fillText(imsiStr, textX, textTop + lineH);
-                }
+            gc.setFill(theme.label);
+            gc.fillText(timeStr, textX, textTop);
+            if (!imsiStr.isEmpty()) {
+                gc.setFill(theme.accent1);
+                gc.fillText(imsiStr, textX, textTop + lineH);
             }
         }
     }
@@ -757,10 +1055,11 @@ public class TimelineView extends BorderPane {
 
     private void onMouseMoved(MouseEvent e) {
         int hit = hitTest(e.getX(), e.getY());
-        if (hit >= visible.size()) hit = -1;   // guard against a stale hit-test index
+        if (hit >= count()) hit = -1;   // guard against a stale hit-test index
         if (hit != hoveredIdx) { hoveredIdx = hit; render(); }
-        if (hit >= 0) {
-            tooltip.setText(buildTooltip(visible.get(hit)));
+        DataPoint hp = hit >= 0 ? pointAt(hit) : null;
+        if (hp != null) {
+            tooltip.setText(buildTooltip(hp));
             Tooltip.install(canvas, tooltip);
         } else {
             Tooltip.uninstall(canvas, tooltip);
@@ -772,7 +1071,8 @@ public class TimelineView extends BorderPane {
         if (hit >= 0) {
             selectedIdx = hit;
             render();
-            if (selectionListener != null) selectionListener.accept(visible.get(hit));
+            DataPoint sp = pointAt(hit);
+            if (selectionListener != null && sp != null) selectionListener.accept(sp);
         }
     }
 
@@ -792,7 +1092,8 @@ public class TimelineView extends BorderPane {
         selectedIdx = hit;
         render();
 
-        String imsi = idOf(visible.get(hit));
+        DataPoint cp = pointAt(hit);
+        String imsi = cp != null ? idOf(cp) : null;
         String name = idMode.uiLabel();
         copyImsiItem.setDisable(imsi == null);
         copyImsiItem.setText(imsi != null
@@ -804,8 +1105,9 @@ public class TimelineView extends BorderPane {
 
     /** Copies the IMSI of the data point the context menu was opened for. */
     private void copySelectedImsi() {
-        if (contextMenuIdx < 0 || contextMenuIdx >= visible.size()) return;
-        String imsi = idOf(visible.get(contextMenuIdx));
+        if (contextMenuIdx < 0 || contextMenuIdx >= count()) return;
+        DataPoint cp = pointAt(contextMenuIdx);
+        String imsi = cp != null ? idOf(cp) : null;
         if (imsi == null) return;
         ClipboardContent content = new ClipboardContent();
         content.putString(imsi);
@@ -824,7 +1126,8 @@ public class TimelineView extends BorderPane {
         if (dotX == null) return -1;
         for (int i = 0; i < dotX.length; i++) {
             double dx = mx - dotX[i], dy = my - dotY[i];
-            if (Math.sqrt(dx * dx + dy * dy) <= DOT_R * 2.5) return i;
+            if (Math.sqrt(dx * dx + dy * dy) <= DOT_R * 2.5)
+                return paged != null ? (i < dotIdx.length ? dotIdx[i] : -1) : i;
         }
         return -1;
     }

@@ -163,6 +163,7 @@ public final class Timeline {
 		List<DateColumn> out = new ArrayList<>();
 		if (job == null || job.resultlist == null)
 			return out;
+		job.loadAllDeferredIndexes();     // index tables take part as well
 		for (String t : new TreeSet<>(job.resultlist.keySet())) {
 			if (t.startsWith("sqlite_") || t.startsWith("__"))
 				continue;

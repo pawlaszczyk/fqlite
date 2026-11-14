@@ -34,6 +34,9 @@ public class RecoveryTask implements Runnable {
 	private final Auxiliary ct;
 	private boolean freeList;
 	private boolean orphan = false;
+	/** collect mode: only the live cells of this index are read */
+	private String collectTable = null;
+	private List<DataRow> collect = null;
 
 	/**
 	 * Constructor method.
@@ -60,6 +63,19 @@ public class RecoveryTask implements Runnable {
 	}
 
 	/**
+	 * Collect mode: reads only the live cells (cell pointer array) of an index page and adds the
+	 * regular records of index {@code table} to {@code sink}. Nothing is carved and nothing is
+	 * added to the result lists - used to load the live entries of an index whose loading was
+	 * deferred). The records are read by exactly the same code
+	 * as in the normal scan.
+	 */
+	public RecoveryTask(Auxiliary ct, Job job, long offset, int pagenumber, int pagesize, String table, List<DataRow> sink) {
+		this(ct, job, offset, pagenumber, pagesize, false);
+		this.collectTable = table;
+		this.collect = sink;
+	}
+
+	/**
 	 * This method is called to recover regular data records from the start of a database page.
 	 *
 	 * @return 0 if successful
@@ -68,6 +84,9 @@ public class RecoveryTask implements Runnable {
 
 		boolean withoutROWID = false;
 		int fbstart = -1;
+		/* Lighthouse database without carving: freelist pages hold deleted data only */
+		if (freeList && job.skipCarving)
+			return 0;
 		/* page not assigned by any b-tree and not part of the free list -> orphaned page */
 		orphan = !freeList && pagenumber > 1 && job.pages[pagenumber] == null;
 		if (orphan)
@@ -121,6 +140,8 @@ public class RecoveryTask implements Runnable {
 			 * It is an overflow page -> skip it!
 			 */
 			if (type == 0) {
+				if (collect != null)
+					return 0;            // collect mode: no live cells on this page
 
 				/* if page was dropped - because of a DROP TABLE command - first 8 Bytes are zero-bytes */
 				buffer.position(0);
@@ -199,7 +220,8 @@ public class RecoveryTask implements Runnable {
 			int cp = Auxiliary.TwoByteBuffertoInt(size);
 
 			AppLog.debug(" number of cells: " + cp + " type of page " +  type);
-			job.numberofcells.addAndGet(cp);
+			if (collect == null)
+				job.numberofcells.addAndGet(cp);
 			if (0 == cp)
 				AppLog.debug(" Page seems to be dropped. No cell entries.");
 
@@ -239,7 +261,7 @@ public class RecoveryTask implements Runnable {
 			/*
 			 * scan of Freeblock list
 			 */
-			if (fbstart > pageheaderend  && fbstart <  job.ps) {
+			if (!job.skipCarving && fbstart > pageheaderend  && fbstart <  job.ps) {
 				boolean goon = false;
 
 				do {
@@ -610,7 +632,9 @@ public class RecoveryTask implements Runnable {
 
 			} // end of for - cell pointer
 
-
+			/* collect mode: only the live cells are needed */
+			if (collect != null)
+				return 0;
 
 			if(celltower_table) {
 				return 0;
@@ -667,25 +691,43 @@ public class RecoveryTask implements Runnable {
 	{
 		int empty_columns = 0;
 
+		/* collect mode: keep the live entries of the requested index only */
+		if (collect != null) {
+			List<String> l = row.line();
+			if (l.size() > 3 && collectTable.equals(l.getFirst()) && Global.REGULAR_RECORD.equals(l.get(3)))
+				collect.add(row);
+			return;
+		}
+
+		/* live entry of an index whose live entries are loaded on demand: not kept (the
+		   table itself is created, so it is shown with its deleted entries) */
+		if (job.isLiveIndexRowDeferred(row.line())) {
+			String name = row.line().getFirst();
+			job.resultlist.computeIfAbsent(name, k -> javafx.collections.FXCollections.observableArrayList());
+			job.hexdumplist.computeIfAbsent(name, k -> javafx.collections.FXCollections.observableArrayList());
+			job.countDeferredLiveRow(row.line());
+			return;
+		}
+
 		// entry for table name already exists
 		if (job.resultlist.containsKey(row.line().getFirst()))
 		{
 			ObservableList<ObservableList<String>> tablelist = job.resultlist.get(row.line().getFirst());
-			tablelist.add(FXCollections.observableList(row.line()));  // add row
+			tablelist.add(job.stringPool.row(row.line()));  // add row
 
 			// save the original hex-values of a table row separately to a different list
 			ObservableList<ObservableList<byte[]>> hexlist = job.hexdumplist.get(row.line().getFirst());
-			hexlist.add(FXCollections.observableList(row.hexdump()));
+			hexlist.add(CompactList.hexRow(row.hexdump()));
 		}
 
 		// create a new dataset since the table name occurs for the first time
 		else {
 			ObservableList<ObservableList<String>> tablelist = FXCollections.observableArrayList();
-			tablelist.add(FXCollections.observableList(row.line()));  // add row
+			tablelist.add(job.stringPool.row(row.line()));  // add row
 			job.resultlist.put(row.line().getFirst(),tablelist);
 
 			ObservableList<ObservableList<byte[]>> hexlist = FXCollections.observableArrayList();
-			hexlist.add(FXCollections.observableList(row.hexdump()));
+			hexlist.add(CompactList.hexRow(row.hexdump()));
 			job.hexdumplist.put(row.line().getFirst(),hexlist);
 		}
 	}
@@ -786,6 +828,9 @@ public class RecoveryTask implements Runnable {
 	 * @param content page content as a hex-string
 	 */
 	public void carve(String content, Carver crv) {
+		/* Lighthouse database: no search for deleted records (see Job.decideCarving) */
+		if (job.skipCarving)
+			return;
 
 		Carver c = crv;
 

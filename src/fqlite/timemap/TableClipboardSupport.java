@@ -14,7 +14,9 @@ import javafx.scene.input.KeyCodeCombination;
 import javafx.scene.input.KeyCombination;
 import javafx.scene.input.KeyEvent;
 
+import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Set;
 
 /**
@@ -77,8 +79,119 @@ final class TableClipboardSupport {
      * context menu (e.g. a per-row one) to merge into instead.
      */
     static void install(TableView<?> table) {
+        install(table, "lighthouse_tabelle.csv");
+    }
+
+    /** As {@link #install(TableView)}, with "Export to CSV…" saving under {@code fileName} by default. */
+    static void install(TableView<?> table, String fileName) {
         enableCellSelectionAndCopyShortcut(table);
-        table.setContextMenu(new ContextMenu(copyMenuItem(table)));
+        table.setContextMenu(new ContextMenu(copyMenuItem(table), exportMenuItem(table, fileName)));
+    }
+
+    // ── CSV export ───────────────────────────────────────────────────────────
+
+    /** source of a complete export, if the table holds only part of the result */
+    interface CsvSource {
+        /** the complete CSV (header and every row), or null to export the table */
+        java.nio.file.Path file();
+    }
+
+    /**
+     * "Als CSV exportieren…" / "Export to CSV…": writes every row of the table
+     * (not only the selected ones) with its column headers.
+     */
+    static MenuItem exportMenuItem(TableView<?> table, String fileName) {
+        return exportMenuItem(table, fileName, null);
+    }
+
+    /** @param full complete result (written instead of the table rows when it returns a file) */
+    static MenuItem exportMenuItem(TableView<?> table, String fileName, CsvSource full) {
+        return exportMenuItem(table, () -> fileName, full);
+    }
+
+    /** @param fileName proposed file name, asked when the item is chosen */
+    static MenuItem exportMenuItem(TableView<?> table, java.util.function.Supplier<String> fileName, CsvSource full) {
+        MenuItem item = new MenuItem(Lang.t("Als CSV exportieren…", "Export to CSV…"));
+        Lang.addListener(() -> item.setText(Lang.t("Als CSV exportieren…", "Export to CSV…")));
+        item.setOnAction(e -> exportCsv(table, fileName.get(), full));
+        return item;
+    }
+
+    private static java.io.File lastDir;
+
+    static void exportCsv(TableView<?> table, String fileName, CsvSource full) {
+        javafx.stage.FileChooser fc = new javafx.stage.FileChooser();
+        fc.setTitle(Lang.t("Als CSV exportieren", "Export to CSV"));
+        fc.setInitialFileName(fileName);
+        fc.getExtensionFilters().add(new javafx.stage.FileChooser.ExtensionFilter("CSV", "*.csv"));
+        if (lastDir != null && lastDir.isDirectory()) fc.setInitialDirectory(lastDir);
+        java.io.File f = fc.showSaveDialog(table.getScene() != null ? table.getScene().getWindow() : null);
+        if (f == null) return;
+        lastDir = f.getParentFile();
+        java.nio.file.Path src = full != null ? full.file() : null;
+        // the cell texts are read on the FX thread, the file is written in the background
+        List<String> lines = src != null ? null : csvLines(table);
+        Thread t = new Thread(() -> {
+            try {
+                if (src != null) {
+                    java.nio.file.Files.copy(src, f.toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+                } else {
+                    try (java.io.Writer w = csvWriter(f.toPath())) {
+                        for (String l : lines) w.write(l);
+                    }
+                }
+            } catch (java.io.IOException ex) {
+                javafx.application.Platform.runLater(() -> new javafx.scene.control.Alert(
+                        javafx.scene.control.Alert.AlertType.ERROR,
+                        Lang.t("CSV-Export fehlgeschlagen: ", "CSV export failed: ") + ex.getMessage()).showAndWait());
+            }
+        }, "csv-export");
+        t.setDaemon(true);
+        t.start();
+    }
+
+    /** header and every row of the table, each a CSV line with line end */
+    private static List<String> csvLines(TableView<?> table) {
+        List<? extends TableColumn<?, ?>> cols = table.getVisibleLeafColumns();
+        List<String> lines = new ArrayList<>(table.getItems().size() + 1);
+        List<String> head = new ArrayList<>(cols.size());
+        for (TableColumn<?, ?> c : cols) head.add(c.getText());
+        lines.add(csvLine(head));
+        for (int r = 0; r < table.getItems().size(); r++) {
+            List<String> cells = new ArrayList<>(cols.size());
+            for (TableColumn<?, ?> c : cols) {
+                Object v = c.getCellData(r);
+                cells.add(v == null ? "" : v.toString());
+            }
+            lines.add(csvLine(cells));
+        }
+        return lines;
+    }
+
+    /**
+     * Writer for a CSV file: UTF-8 with byte order mark, so that spreadsheet
+     * programs read umlauts correctly.
+     */
+    static java.io.Writer csvWriter(java.nio.file.Path p) throws java.io.IOException {
+        java.io.Writer w = java.nio.file.Files.newBufferedWriter(p, java.nio.charset.StandardCharsets.UTF_8);
+        w.write('\uFEFF');
+        return w;
+    }
+
+    /** one CSV line (with line end) in the separator of the settings */
+    static String csvLine(List<String> cells) {
+        String sep = fqlite.base.Global.CSV_SEPARATOR;
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < cells.size(); i++) {
+            if (i > 0) sb.append(sep);
+            String v = cells.get(i) == null ? "" : cells.get(i);
+            if (v.contains(sep) || v.contains("\"") || v.contains("\n") || v.contains("\r")) {
+                sb.append('"').append(v.replace("\"", "\"\"")).append('"');
+            } else {
+                sb.append(v);
+            }
+        }
+        return sb.append("\r\n").toString();
     }
 
     /**

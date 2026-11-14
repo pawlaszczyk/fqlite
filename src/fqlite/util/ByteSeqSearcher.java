@@ -56,34 +56,67 @@ public class ByteSeqSearcher{
 	     */
 	    public long indexOf(BigByteBuffer buffer) 
 	    {
-	    	//int size = buffer.capacity() - buffer.position();
-	        
-	        int b;
+	        // Same Knuth-Morris-Pratt search as before, but the bytes are read block by block
+	        // instead of one synchronized BigByteBuffer.get() per byte (which made the schema
+	        // search a full pass of about 6 s per 200 MB). Blocks are kept between calls, so
+	        // the typical loop "indexOf(bb, lastMatch + 2)" reuses the block it already read.
+	        // Result and buffer position are exactly as before: on a match the buffer points to
+	        // the byte after the pattern, otherwise it is entirely consumed.
+	        long limit = buffer.limit();
+	        long p = buffer.position();
 	        int j = 0;
-
-	        //System.out.println(" position " + buffer.position() + " limit " + buffer.limit());
-	        while (buffer.position() < buffer.limit())
+	        while (p < limit)
 	        {
-	        	b = buffer.get();
-	        	
-	            while (j >= 0 && (byte) b != pattern_[j])
+	            if (cacheOwner != buffer || p < cacheStart || p >= cacheStart + cacheLen || cacheLimit != limit)
+	                fill(buffer, p, limit);
+	            int i = (int) (p - cacheStart);
+	            final int n = cacheLen;
+	            final byte[] c = cache;
+	            while (i < n)
 	            {
-	                j = borders_[j];
-	            }
-	            // Move to the next character in the pattern.
-	            ++j;
+	                byte b = c[i++];
+	                while (j >= 0 && b != pattern_[j])
+	                {
+	                    j = borders_[j];
+	                }
+	                // Move to the next character in the pattern.
+	                ++j;
 
-	            // If we've matched up to the full pattern length, we found it.  Return,
-	            // which will automatically save our position in the Input-Buffer at the point immediately
-	            // following the pattern match.
-	            if (j == pattern_.length)
-	            {
-	                return buffer.position();
+	                // If we've matched up to the full pattern length, we found it: the
+	                // position is the byte immediately following the pattern match.
+	                if (j == pattern_.length)
+	                {
+	                    long end = cacheStart + i;
+	                    buffer.position(end);
+	                    return end;
+	                }
 	            }
+	            p = cacheStart + n;
 	        }
 
 	        // No dice, Note that the buffer is now completely consumed.
+	        buffer.position(limit);
 	        return -1;
+	    }
+
+	    private static final int BLOCK = 1 << 20;
+	    private byte[] cache = new byte[0];
+	    private long cacheStart = -1;
+	    private int cacheLen = 0;
+	    private long cacheLimit = -1;
+	    private BigByteBuffer cacheOwner = null;
+
+	    private void fill(BigByteBuffer buffer, long from, long limit)
+	    {
+	        int len = (int) Math.min(BLOCK, limit - from);
+	        if (cache.length < len)
+	            cache = new byte[BLOCK];
+	        buffer.position(from);
+	        buffer.get(cache, 0, len);
+	        cacheStart = from;
+	        cacheLen = len;
+	        cacheLimit = limit;
+	        cacheOwner = buffer;
 	    }
 
 	    /// Builds up a component of longest "borders" for each prefix of the pattern to find.

@@ -291,21 +291,21 @@ public class RollbackJournalReader {
         // entry for table name already exists
         if (resultlist.containsKey(row.line().getFirst())) {
             ObservableList<ObservableList<String>> tablelist = resultlist.get(row.line().getFirst());
-            tablelist.add(FXCollections.observableList(row.line()));  // add row
+            tablelist.add(job.stringPool.row(row.line()));  // add row
 
             // save the original bytes-values of the table row separately to a different list
             ObservableList<ObservableList<byte[]>> hexlist = hexdumplist.get(row.line().getFirst());
-            hexlist.add(FXCollections.observableList(row.hexdump()));
+            hexlist.add(CompactList.hexRow(row.hexdump()));
         }
 
         // create a new data set since the table name occurs for the first time
         else {
             ObservableList<ObservableList<String>> tablelist = FXCollections.observableArrayList();
-            tablelist.add(FXCollections.observableList(row.line())); // add row
+            tablelist.add(job.stringPool.row(row.line())); // add row
             resultlist.put(row.line().getFirst(), tablelist);
 
             ObservableList<ObservableList<byte[]>> hexlist = FXCollections.observableArrayList();
-            hexlist.add(FXCollections.observableList(row.hexdump()));
+            hexlist.add(CompactList.hexRow(row.hexdump()));
             hexdumplist.put(row.line().getFirst(), hexlist);
         }
     }

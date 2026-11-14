@@ -8,7 +8,9 @@ import fqlite.timemap.PoliceAnalysisQueries;
 import java.sql.Connection;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -121,7 +123,7 @@ public class RAGPipeline {
     }
 
     /**
-     * Fuer ETSI-CDR-Datenbanken: Hilfs-Views in der In-Memory-Kopie anlegen und
+     * Fuer ETSI-CDR-Datenbanken: Hilfs-Views (TEMP, nur in dieser Verbindung) anlegen und
      * den Schema-Kontext exakt so aufbauen wie in Training und Evaluation von
      * forensic_sql_ETSI_CDR_V3 (etsi_context.py, enrich_context). Die
      * Embedding-basierte Tabellenauswahl wird fuer diese DBs umgangen, weil sie
@@ -331,7 +333,91 @@ public class RAGPipeline {
                     && !g.rules.contains("R1_ANALYTIC") && !g.rules.contains("R5_IDENT")
                     && !g.rules.contains("R8_ANYDAY");
         }
+
+        // Open time ranges ("vom 10.04. an", "ab dem 10.04.", "bis zum
+        // 12.04.") are completed with the start or end of the data. The
+        // templates only restrict the time when both ends are given, so
+        // without this "vom 10.04. an" silently returned the whole period.
+        qi = completeOpenTimeRange(qi, normalized, dataDateContext);
+
+        qi.allCells = ALL_CELLS_TRIGGER.matcher(request).find();
         return qi;
+    }
+
+    /** "in allen Funkzellen", "in jeder Funkzelle", "in sämtlichen Zellen" ... */
+    static final Pattern ALL_CELLS_TRIGGER = Pattern.compile(
+            "\\b(?:in\\s+)?(?:allen|s[aä]mtlichen)\\s+(?:\\w+\\s+)?(?:funkzellen|zellen|standorten|funkmasten|masten)\\b"
+            + "|\\bin\\s+jede[rnm]?\\s+(?:funk)?zelle\\b"
+            + "|\\ball\\s+(?:the\\s+)?(?:cells?|cell\\s+sites|sites)\\b",
+            Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE);
+
+    /**
+     * "ab (dem) DATE", "seit DATE" (in the date-normalized request). Not "vom
+     * DATE an": in "Zeige mir alle Wanderer vom 10.04. an" the "an" belongs
+     * to "anzeigen", the request asks for that day (see SINGLE_DAY_TRIGGER).
+     */
+    static final Pattern OPEN_FROM_TRIGGER = Pattern.compile(
+            "\\b(?:ab|seit)\\s+(?:dem\\s+|den\\s+)?(\\d{4}-\\d{2}-\\d{2})\\b"
+            + "|\\b(?:from|since)\\s+(\\d{4}-\\d{2}-\\d{2})\\b(?![^.?!]*\\b(?:to|until)\\b)",
+            Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE);
+
+    /** "vom/am DATE", "on DATE" without an end ("bis", "und", "to") after it: that day */
+    static final Pattern SINGLE_DAY_TRIGGER = Pattern.compile(
+            "\\b(?:vom|am|on)\\s+(?:dem\\s+|den\\s+)?(\\d{4}-\\d{2}-\\d{2})\\b(?![^?!]*\\b(?:bis|und|to|until|and)\\b)",
+            Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE);
+
+    /** "bis (zum) DATE" without a start ("von/vom/ab/seit/zwischen" before it) */
+    static final Pattern OPEN_TO_TRIGGER = Pattern.compile(
+            "\\b(?:bis|until)\\s+(?:zum\\s+|einschlie[sß]lich\\s+|inkl\\.?\\s+)?(\\d{4}-\\d{2}-\\d{2})\\b",
+            Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE);
+    private static final Pattern RANGE_START_WORD = Pattern.compile(
+            "\\b(?:von|vom|ab|seit|zwischen|from|since|between)\\b", Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE);
+    private static final Pattern DATA_RANGE = Pattern.compile(
+            "(\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2}).*?(\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2})");
+
+    /**
+     * Completes a time range that is open on one side with the first or last
+     * timestamp of the data ({@code dataDateContext}, "MIN bis MAX"): "ab
+     * DATE" / "seit DATE" end with the last record, "bis DATE" (without a
+     * start) begins with the first, "vom DATE" / "am DATE" alone is that day. A start time of day the
+     * model extracted for that date is kept; otherwise the day begins at
+     * 00:00:00 (resp. ends at 23:59:59). Also completes a window the model
+     * returned with only one end.
+     */
+    static QueryIntent completeOpenTimeRange(QueryIntent qi, String normalized, String dataDateContext) {
+        if (dataDateContext == null || normalized == null) return qi;
+        Matcher dr = DATA_RANGE.matcher(dataDateContext);
+        if (!dr.find()) return qi;
+        String dataMin = dr.group(1), dataMax = dr.group(2);
+        String start = qi.startTime, end = qi.endTime;
+
+        Matcher from = OPEN_FROM_TRIGGER.matcher(normalized);
+        Matcher single = SINGLE_DAY_TRIGGER.matcher(normalized);
+        if (from.find()) {
+            String day = from.group(1) != null ? from.group(1) : from.group(2);
+            if (start == null || !start.startsWith(day)) start = day + " 00:00:00";
+            end = dataMax;
+        } else if (single.find()) {
+            // that day; times of day the model extracted for it are kept
+            String day = single.group(1);
+            if (start == null || !start.startsWith(day)) start = day + " 00:00:00";
+            if (end == null || !end.startsWith(day)) end = day + " 23:59:59";
+        } else {
+            Matcher to = OPEN_TO_TRIGGER.matcher(normalized);
+            if (to.find() && !RANGE_START_WORD.matcher(normalized.substring(0, to.start())).find()) {
+                String day = to.group(1);
+                if (end == null || !end.startsWith(day)) end = day + " 23:59:59";
+                start = dataMin;
+            }
+        }
+        // a window with only one end: complete it with the data range
+        if (start != null && end == null) end = dataMax;
+        if (end != null && start == null) start = dataMin;
+        if (Objects.equals(start, qi.startTime) && Objects.equals(end, qi.endTime)) return qi;
+        if (!isValidTimestamp(start) || !isValidTimestamp(end)) return qi;
+        QueryIntent copy = qi.withTimeWindow(start, end);
+        copy.ambiguousTimeOfDayWithoutDate = qi.ambiguousTimeOfDayWithoutDate;
+        return copy;
     }
 
     /**
@@ -355,7 +441,7 @@ public class RAGPipeline {
 
     /**
      * @param dataDateContext "yyyy-MM-dd HH:mm:ss bis yyyy-MM-dd HH:mm:ss"
-     *                        (see {@link #queryDataDateRange} in
+     *                        (see queryDataDateRange in
      *                        MapViewPane), or {@code null}
      * @return "yyyy-MM-dd" if both halves fall on the same calendar day,
      *         else {@code null} (spans multiple days, or the range is
@@ -944,11 +1030,11 @@ public class RAGPipeline {
                 FROM response_records
                 WHERE %1$s IS NOT NULL AND %1$s <> ''
                   AND latitude_dec IS NOT NULL AND longitude_dec IS NOT NULL%2$s
-                  AND %1$s IN (
+                  AND +%1$s IN (
                       SELECT %1$s FROM response_records
                       WHERE %1$s IS NOT NULL AND %1$s <> ''
                         AND latitude_dec IS NOT NULL AND longitude_dec IS NOT NULL%2$s
-                      GROUP BY %1$s
+                      GROUP BY +%1$s
                       HAVING COUNT(DISTINCT latitude_dec || ',' || longitude_dec) > 1
                   )
                 ORDER BY %1$s, start_time
@@ -962,6 +1048,174 @@ public class RAGPipeline {
     // named cell never gets silently dropped by it — see the warning on
     // buildPlainFilterSql's caller in MapViewPane.onLlmRun)
     // ========================================================================
+
+    // ========================================================================
+    // Duration ("länger als 60 Minuten"): read from the text, added to the
+    // fixed templates
+    // ========================================================================
+
+    /**
+     * A restriction of the duration of the records named in the request.
+     *
+     * @param minSeconds lower bound or {@code null}
+     * @param minExclusive {@code true} for "länger als" (&gt;), {@code false} for "mindestens" (&gt;=)
+     * @param maxSeconds upper bound or {@code null}
+     * @param maxExclusive {@code true} for "kürzer als" (&lt;), {@code false} for "höchstens" (&lt;=)
+     */
+    public record DurationFilter(Long minSeconds, boolean minExclusive, Long maxSeconds, boolean maxExclusive) {
+
+        /**
+         * Duration of a record in seconds: {@code duration_seconds} (the
+         * durationTime of the ETSI record), else end minus start.
+         */
+        public static final String DURATION_EXPR =
+                "COALESCE(duration_seconds, CAST(strftime('%s', end_time) AS INTEGER) - CAST(strftime('%s', start_time) AS INTEGER))";
+
+        /** the SQL condition */
+        public String sql() {
+            StringBuilder sb = new StringBuilder();
+            if (minSeconds != null) sb.append(DURATION_EXPR).append(minExclusive ? " > " : " >= ").append(minSeconds);
+            if (maxSeconds != null) {
+                if (sb.length() > 0) sb.append(" AND ");
+                sb.append(DURATION_EXPR).append(maxExclusive ? " < " : " <= ").append(maxSeconds);
+            }
+            return sb.toString();
+        }
+
+        /** short description, e.g. "> 60 min" */
+        public String label() {
+            StringBuilder sb = new StringBuilder();
+            if (minSeconds != null) sb.append(minExclusive ? "> " : "≥ ").append(format(minSeconds));
+            if (maxSeconds != null) {
+                if (sb.length() > 0) sb.append(", ");
+                sb.append(maxExclusive ? "< " : "≤ ").append(format(maxSeconds));
+            }
+            return sb.toString();
+        }
+
+        private static String format(long s) {
+            if (s >= 3600 && s % 3600 == 0) return (s / 3600) + " h";
+            if (s >= 60 && s % 60 == 0) return (s / 60) + " min";
+            return s + " s";
+        }
+    }
+
+    private static final String DUR_UNIT =
+            "(sekunden|sekunde|sek\\.?|s|minuten|minute|min\\.?|stunden|stunde|std\\.?|h|seconds?|secs?|minutes?|mins?|hours?|hrs?)";
+    private static final String DUR_NUM =
+            "(\\d+(?:[.,]\\d+)?|(?:eine[nr]?\\s+)?halbe[nr]?|half\\s+an?|eine[nmr]?|ein|one|an?|zwei|two|drei|three)";
+    /** amount and unit, optionally followed by a second one ("1 Stunde und 30 Minuten") */
+    private static final String DUR_AMOUNT =
+            DUR_NUM + "\\s*" + DUR_UNIT + "\\b(?:\\s*(?:und|and|,)\\s*" + DUR_NUM + "\\s*" + DUR_UNIT + "\\b)?";
+    private static final Pattern DUR_COMPARE = Pattern.compile(
+            "(?iu)(?<![\\p{L}])(länger\\s+als|laenger\\s+als|mehr\\s+als|über|ueber|mindestens|wenigstens|"
+                    + "longer\\s+than|more\\s+than|over|at\\s+least|"
+                    + "kürzer\\s+als|kuerzer\\s+als|weniger\\s+als|unter|höchstens|hoechstens|maximal|bis\\s+zu|"
+                    + "shorter\\s+than|less\\s+than|under|at\\s+most|up\\s+to)\\s+" + DUR_AMOUNT);
+    private static final Pattern DUR_SYMBOL = Pattern.compile(
+            "(?iu)\\b(?:dauer|duration)\\s*(>=|<=|>|<)\\s*" + DUR_AMOUNT);
+    /** "zwischen 5 und 10 Minuten" (no "h": "zwischen 10 und 12 h" is a time of day) */
+    private static final Pattern DUR_BETWEEN = Pattern.compile(
+            "(?iu)\\b(?:zwischen|between)\\s+(\\d+(?:[.,]\\d+)?)\\s*(?:und|and|-)\\s*(\\d+(?:[.,]\\d+)?)\\s*"
+                    + "(sekunden|sek\\.?|minuten|min\\.?|stunden|std\\.?|seconds?|secs?|minutes?|mins?|hours?)\\b");
+
+    /**
+     * Reads a duration restriction from the request ("länger als 60 Minuten",
+     * "mindestens eine halbe Stunde", "kürzer als 10 Sekunden", "zwischen 5
+     * und 10 Minuten", "Dauer &gt; 2 min", "longer than 1 hour"). The small
+     * model has no field for it, and the fixed templates (calls/SMS, time
+     * range, country, cell site) would otherwise drop it silently.
+     *
+     * @return the restriction, or {@code null} if the text names none
+     */
+    public static DurationFilter findDurationMentionedInText(String text) {
+        if (text == null) return null;
+        Long min = null, max = null;
+        boolean minEx = true, maxEx = true;
+        Matcher m = DUR_BETWEEN.matcher(text);
+        if (m.find()) {
+            double u = unitSeconds(m.group(3));
+            Double a = number(m.group(1)), b = number(m.group(2));
+            if (u > 0 && a != null && b != null) {
+                return new DurationFilter(Math.round(Math.min(a, b) * u), false, Math.round(Math.max(a, b) * u), false);
+            }
+        }
+        m = DUR_COMPARE.matcher(text);
+        while (m.find()) {
+            Long secs = amount(m, 2);
+            if (secs == null) continue;
+            String op = m.group(1).toLowerCase(Locale.ROOT).replaceAll("\\s+", " ");
+            switch (op) {
+                case "länger als", "laenger als", "mehr als", "über", "ueber", "longer than", "more than", "over" -> { min = secs; minEx = true; }
+                case "mindestens", "wenigstens", "at least" -> { min = secs; minEx = false; }
+                case "kürzer als", "kuerzer als", "weniger als", "unter", "shorter than", "less than", "under" -> { max = secs; maxEx = true; }
+                default -> { max = secs; maxEx = false; }   // höchstens, maximal, bis zu, at most, up to
+            }
+        }
+        m = DUR_SYMBOL.matcher(text);
+        while (m.find()) {
+            Long secs = amount(m, 2);
+            if (secs == null) continue;
+            switch (m.group(1)) {
+                case ">" -> { min = secs; minEx = true; }
+                case ">=" -> { min = secs; minEx = false; }
+                case "<" -> { max = secs; maxEx = true; }
+                default -> { max = secs; maxEx = false; }
+            }
+        }
+        return min == null && max == null ? null : new DurationFilter(min, minEx, max, maxEx);
+    }
+
+    /** seconds of the amount in groups {@code g..g+3} (number, unit, optional second number and unit) */
+    private static Long amount(Matcher m, int g) {
+        Double n = number(m.group(g));
+        double u = unitSeconds(m.group(g + 1));
+        if (n == null || u <= 0) return null;
+        double secs = n * u;
+        if (m.group(g + 2) != null) {
+            Double n2 = number(m.group(g + 2));
+            double u2 = unitSeconds(m.group(g + 3));
+            if (n2 != null && u2 > 0) secs += n2 * u2;
+        }
+        return Math.round(secs);
+    }
+
+    private static Double number(String s) {
+        if (s == null) return null;
+        String t = s.trim().toLowerCase(Locale.ROOT);
+        if (t.contains("halb") || t.startsWith("half")) return 0.5;
+        if (t.matches("eine[nmr]?|ein|one|an?")) return 1.0;
+        if (t.equals("zwei") || t.equals("two")) return 2.0;
+        if (t.equals("drei") || t.equals("three")) return 3.0;
+        try {
+            return Double.parseDouble(t.replace(',', '.'));
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
+    private static double unitSeconds(String unit) {
+        if (unit == null) return -1;
+        String u = unit.toLowerCase(Locale.ROOT).replace(".", "");
+        if (u.startsWith("sek") || u.startsWith("sec") || u.equals("s")) return 1;
+        if (u.startsWith("min")) return 60;
+        if (u.startsWith("stund") || u.startsWith("std") || u.startsWith("hour") || u.startsWith("hr") || u.equals("h")) return 3600;
+        return -1;
+    }
+
+    /**
+     * {@code sql} (a fixed template: {@code SELECT * FROM response_records
+     * WHERE ... ORDER BY ...}) with the additional condition {@code cond};
+     * unchanged if {@code cond} is null or the statement has no WHERE clause.
+     */
+    public static String addCondition(String sql, String cond) {
+        if (sql == null || cond == null || cond.isBlank()) return sql;
+        int where = sql.toUpperCase(Locale.ROOT).indexOf("WHERE");
+        if (where < 0) return sql;
+        int order = sql.toUpperCase(Locale.ROOT).lastIndexOf("ORDER BY");
+        if (order < where) order = sql.length();
+        return sql.substring(0, order).stripTrailing() + "\n  AND (" + cond + ")\n" + sql.substring(order);
+    }
 
     /**
      * Regex-based, deterministic extraction of a LAC/TAC and/or CI value
@@ -1145,14 +1399,14 @@ public class RAGPipeline {
                           SELECT imsi FROM response_records
                           WHERE imsi IS NOT NULL AND imsi <> ''
                             AND na_device_id IS NOT NULL AND na_device_id <> ''%1$s
-                          GROUP BY imsi
+                          GROUP BY +imsi
                           HAVING COUNT(DISTINCT na_device_id) > 1
                       )
                       OR na_device_id IN (
                           SELECT na_device_id FROM response_records
                           WHERE na_device_id IS NOT NULL AND na_device_id <> ''
                             AND imsi IS NOT NULL AND imsi <> ''%1$s
-                          GROUP BY na_device_id
+                          GROUP BY +na_device_id
                           HAVING COUNT(DISTINCT imsi) > 1
                       )
                   )
@@ -1182,6 +1436,12 @@ public class RAGPipeline {
         public String normalizedRequest;       // set by RAGPipeline.classifyIntent after normalization
         /** See {@link #isAmbiguousTimeOfDayWithoutDate()}. Set by RAGPipeline.classifyIntent. */
         public boolean ambiguousTimeOfDayWithoutDate;
+        /**
+         * The request asks for subscribers seen in all cell sites ("in allen
+         * Funkzellen"): only the Wanderer with the most cell sites are wanted.
+         * Set by RAGPipeline.classifyIntent.
+         */
+        public boolean allCells;
 
         private QueryIntent(String intent, String startTime, String endTime,
                              String identifierColumn, String identifierLabel, String callSmsType,
@@ -1226,13 +1486,20 @@ public class RAGPipeline {
             QueryIntent copy = new QueryIntent(newIntent, newStart, newEnd,
                     identifierColumn, identifierLabel, newCallSmsType, country);
             copy.normalizedRequest = this.normalizedRequest;
+            copy.allCells = this.allCells;
             return copy;
+        }
+
+        /** Copy with another time range (e.g. chosen by the analyst before running). */
+        public QueryIntent withTimeRange(String newStartTime, String newEndTime) {
+            return withTimeWindow(newStartTime, newEndTime);
         }
 
         private QueryIntent withTimeWindow(String newStartTime, String newEndTime) {
             QueryIntent copy = new QueryIntent(intent, newStartTime, newEndTime,
                     identifierColumn, identifierLabel, callSmsType, country);
             copy.normalizedRequest = this.normalizedRequest;
+            copy.allCells = this.allCells;
             return copy;
         }
 

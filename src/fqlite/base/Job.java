@@ -50,6 +50,7 @@ import fqlite.ui.WALPropertyPanel;
 import fqlite.util.Auxiliary;
 import fqlite.util.ByteSeqSearcher;
 import javafx.application.Platform;
+import javafx.collections.FXCollections;
 import javafx.collections.ObservableList;
 import javafx.scene.control.Alert;
 import javafx.scene.control.Alert.AlertType;
@@ -114,6 +115,23 @@ public class Job {
 	/* this is a multi-threaded program -> all data are saved to the list first*/
 	public ConcurrentHashMap<String,ObservableList<ObservableList<String>>> resultlist = new ConcurrentHashMap<>();
 	public ConcurrentHashMap<String,ObservableList<ObservableList<byte[]>>> hexdumplist = new ConcurrentHashMap<>();
+	/** shares equal cell values of recovered rows while loading (see {@link StringPool}) */
+	public final StringPool stringPool = new StringPool();
+
+	/*
+	 * Live entries of index b-trees loaded on demand. An ETSI database with 8 indexes holds
+	 * 8 index entries for every record; they are mostly copies of the table values and made up
+	 * about half of the memory. For databases of at least Limits.INDEX_ON_DEMAND_MB the live
+	 * entries of the indexes are not kept while loading: the index pages are still read (so the
+	 * deleted entries are carved exactly as before), the post-processing gets the live entries
+	 * of one index at a time, and they are read again from the file when they are needed
+	 * (table opened, export, search). Deleted and freelist entries are always loaded.
+	 */
+	/** indexes whose live entries are not loaded yet */
+	private final Set<String> deferredIndexes = ConcurrentHashMap.newKeySet();
+	/** number of live entries of each deferred index (known after loading) */
+	private final Map<String, Integer> deferredLiveCount = new ConcurrentHashMap<>();
+	private volatile boolean deferLiveIndexEntries = false;
 
 
 	/* some constants */
@@ -1474,6 +1492,9 @@ public class Job {
 		}
 
 
+		decideCarving();
+		decideIndexDeferral();
+
 		///*******************************************************************/
 
 		byte[] freepageno = new byte[4];
@@ -1698,10 +1719,11 @@ public class Job {
 		// attribute records of orphaned pages to the right table (structurally identical tables)
 		reassignOrphanPages();
 
-		// drop stale copies of live records found on freed pages (b-tree rebalancing)
-		removeStaleCopiesOfLiveRecords();
-		removeTruncatedDuplicates();
-		markUpdatedRecords();
+		// drop stale copies of live records found on freed pages (b-tree rebalancing),
+		// truncated duplicates, and flag older versions of live records
+		postProcessRecords();
+		if (skipCarving)
+			reportLighthouseDatabase();
 
 		if (gui != null) {
 
@@ -1946,6 +1968,9 @@ public class Job {
 	 */
 	public boolean exportDB(String filename, String objectname, ExportType exp){
 
+		if (exp == ExportType.SQLITEDB)
+			loadDeferredFor(objectname);
+
 		String dbname = objectname;
 
 		if(exp == ExportType.SQLITEDB || exp == ExportType.ROLLBACKJOURNAL || exp == ExportType.WALARCHIVE)
@@ -2011,6 +2036,9 @@ public class Job {
 	/// @param exp			type of export (single table, complete database, WAL, journal)
 	@SuppressWarnings("incomplete-switch")
 	public boolean exportResults2File(File file, String objectname, FileType parenttype, ExportType exp){
+
+		if (exp == ExportType.SQLITEDB)
+			loadDeferredFor(objectname);
 
 		String dbname = null;
 
@@ -2272,6 +2300,9 @@ public class Job {
 	 */
 	public void exportToCASE(String dbname, String outputPath, String xpath, ExportType exp, boolean isTable, String tname) throws IOException {
 
+		if (exp == ExportType.SQLITEDB)
+			loadDeferredFor(isTable ? tname : null);
+
 		CASEExport.exportToCase(this, dbname, outputPath, xpath, exp, isTable, tname);
 
 	}
@@ -2285,6 +2316,9 @@ public class Job {
 	 * @throws IOException
 	 */
 	public void exportToHtml(String dbname, String outputPath, String xpath, ExportType exp, boolean isTable, String tname) throws IOException {
+
+		if (exp == ExportType.SQLITEDB)
+			loadDeferredFor(isTable ? tname : null);
 
 		try (BufferedWriter writer = new BufferedWriter(new FileWriter(outputPath, StandardCharsets.UTF_8))) {
 
@@ -3394,6 +3428,8 @@ public class Job {
 		} catch (IOException e) {
 			AppLog.error("Could not open file " + path + ": " + e.getMessage());
 			info("Error: Could not open file.");
+		} finally {
+			stringPool.release();
 		}
 		long end = System.currentTimeMillis();
 		AppLog.info("Duration in ms: " + (end - start));
@@ -3711,6 +3747,377 @@ public class Job {
 	}
 
 	/**
+	 * Runs the post-processing of the recovered records (stale copies, truncated duplicates,
+	 * older versions) - table by table, as before. For an index whose live entries are loaded
+	 * on demand, its live entries are read for the post-processing and dropped again
+	 * afterwards, one index at a time, so they are never all in memory together. The
+	 * post-processing of a table only uses the rows of that table, so the result is the same.
+	 */
+	private void postProcessRecords() {
+		List<String> tables = new ArrayList<>();
+		for (String t : resultlist.keySet())
+			if (!deferredIndexes.contains(t))
+				tables.add(t);
+		int stale = removeStaleCopiesOfLiveRecords(tables);
+		int truncated = removeTruncatedDuplicates(tables);
+		int updated = markUpdatedRecords(tables);
+
+		for (String idx : new ArrayList<>(deferredIndexes)) {
+			ObservableList<ObservableList<String>> rows = resultlist.computeIfAbsent(idx, k -> FXCollections.observableArrayList());
+			ObservableList<ObservableList<byte[]>> hex = hexdumplist.computeIfAbsent(idx, k -> FXCollections.observableArrayList());
+			// the post-processing only removes or flags deleted/freelist/truncated records: an
+			// index without any of them is left as it is, its live entries need not be read
+			if (!hasRecoveredRows(rows) && !truncatedLiveIndexes.contains(idx)) {
+				deferredLiveCount.putIfAbsent(idx, 0);
+				continue;
+			}
+			List<DataRow> live = readLiveIndexRows(idx);
+			List<ObservableList<String>> liveRows = new ArrayList<>(live.size());
+			List<ObservableList<byte[]>> liveHex = new ArrayList<>(live.size());
+			for (DataRow r : live) {
+				liveRows.add(stringPool.row(r.line()));
+				liveHex.add(CompactList.hexRow(r.hexdump()));
+			}
+			live.clear();
+			// post-process deleted + live entries in a working copy of the table
+			ObservableList<ObservableList<String>> work = FXCollections.observableList(new ArrayList<>(rows.size() + liveRows.size()));
+			ObservableList<ObservableList<byte[]>> workHex = FXCollections.observableList(new ArrayList<>(hex.size() + liveHex.size()));
+			work.addAll(rows);
+			work.addAll(liveRows);
+			workHex.addAll(hex);
+			workHex.addAll(liveHex);
+			resultlist.put(idx, work);
+			hexdumplist.put(idx, workHex);
+			List<String> one = List.of(idx);
+			stale += removeStaleCopiesOfLiveRecords(one);
+			truncated += removeTruncatedDuplicates(one);
+			updated += markUpdatedRecords(one);
+			resultlist.put(idx, rows);
+			hexdumplist.put(idx, hex);
+			// the post-processing only removes or flags deleted entries: the live entries are
+			// still the last rows of the working copy - keep everything before them
+			int n = liveRows.size();
+			if (n > 0 && work.size() >= n && work.get(work.size() - n) == liveRows.get(0) && workHex.size() == work.size()) {
+				rows.setAll(work.subList(0, work.size() - n));
+				hex.setAll(workHex.subList(0, workHex.size() - n));
+			} else if (n > 0) {
+				// unexpected - keep the index loaded rather than lose entries
+				rows.setAll(work);
+				hex.setAll(workHex);
+				deferredIndexes.remove(idx);
+				AppLog.error("Index " + idx + ": live entries kept loaded (unexpected row order after post-processing)");
+				continue;
+			} else {
+				rows.setAll(work);
+				hex.setAll(workHex);
+			}
+			deferredLiveCount.put(idx, n);
+		}
+
+		if (stale > 0)
+			info(stale + " deleted/freelist record(s) are identical copies of live records (b-tree rebalancing) - not reported.");
+		if (truncated > 0)
+			info(truncated + " truncated record(s) are empty or partial copies of completely recovered records - not reported.");
+		if (updated > 0)
+			info(updated + " deleted record(s) are older versions of live records (UPDATE) - flagged.");
+		if (!deferredIndexes.isEmpty())
+			info("Live entries of " + deferredIndexes.size() + " index(es) are loaded on demand (database >= "
+					+ Limits.INDEX_ON_DEMAND_MB + " MiB, Settings > Display & limits).");
+	}
+
+	/**
+	 * true: no search for deleted records (freeblocks, unallocated areas, freelist and dropped
+	 * pages) - set for Lighthouse databases, see {@link #decideCarving()}
+	 */
+	public volatile boolean skipCarving = false;
+	/** result of the import-log check of a Lighthouse database (null if not checked) */
+	public volatile String lighthouseCheck = null;
+
+	/**
+	 * A Lighthouse database is written by FQLite's own ETSI importer (fqlite.importer); the
+	 * evidence is the imported ETSI XML file, not this database. Deleted records in it are
+	 * left-overs of the import (e.g. b-tree page splits) - searching them costs time and only
+	 * produces noise. A later modification is detected more reliably by comparing the records
+	 * with the import log (see {@link #reportLighthouseDatabase()}). The search can be switched
+	 * on again with {@link Limits#CARVE_LIGHTHOUSE_DB}.
+	 */
+	private void decideCarving() {
+		skipCarving = Limits.CARVE_LIGHTHOUSE_DB == 0 && isLighthouseSchema();
+		lighthouseCheck = null;
+		if (skipCarving)
+			info("Lighthouse (ETSI) database recognised: deleted records are not searched (Settings > Display & limits).");
+	}
+
+	/** schema of FQLite's ETSI importer: response_records, request_metadata and import_log */
+	private boolean isLighthouseSchema() {
+		TableDescriptor rr = header("response_records"), rm = header("request_metadata"), il = header("import_log");
+		return rr != null && rm != null && il != null && rr.columnnames.contains("source_file")
+				&& il.columnnames.contains("rows_inserted") && il.columnnames.contains("importer_version");
+	}
+
+	private TableDescriptor header(String name) {
+		for (TableDescriptor t : headers)
+			if (name.equals(t.tblname))
+				return t;
+		return null;
+	}
+
+	/**
+	 * Compares the records of response_records per source file with the number the importer
+	 * wrote ({@code import_log.rows_inserted}) and reports the result - in GUI mode as a note.
+	 * A difference means the database was modified after the import.
+	 */
+	private void reportLighthouseDatabase() {
+		TableDescriptor rr = header("response_records"), il = header("import_log");
+		ObservableList<ObservableList<String>> rrRows = resultlist.get("response_records");
+		ObservableList<ObservableList<String>> ilRows = resultlist.get("import_log");
+		int srcCol = rr == null ? -1 : rr.columnnames.indexOf("source_file");
+		int ilSrc = il == null ? -1 : il.columnnames.indexOf("source_file");
+		int ilRows_ = il == null ? -1 : il.columnnames.indexOf("rows_inserted");
+		Map<String, Long> actual = new TreeMap<>(), expected = new TreeMap<>();
+		if (rrRows != null && srcCol >= 0)
+			for (ObservableList<String> r : rrRows)
+				if (r.size() > 5 + srcCol && Global.REGULAR_RECORD.equals(r.get(3)))
+					actual.merge(String.valueOf(r.get(5 + srcCol)), 1L, Long::sum);
+		if (ilRows != null && ilSrc >= 0 && ilRows_ >= 0)
+			for (ObservableList<String> r : ilRows)
+				if (r.size() > 5 + Math.max(ilSrc, ilRows_) && Global.REGULAR_RECORD.equals(r.get(3))) {
+					try {
+						expected.merge(String.valueOf(r.get(5 + ilSrc)), Long.parseLong(r.get(5 + ilRows_).trim()), Long::sum);
+					} catch (NumberFormatException e) {
+						expected.merge(String.valueOf(r.get(5 + ilSrc)), -1L, (x, y) -> -1L);
+					}
+				}
+		long a = actual.values().stream().mapToLong(Long::longValue).sum();
+		long e = expected.values().stream().mapToLong(Long::longValue).sum();
+		boolean ok = !expected.isEmpty() && actual.equals(expected);
+		StringBuilder sb = new StringBuilder();
+		sb.append("Lighthouse (ETSI) database written by FQLite's importer. The search for deleted records was skipped: "
+				+ "the evidence is the imported ETSI XML file (its SHA-256 is in import_log).\n\n");
+		if (expected.isEmpty()) {
+			sb.append("The import log holds no record counts - the records could not be checked.");
+		} else if (ok) {
+			sb.append(String.format("Import log check: %,d of %,d records, as written by the importer (%d source file%s).",
+					a, e, expected.size(), expected.size() == 1 ? "" : "s"));
+		} else {
+			sb.append(String.format("WARNING - the records differ from the import log: %,d records in the database, %,d written by the importer.%n",
+					a, e));
+			Set<String> files = new java.util.TreeSet<>(expected.keySet());
+			files.addAll(actual.keySet());
+			for (String f : files)
+				if (!java.util.Objects.equals(actual.get(f), expected.get(f)))
+					sb.append(String.format("  %s: %,d in the database, %s in the import log%n", f, actual.getOrDefault(f, 0L),
+							expected.containsKey(f) ? String.format("%,d", expected.get(f)) : "none"));
+			sb.append("\nThe database may have been modified after the import. To search it for deleted records, set "
+					+ "\"Search deleted records in Lighthouse (ETSI) databases\" to 1 (Settings > Display & limits) and open it again.");
+		}
+		lighthouseCheck = sb.toString();
+		info(lighthouseCheck.replace("\n\n", " "));
+		if (gui != null) {
+			final boolean warn = !ok;
+			final String text = lighthouseCheck;
+			Platform.runLater(() -> {
+				Alert alert = new Alert(warn ? AlertType.WARNING : AlertType.INFORMATION);
+				alert.setTitle("Lighthouse database");
+				alert.setHeaderText(warn ? "Records differ from the import log" : "Lighthouse (ETSI) database recognised");
+				javafx.scene.control.Label body = new javafx.scene.control.Label(text);
+				body.setWrapText(true);
+				body.setMaxWidth(580);
+				body.setMinHeight(javafx.scene.layout.Region.USE_PREF_SIZE);
+				alert.getDialogPane().setContent(body);
+				alert.getDialogPane().setPrefWidth(620);
+				alert.getDialogPane().setMinHeight(javafx.scene.layout.Region.USE_PREF_SIZE);
+				alert.setResizable(true);
+				alert.show();
+			});
+		}
+	}
+
+	/**
+	 * Decides before the scan whether the live entries of the index b-trees are loaded on
+	 * demand: database of at least {@link Limits#INDEX_ON_DEMAND_MB} MiB, and no WAL archive or
+	 * rollback journal (their analysis compares against all rows of the database).
+	 */
+	private void decideIndexDeferral() {
+		deferredIndexes.clear();
+		deferredLiveCount.clear();
+		truncatedLiveIndexes.clear();
+		deferLiveIndexEntries = false;
+		if (Limits.INDEX_ON_DEMAND_MB <= 0 || path == null || indices.isEmpty())
+			return;
+		if (size < ((long) Limits.INDEX_ON_DEMAND_MB << 20))
+			return;
+		if (readWAL || readRollbackJournal || new File(path + "-wal").exists() || new File(path + "-journal").exists())
+			return;
+		for (IndexDescriptor id : indices)
+			if (id.idxname != null && !id.idxname.isEmpty())
+				deferredIndexes.add(id.idxname);
+		deferLiveIndexEntries = !deferredIndexes.isEmpty();
+	}
+
+	/** counts a live index entry that was not kept (see {@link #isLiveIndexRowDeferred}) */
+	void countDeferredLiveRow(List<String> line) {
+		deferredLiveCount.merge(line.getFirst(), 1, Integer::sum);
+		String pll = line.size() > 1 ? line.get(1) : null;
+		if (pll != null && pll.contains(Auxiliary.FLAG_TRUNCATED))
+			truncatedLiveIndexes.add(line.getFirst());     // may be removed as truncated duplicate
+	}
+
+	/** deferred indexes with a live entry flagged as truncated (post-processing may remove it) */
+	private final Set<String> truncatedLiveIndexes = ConcurrentHashMap.newKeySet();
+
+	/** true if {@code rows} contains a deleted, freelist or truncated record */
+	private static boolean hasRecoveredRows(List<ObservableList<String>> rows) {
+		for (ObservableList<String> r : rows) {
+			if (r.size() <= 5)
+				continue;
+			String st = r.get(3), pll = r.get(1);
+			if (Global.DELETED_RECORD_IN_PAGE.equals(st) || Global.FREELIST_ENTRY.equals(st)
+					|| (pll != null && pll.contains(Auxiliary.FLAG_TRUNCATED)))
+				return true;
+		}
+		return false;
+	}
+
+	/** true if {@code line} is a live entry of an index whose live entries are loaded on demand */
+	boolean isLiveIndexRowDeferred(List<String> line) {
+		return deferLiveIndexEntries && line.size() > 3 && Global.REGULAR_RECORD.equals(line.get(3))
+				&& deferredIndexes.contains(line.getFirst());
+	}
+
+	/** true if the live entries of {@code table} (an index) are not loaded yet */
+	public boolean isIndexDeferred(String table) {
+		return table != null && deferredIndexes.contains(table);
+	}
+
+	/** number of live entries of {@code table} that are not loaded yet (0 if none) */
+	public int deferredLiveRows(String table) {
+		return isIndexDeferred(table) ? deferredLiveCount.getOrDefault(table, 0) : 0;
+	}
+
+	/** number of live index entries of all indexes that are not loaded yet */
+	public long deferredLiveRows() {
+		long n = 0;
+		for (String t : deferredIndexes)
+			n += deferredLiveCount.getOrDefault(t, 0);
+		return n;
+	}
+
+	/**
+	 * Reads the live entries of index {@code idx} from the database file: the pages of its
+	 * b-tree that the scan reads, with the same record reader (see the collect mode of
+	 * {@link RecoveryTask}), in page order.
+	 */
+	List<DataRow> readLiveIndexRows(String idx) {
+		List<DataRow> out = new ArrayList<>();
+		// after loading, the file buffer is closed: open it read-only for this call
+		boolean reopened = false;
+		synchronized (this) {
+			if (db == null) {
+				try {
+					db = new BigByteBuffer(path);
+					reopened = true;
+				} catch (IOException e) {
+					AppLog.error("Index " + idx + ": database file could not be opened again: " + e.getMessage());
+					return out;
+				}
+			}
+		}
+		try {
+			readLiveIndexRows(idx, out);
+		} finally {
+			if (reopened)
+				synchronized (this) {
+					try {
+						db.close();
+					} catch (IOException e) {
+						AppLog.debug("closing database buffer: " + e.getMessage());
+					}
+					db = null;
+				}
+		}
+		return out;
+	}
+
+	private void readLiveIndexRows(String idx, List<DataRow> out) {
+		Auxiliary util = new Auxiliary(this);
+		Set<Integer> free = new HashSet<>(freelistpages);
+		for (int cc = 2; cc < pages.length; cc++) {
+			AbstractDescriptor d = pages[cc];
+			if (!(d instanceof IndexDescriptor) || !idx.equals(((IndexDescriptor) d).idxname) || d.doNotScan || free.contains(cc))
+				continue;
+			try {
+				new RecoveryTask(util, this, (cc - 1L) * ps, cc, ps, idx, out).recover();
+			} catch (RuntimeException e) {
+				AppLog.error("Index " + idx + ": page " + cc + " could not be read again: " + e.getMessage());
+			}
+		}
+	}
+
+	/**
+	 * Loads the live entries of a deferred index into {@link #resultlist}/{@link #hexdumplist}
+	 * (appended after the deleted entries). In GUI mode the rows get their line numbers, as
+	 * all other rows, and the open table is updated.
+	 *
+	 * @param idx index name
+	 * @return the rows added (empty if the index was not deferred)
+	 */
+	public List<ObservableList<String>> loadDeferredIndex(String idx) {
+		List<ObservableList<String>> added;
+		synchronized (deferredIndexes) {
+			if (!deferredIndexes.contains(idx))
+				return List.of();
+			info("Loading live entries of index " + idx + " ...");
+			List<DataRow> live = readLiveIndexRows(idx);
+			added = new ArrayList<>(live.size());
+			List<ObservableList<byte[]>> addedHex = new ArrayList<>(live.size());
+			ObservableList<ObservableList<String>> rows = resultlist.computeIfAbsent(idx, k -> FXCollections.observableArrayList());
+			ObservableList<ObservableList<byte[]>> hex = hexdumplist.computeIfAbsent(idx, k -> FXCollections.observableArrayList());
+			synchronized (resultlist) {
+				int next = rows.size();
+				for (DataRow r : live) {
+					ObservableList<String> row = stringPool.row(r.line());
+					ObservableList<byte[]> h = CompactList.hexRow(r.hexdump());
+					if (gui != null)
+						GUI.prepareRow(row, h, ++next);     // BLOB icons and line number, as update_table()
+					added.add(row);
+					addedHex.add(h);
+				}
+				rows.addAll(added);
+				hex.addAll(addedHex);
+			}
+			stringPool.release();
+			deferredIndexes.remove(idx);
+			deferredLiveCount.remove(idx);
+		}
+		if (gui != null)
+			gui.deferredRowsLoaded(this, idx, added);
+		return added;
+	}
+
+	/**
+	 * Loads the live entries of all deferred indexes - called by every function that works on
+	 * all rows of the database (exports, search, timeline).
+	 */
+	public void loadAllDeferredIndexes() {
+		for (String idx : new ArrayList<>(deferredIndexes))
+			loadDeferredIndex(idx);
+	}
+
+	/**
+	 * Before exporting {@code objectname}: loads the live entries it needs - of this index, or
+	 * of all indexes if the whole database is exported.
+	 */
+	public void loadDeferredFor(String objectname) {
+		if (deferredIndexes.isEmpty())
+			return;
+		if (objectname != null && deferredIndexes.contains(objectname))
+			loadDeferredIndex(objectname);
+		else if (objectname == null || !resultlist.containsKey(objectname))
+			loadAllDeferredIndexes();
+	}
+
+	/**
 	 * B-tree rebalancing (e.g. after a range DELETE) moves live cells to other pages; the
 	 * freed pages still contain the old, byte-identical copies. Reporting them as deleted or
 	 * freelist records is a false positive (Lee et al. 2025, "Type **"). A deleted/freelist
@@ -3718,12 +4125,31 @@ public class Job {
 	 * if both are known, the same rowid). Copies with different content (older versions of an
 	 * updated row) are kept - they are evidence.
 	 */
-	private void removeStaleCopiesOfLiveRecords() {
+	private int removeStaleCopiesOfLiveRecords(Iterable<String> tables) {
 		int removed = 0;
-		for (String table : resultlist.keySet()) {
+		for (String table : tables) {
 			ObservableList<ObservableList<String>> rows = resultlist.get(table);
 			ObservableList<ObservableList<byte[]>> hex = hexdumplist.get(table);
 			if (rows == null || rows.size() < 2)
+				continue;
+			// Keys the deleted/freelist records will look up. Only live records with one of
+			// these keys are indexed below: the maps stay as small as the number of deleted
+			// records instead of holding a copy of every live record (same result - other
+			// keys are never looked up). Tables without deleted records are skipped.
+			Set<List<String>> wanted = new HashSet<>();
+			Set<List<String>> wantedNoId = new HashSet<>();
+			for (ObservableList<String> r : rows) {
+				if (r.size() <= 5)
+					continue;
+				String st = r.get(3);
+				if (!Global.FREELIST_ENTRY.equals(st) && !Global.DELETED_RECORD_IN_PAGE.equals(st))
+					continue;
+				wanted.add(new ArrayList<>(r.subList(5, r.size())));
+				List<String> v = blankValues(r.subList(5, r.size()));
+				if (v.stream().filter(x -> !x.isEmpty()).count() >= 2)
+					wantedNoId.add(v);
+			}
+			if (wanted.isEmpty())
 				continue;
 			Map<List<String>, Set<String>> live = new HashMap<>();
 			// same, with the INTEGER PRIMARY KEY column (value = rowid) blanked: a carved copy loses
@@ -3731,21 +4157,28 @@ public class Job {
 			Map<List<String>, Set<String>> liveNoId = new HashMap<>();
 			for (ObservableList<String> r : rows)
 				if (r.size() > 5 && Global.REGULAR_RECORD.equals(r.get(3))) {
-					live.computeIfAbsent(new ArrayList<>(r.subList(5, r.size())), k -> new HashSet<>()).add(r.get(2));
+					List<String> key = r.subList(5, r.size());
+					if (wanted.contains(key))
+						live.computeIfAbsent(new ArrayList<>(key), k -> new HashSet<>()).add(r.get(2));
 					String rid = r.get(2) == null ? "" : r.get(2).trim();
-					if (!positiveRowid(rid))
+					if (wantedNoId.isEmpty() || !positiveRowid(rid))
 						continue;
 					// one key per column that holds the rowid (the INTEGER PRIMARY KEY; another
 					// column may hold the same number by chance, e.g. a counter)
-					List<String> base = blankValues(r.subList(5, r.size()));
-					for (int k = 0; k < base.size(); k++)
-						if (rid.equals(base.get(k).trim())) {
-							List<String> v = new ArrayList<>(base);
-							v.set(k, "");
-							liveNoId.computeIfAbsent(v, x -> new HashSet<>()).add(rid);
-						}
+					List<String> base = null;
+					for (int k = 5; k < r.size(); k++) {
+						String x = r.get(k);
+						if (x == null || !rid.equals(x.trim()))
+							continue;
+						if (base == null)
+							base = blankValues(key);
+						List<String> v = new ArrayList<>(base);
+						v.set(k - 5, "");
+						if (wantedNoId.contains(v))
+							liveNoId.computeIfAbsent(v, y -> new HashSet<>()).add(rid);
+					}
 				}
-			if (live.isEmpty())
+			if (live.isEmpty() && liveNoId.isEmpty())
 				continue;
 			for (int i = rows.size() - 1; i >= 0; i--) {
 				ObservableList<String> r = rows.get(i);
@@ -3772,8 +4205,7 @@ public class Job {
 				}
 			}
 		}
-		if (removed > 0)
-			info(removed + " deleted/freelist record(s) are identical copies of live records (b-tree rebalancing) - not reported.");
+		return removed;
 	}
 
 	/**
@@ -3783,9 +4215,9 @@ public class Job {
 	 * non-empty value of the copy equals or is a prefix of the corresponding value. Truncated
 	 * records without any recovered value are dropped as well.
 	 */
-	private void removeTruncatedDuplicates() {
+	private int removeTruncatedDuplicates(Iterable<String> tables) {
 		int removed = 0;
-		for (String table : resultlist.keySet()) {
+		for (String table : tables) {
 			ObservableList<ObservableList<String>> rows = resultlist.get(table);
 			ObservableList<ObservableList<byte[]>> hex = hexdumplist.get(table);
 			if (rows == null || rows.size() < 2)
@@ -3823,8 +4255,7 @@ public class Job {
 				}
 			}
 		}
-		if (removed > 0)
-			info(removed + " truncated record(s) are empty or partial copies of completely recovered records - not reported.");
+		return removed;
 	}
 
 	/**
@@ -3833,15 +4264,29 @@ public class Job {
 	 * older version left behind by an UPDATE. The finding is appended to the "[pll|hl]" column.
 	 * (Rows of a dropped and re-created table share the rowid but no values - not flagged.)
 	 */
-	private void markUpdatedRecords() {
+	private int markUpdatedRecords(Iterable<String> tables) {
 		int marked = 0;
-		for (String table : resultlist.keySet()) {
+		for (String table : tables) {
 			ObservableList<ObservableList<String>> rows = resultlist.get(table);
 			if (rows == null || rows.size() < 2)
 				continue;
+			// rowids the deleted/freelist records ask for; only live records with one of them
+			// are indexed (same result, but no index over every live record of the table)
+			Set<String> wanted = new HashSet<>();
+			for (ObservableList<String> r : rows) {
+				if (r.size() <= 5)
+					continue;
+				String st = r.get(3), pll = r.get(1);
+				if ((Global.DELETED_RECORD_IN_PAGE.equals(st) || Global.FREELIST_ENTRY.equals(st))
+						&& pll != null && !pll.contains(Auxiliary.FLAG_UPDATED) && r.get(2) != null)
+					wanted.add(r.get(2).trim());
+			}
+			if (wanted.isEmpty())
+				continue;
 			Map<String, List<ObservableList<String>>> live = new HashMap<>();
 			for (ObservableList<String> r : rows)
-				if (r.size() > 5 && Global.REGULAR_RECORD.equals(r.get(3)) && positiveRowid(r.get(2)))
+				if (r.size() > 5 && Global.REGULAR_RECORD.equals(r.get(3)) && r.get(2) != null
+						&& wanted.contains(r.get(2).trim()) && positiveRowid(r.get(2)))
 					live.computeIfAbsent(r.get(2).trim(), k -> new ArrayList<>()).add(r);
 			if (live.isEmpty())
 				continue;
@@ -3865,9 +4310,8 @@ public class Job {
 				}
 			}
 		}
-		marked += markUpdatedWithoutRowid();
-		if (marked > 0)
-			info(marked + " deleted record(s) are older versions of live records (UPDATE) - flagged.");
+		marked += markUpdatedWithoutRowid(tables);
+		return marked;
 	}
 
 	/**
@@ -3876,11 +4320,28 @@ public class Job {
 	 * table shares a distinctive value with it and has the same value in all but one of its
 	 * (at least three) non-empty columns.
 	 */
-	private int markUpdatedWithoutRowid() {
+	private int markUpdatedWithoutRowid(Iterable<String> tables) {
 		int marked = 0;
-		for (String table : resultlist.keySet()) {
+		for (String table : tables) {
 			ObservableList<ObservableList<String>> rows = resultlist.get(table);
 			if (rows == null || rows.size() < 2)
+				continue;
+			// (column, value) pairs of the records that will be compared below. Only these
+			// pairs are indexed - instead of every value of every live record - so the index
+			// stays as small as the number of deleted records. Lists are capped at 51 rows:
+			// a value shared by more than 50 live rows is not distinctive and never used, the
+			// cap keeps that decision unchanged.
+			Map<Integer, Set<String>> wanted = new HashMap<>();
+			for (ObservableList<String> r : rows) {
+				if (!isCandidateWithoutRowid(r))
+					continue;
+				for (int k = 5; k < r.size(); k++) {
+					String v = r.get(k);
+					if (v != null && !v.isEmpty() && !v.equals("NULL"))
+						wanted.computeIfAbsent(k, x -> new HashSet<>()).add(v);
+				}
+			}
+			if (wanted.isEmpty())
 				continue;
 			// index: column -> value -> live rows (only distinctive values are used)
 			Map<Integer, Map<String, List<ObservableList<String>>>> index = new HashMap<>();
@@ -3891,7 +4352,12 @@ public class Job {
 					String v = r.get(k);
 					if (v == null || v.isEmpty() || v.equals("NULL"))
 						continue;
-					index.computeIfAbsent(k, x -> new HashMap<>()).computeIfAbsent(v, x -> new ArrayList<>()).add(r);
+					Set<String> w = wanted.get(k);
+					if (w == null || !w.contains(v))
+						continue;
+					List<ObservableList<String>> l = index.computeIfAbsent(k, x -> new HashMap<>()).computeIfAbsent(v, x -> new ArrayList<>());
+					if (l.size() <= 50)
+						l.add(r);
 				}
 			}
 			if (index.isEmpty())
@@ -3937,6 +4403,17 @@ public class Job {
 			}
 		}
 		return marked;
+	}
+
+	/** deleted/freelist record without rowid that markUpdatedWithoutRowid() compares */
+	private static boolean isCandidateWithoutRowid(List<String> r) {
+		if (r.size() <= 5 || positiveRowid(r.get(2)))
+			return false;
+		String st = r.get(3), pll = r.get(1);
+		if (!Global.DELETED_RECORD_IN_PAGE.equals(st) && !Global.FREELIST_ENTRY.equals(st))
+			return false;
+		return pll != null && !pll.contains(Auxiliary.FLAG_UPDATED) && !pll.contains(Auxiliary.FLAG_TRUNCATED)
+				&& !pll.contains("header\u2260payload");
 	}
 
 	private static boolean differsInOneColumn(List<String> deleted, List<String> live) {

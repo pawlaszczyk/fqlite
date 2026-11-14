@@ -29,6 +29,36 @@ public final class Limits {
 	public static int GAPS_MAX_LISTED = 100_000;
 	/** maximum number of hits of a case search */
 	public static int CASE_MAX_HITS = 100_000;
+	/**
+	 * databases of at least this size (MiB) load the live entries of their index b-trees only
+	 * when needed (table opened, export, search); 0 = always load them right away
+	 */
+	public static int INDEX_ON_DEMAND_MB = 256;
+	/**
+	 * 1 = also search for deleted records in Lighthouse (ETSI) databases written by FQLite's
+	 * importer; 0 (default) = skip it, the evidence is the imported XML file
+	 */
+	public static int CARVE_LIGHTHOUSE_DB = 0;
+
+	/**
+	 * Lighthouse, database opened directly: from this number of records the map
+	 * and timeline show an overview (counts per location and time, records read
+	 * page by page) instead of loading every record; 0 = always the overview
+	 */
+	public static int LIGHTHOUSE_OVERVIEW_ROWS = 2_000_000;
+
+	/**
+	 * Lighthouse overview: filter and query results up to this number of
+	 * records are loaded completely (all functions on single records); larger
+	 * results are shown as an overview
+	 */
+	public static int LIGHTHOUSE_DETAIL_ROWS = 500_000;
+
+	/**
+	 * Lighthouse (database opened directly): ask before a query whose estimated
+	 * duration is at least this many seconds; 0 = never ask
+	 */
+	public static int LIGHTHOUSE_CONFIRM_SECONDS = 30;
 
 	public static long blobMaxBytes() {
 		return (long) BLOB_MAX_MB << 20;
@@ -44,6 +74,11 @@ public final class Limits {
 		FIELD_MAX_PATHS = get(p, "FIELD_MAX_PATHS", FIELD_MAX_PATHS, 10, 100_000);
 		GAPS_MAX_LISTED = get(p, "GAPS_MAX_LISTED", GAPS_MAX_LISTED, 100, 100_000_000);
 		CASE_MAX_HITS = get(p, "CASE_MAX_HITS", CASE_MAX_HITS, 100, 100_000_000);
+		INDEX_ON_DEMAND_MB = get(p, "INDEX_ON_DEMAND_MB", INDEX_ON_DEMAND_MB, 0, 1_000_000);
+		CARVE_LIGHTHOUSE_DB = get(p, "CARVE_LIGHTHOUSE_DB", CARVE_LIGHTHOUSE_DB, 0, 1);
+		LIGHTHOUSE_OVERVIEW_ROWS = get(p, "LIGHTHOUSE_OVERVIEW_ROWS", LIGHTHOUSE_OVERVIEW_ROWS, 0, Integer.MAX_VALUE);
+		LIGHTHOUSE_DETAIL_ROWS = get(p, "LIGHTHOUSE_DETAIL_ROWS", LIGHTHOUSE_DETAIL_ROWS, 1_000, 100_000_000);
+		LIGHTHOUSE_CONFIRM_SECONDS = get(p, "LIGHTHOUSE_CONFIRM_SECONDS", LIGHTHOUSE_CONFIRM_SECONDS, 0, 1_000_000);
 	}
 
 	public static void store(Properties p) {
@@ -56,6 +91,11 @@ public final class Limits {
 		p.setProperty("FIELD_MAX_PATHS", String.valueOf(FIELD_MAX_PATHS));
 		p.setProperty("GAPS_MAX_LISTED", String.valueOf(GAPS_MAX_LISTED));
 		p.setProperty("CASE_MAX_HITS", String.valueOf(CASE_MAX_HITS));
+		p.setProperty("INDEX_ON_DEMAND_MB", String.valueOf(INDEX_ON_DEMAND_MB));
+		p.setProperty("CARVE_LIGHTHOUSE_DB", String.valueOf(CARVE_LIGHTHOUSE_DB));
+		p.setProperty("LIGHTHOUSE_OVERVIEW_ROWS", String.valueOf(LIGHTHOUSE_OVERVIEW_ROWS));
+		p.setProperty("LIGHTHOUSE_DETAIL_ROWS", String.valueOf(LIGHTHOUSE_DETAIL_ROWS));
+		p.setProperty("LIGHTHOUSE_CONFIRM_SECONDS", String.valueOf(LIGHTHOUSE_CONFIRM_SECONDS));
 	}
 
 	public static int get(Properties p, String key, int def, int min, int max) {

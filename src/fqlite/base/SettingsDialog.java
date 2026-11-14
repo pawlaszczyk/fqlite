@@ -541,7 +541,12 @@ public class SettingsDialog extends Application {
                 { "Rows sampled by \"Decode column into fields\"", Limits.FIELD_SCAN_ROWS, 10, 10_000_000, "SCAN" },
                 { "Max. fields per decoded value", Limits.FIELD_MAX_PATHS, 10, 100_000, "PATHS" },
                 { "Max. missing row numbers listed per table", Limits.GAPS_MAX_LISTED, 100, 100_000_000, "GAPS" },
-                { "Max. hits of a case search", Limits.CASE_MAX_HITS, 100, 100_000_000, "HITS" } };
+                { "Max. hits of a case search", Limits.CASE_MAX_HITS, 100, 100_000_000, "HITS" },
+                { "Load live index entries on demand from DB size (MiB, 0 = never)", Limits.INDEX_ON_DEMAND_MB, 0, 1_000_000, "IDXMB" },
+                { "Search deleted records in Lighthouse (ETSI) databases (1 = yes, 0 = no)", Limits.CARVE_LIGHTHOUSE_DB, 0, 1, "LHCARVE" },
+                { "Lighthouse (large databases): overview from records (0 = always)", Limits.LIGHTHOUSE_OVERVIEW_ROWS, 0, Integer.MAX_VALUE, "LHOVR" },
+                { "Lighthouse overview: load filter/query results completely up to records", Limits.LIGHTHOUSE_DETAIL_ROWS, 1_000, 100_000_000, "LHDET" },
+                { "Lighthouse: ask before queries estimated to take at least (seconds, 0 = never)", Limits.LIGHTHOUSE_CONFIRM_SECONDS, 0, 1_000_000, "LHASK" } };
         int lr = 0;
         for (Object[] d : defs) {
             javafx.scene.control.Spinner<Integer> sp = new javafx.scene.control.Spinner<>((int) d[2], (int) d[3], (int) d[1]);
@@ -608,6 +613,11 @@ public class SettingsDialog extends Application {
                         case "PATHS" -> Limits.FIELD_MAX_PATHS = Math.max(10, v);
                         case "GAPS" -> Limits.GAPS_MAX_LISTED = Math.max(100, v);
                         case "HITS" -> Limits.CASE_MAX_HITS = Math.max(100, v);
+                        case "IDXMB" -> Limits.INDEX_ON_DEMAND_MB = Math.max(0, v);
+                        case "LHCARVE" -> Limits.CARVE_LIGHTHOUSE_DB = Math.max(0, Math.min(1, v));
+                        case "LHOVR" -> Limits.LIGHTHOUSE_OVERVIEW_ROWS = Math.max(0, v);
+                        case "LHDET" -> Limits.LIGHTHOUSE_DETAIL_ROWS = Math.max(1_000, v);
+                        case "LHASK" -> Limits.LIGHTHOUSE_CONFIRM_SECONDS = Math.max(0, v);
                         default -> { }
                     }
                 }

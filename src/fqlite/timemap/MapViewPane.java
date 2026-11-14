@@ -1,10 +1,12 @@
 package fqlite.timemap;
 
 import fqlite.base.Global;
+import fqlite.base.Limits;
 import fqlite.base.ThemeManager;
 import fqlite.rag.RAGPipeline;
 import fqlite.sql.DBManager;
-import fqlite.sql.InMemoryDatabase;
+import fqlite.sql.QueryableDatabase;
+import fqlite.sql.ReadOnlySqliteDatabase;
 import fqlite.timemap.DataAnalyzer.DataPoint;
 import fqlite.timemap.DataAnalyzer.ResponseRecordDataPoint;
 import javafx.application.Platform;
@@ -30,6 +32,7 @@ import java.sql.ResultSetMetaData;
 import java.sql.SQLException;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.logging.Level;
 import java.util.logging.Logger;
 
 /**
@@ -51,12 +54,14 @@ import java.util.logging.Logger;
  * <h3>LLM interaction</h3>
  * <p>The embedded prompt bar at the bottom sends the user's natural-language
  * question to the {@link RAGPipeline}.  The pipeline returns a SELECT statement
- * which is then executed directly against the {@link InMemoryDatabase}.
+ * which is then executed directly against the attached {@link QueryableDatabase}
+ * (the in-memory copy of recovered records, or the database file itself when
+ * it was opened directly via {@link #setBaseDatabase}).
  * The resulting rows are converted to a {@link ConcurrentHashMap} and fed back
  * into {@link #setData} so the timeline, map and detail panel update
  * automatically — without opening a separate SQL Analyser window.</p>
  *
- * <p>Call {@link #attachLLM(RAGPipeline, InMemoryDatabase)} once after the
+ * <p>Call {@link #attachLLM(RAGPipeline, QueryableDatabase)} once after the
  * pipeline has been initialised to enable the bar; until then it shows a
  * "not configured" hint and the button is disabled.</p>
  */
@@ -79,6 +84,17 @@ public class MapViewPane extends BorderPane {
     // filtered rows that happen to also be calls".
     private final MapView mocMtcMapView = new MapView();
     private final Label   mocMtcCountLabel = new Label();
+    /** time range of the MOC/MTC tab */
+    private final CheckBox      mocTimeBox = new CheckBox();
+    private final DateTimeField mocFrom    = new DateTimeField();
+    private final DateTimeField mocTo      = new DateTimeField();
+    private final Button        mocApply   = new Button();
+    private final Label         mocArrow   = new Label("→");
+    /** all MOC/MTC calls of the shown records (single records only) */
+    private List<DataPoint> mocMtcBase = List.of();
+    /** overview of time-filtered calls of a large database, or null */
+    private Overview mocOverview;
+    private int mocGeneration;
     /** Details list below {@link #mocMtcMapView}: one row per MOC/MTC call, with duration + direction. */
     private final TableView<DataPoint> mocMtcTable;
     private static final Color MOC_COLOR = Color.web("#22c55e"); // green-500 — outgoing
@@ -110,6 +126,8 @@ public class MapViewPane extends BorderPane {
     // ── LLM bar widgets ───────────────────────────────────────────────────────
     private final TextField llmPromptField;
     private final Button    llmRunButton;
+    /** stops the running query (see {@link #cancelOperations}) */
+    private final Button    llmCancelButton = new Button();
     private final Label     llmStatusLabel;
     private final HBox      llmBar;
     /** Shown instead of map redraw when an LLM prompt is classified as a co-location query. */
@@ -123,11 +141,33 @@ public class MapViewPane extends BorderPane {
 
     /** Shown alongside the map redraw when an LLM prompt is classified as a "wechsler" (Geräte-/SIM-Wechsel) query. */
     private final TableView<WechslerRow> wechslerTable;
+    /** duration restriction of the current request of the assistant ("länger als 60 Minuten"), or null */
+    private volatile RAGPipeline.DurationFilter llmDuration;
+
+    /** {@code sql} with the duration restriction of the current request */
+    private String withDuration(String sql) {
+        RAGPipeline.DurationFilter d = llmDuration;
+        return d == null ? sql : RAGPipeline.addCondition(sql, d.sql());
+    }
+
+    /** appends the duration restriction to the status line (FX thread) */
+    private void appendDurationStatus() {
+        RAGPipeline.DurationFilter d = llmDuration;
+        if (d != null) llmStatusLabel.setText(llmStatusLabel.getText() + "  |  " + Lang.t("Dauer ", "duration ") + d.label());
+    }
+
+    /** participants (one row per IMSI) of a filter query of the assistant */
+    private final TableView<ParticipantRow> participantsTable;
+    /** query of the assistant the participants list belongs to (see {@link #showParticipants}) */
+    private volatile int participantsGen;
 
     /** Set by {@link #attachLLM}; {@code null} means LLM not yet ready. */
     private RAGPipeline    ragPipeline  = null;
-    /** Set by {@link #attachLLM}; needed to execute the generated SQL. */
-    private InMemoryDatabase inMemoryDB = null;
+    /**
+     * Database the generated SQL, the presets and the reset run against. Set
+     * by {@link #attachLLM} or {@link #setBaseDatabase}.
+     */
+    private QueryableDatabase database = null;
 
     // =========================================================================
     // Construction
@@ -244,7 +284,34 @@ public class MapViewPane extends BorderPane {
         mocMtcSplit.setDividerPositions(0.62);
 
         BorderPane mocMtcTabContent = new BorderPane();
-        mocMtcTabContent.setTop(mocMtcLegend);
+        mocTimeBox.setText(Lang.t("Zeitraum einschränken", "Restrict time range"));
+        mocApply.setText(Lang.t("Anwenden", "Apply"));
+        mocFrom.setPromptText(Lang.t("JJJJ-MM-TT (von)", "YYYY-MM-DD (from)"));
+        mocTo.setPromptText(Lang.t("JJJJ-MM-TT (bis)", "YYYY-MM-DD (to)"));
+        Lang.addListener(() -> {
+            mocTimeBox.setText(Lang.t("Zeitraum einschränken", "Restrict time range"));
+            mocApply.setText(Lang.t("Anwenden", "Apply"));
+            mocFrom.setPromptText(Lang.t("JJJJ-MM-TT (von)", "YYYY-MM-DD (from)"));
+            mocTo.setPromptText(Lang.t("JJJJ-MM-TT (bis)", "YYYY-MM-DD (to)"));
+        });
+        mocTimeBox.setFont(Font.font("Monospace", 14));
+        mocFrom.setFieldFont(Font.font("Monospace", 14));
+        mocTo.setFieldFont(Font.font("Monospace", 14));
+        mocFrom.setDisable(true);
+        mocTo.setDisable(true);
+        mocApply.setDisable(true);
+        mocTimeBox.setOnAction(e -> {
+            boolean on = mocTimeBox.isSelected();
+            mocFrom.setDisable(!on);
+            mocTo.setDisable(!on);
+            mocApply.setDisable(!on);
+            refreshMocMtc();
+        });
+        mocApply.setOnAction(e -> refreshMocMtc());
+        HBox mocTimeRow = new HBox(8, mocTimeBox, mocFrom, mocArrow, mocTo, mocApply);
+        mocTimeRow.setAlignment(Pos.CENTER_LEFT);
+        mocTimeRow.setPadding(new Insets(0, 14, 6, 14));
+        mocMtcTabContent.setTop(new VBox(mocMtcLegend, mocTimeRow));
         mocMtcTabContent.setCenter(mocMtcSplit);
 
         // ── Tabs: map/timeline view vs. dedicated police-analysis panel ───────
@@ -288,10 +355,13 @@ public class MapViewPane extends BorderPane {
         // row shows every visited cell, not just the first one centered
         // on above.
         policeAnalysisPane.setImsiSelectListener(mapView::selectImsiForPath);
+        // the identifiers of a statistics result: their records in map and timeline
+        policeAnalysisPane.setResultListener(this::showStatisticsResult);
 
         // ── Wire selection events ─────────────────────────────────────────────
         timelineView.setSelectionListener(this::onTimelinePointSelected);
         mapView.setSelectionListener(this::onMapPointSelected);
+        mapView.setLocationLoadListener(this::onOverviewLocationLoad);
         timelineView.setFilterListener(filtered -> {
             currentMapPoints = filtered;
             mapView.setData(filtered);
@@ -339,10 +409,18 @@ public class MapViewPane extends BorderPane {
 
 
         VBox bottom = new VBox();
+        llmCancelButton.setText(Lang.t("■ Abbrechen", "■ Cancel"));
+        Lang.addListener(() -> llmCancelButton.setText(Lang.t("■ Abbrechen", "■ Cancel")));
+        llmCancelButton.setFont(Font.font("Monospace", FontWeight.BOLD, 14));
+        llmCancelButton.setTooltip(new Tooltip(Lang.t("Laufende Abfrage abbrechen", "Cancel the running query")));
+        llmCancelButton.setOnAction(e -> cancelOperations());
+        llmCancelButton.setManaged(false);
+        llmCancelButton.setVisible(false);
         llmBar = new HBox(8,
                 new Label("\uD83E\uDD16"),
                 llmPromptField,
                 llmRunButton,
+                llmCancelButton,
                 llmResetButton
         );
         llmBar.setAlignment(Pos.CENTER_LEFT);
@@ -360,12 +438,17 @@ public class MapViewPane extends BorderPane {
         wechslerTable.setManaged(false);
         wechslerTable.setVisible(false);
 
+        participantsTable = buildParticipantsTable();
+        participantsTable.setManaged(false);
+        participantsTable.setVisible(false);
+
         bottom.setPadding(new Insets(8, 14, 8, 14));
         bottom.getChildren().add(llmBar);
         bottom.getChildren().add(llmStatusLabel);
         bottom.getChildren().add(coLocationTable);
         bottom.getChildren().add(roamersTable);
         bottom.getChildren().add(wechslerTable);
+        bottom.getChildren().add(participantsTable);
         setBottom(bottom);
 
 
@@ -390,17 +473,16 @@ public class MapViewPane extends BorderPane {
      * pipeline.</p>
      *
      * @param pipeline an initialised {@link RAGPipeline} (schema already loaded)
-     * @param mdb      the {@link InMemoryDatabase} that backs the current
-     *                 analysis; its name must match the key in {@link DBManager}
+     * @param mdb      the database that backs the current analysis
      */
     /** Button caption for the DE/EN toggle, showing the language it would switch to. */
     private static String langToggleLabel() {
         return Lang.isGerman() ? "DE | en" : "de | EN";
     }
 
-    public void attachLLM(RAGPipeline pipeline, InMemoryDatabase mdb) {
+    public void attachLLM(RAGPipeline pipeline, QueryableDatabase mdb) {
         this.ragPipeline = pipeline;
-        this.inMemoryDB  = mdb;
+        this.database  = mdb;
         this.dbName      = mdb != null ? mdb.getDbName() : null;
         policeAnalysisPane.setDatabase(mdb);
         Platform.runLater(() -> {
@@ -476,25 +558,27 @@ public class MapViewPane extends BorderPane {
             List<DataPoint> points = analyzer.analyze(resultlist, safeHeaders, (doneRows, totalRows) ->
                     Platform.runLater(() -> loadingLabel.setText(String.format(
                             "Lade Geodaten… %,d / %,d Zeilen", doneRows, totalRows))));
-            Platform.runLater(() -> {
-                allPoints        = points;
-                currentMapPoints = points;
-                timelineView.setData(points);
-                mapView.setData(points, clearSequenceSelection);
-                List<DataPoint> mocMtc = filterMocMtc(points);
-                mocMtcMapView.setData(mocMtc);
-                mocMtcCountLabel.setText(String.format("%,d Anrufe", mocMtc.size()));
-                List<DataPoint> mocMtcSorted = new ArrayList<>(mocMtc);
-                mocMtcSorted.sort(Comparator.comparing(
-                        DataPoint::getTimestamp, Comparator.nullsLast(Comparator.naturalOrder())));
-                mocMtcTable.getItems().setAll(mocMtcSorted);
-                detailPane.clear(theme);
-                loadingOverlay.setVisible(false);
-                loadingOverlay.setManaged(false);
-            });
+            Platform.runLater(() -> applyPoints(points, clearSequenceSelection));
         }, "mapview-analyze-worker");
         worker.setDaemon(true);
         worker.start();
+    }
+
+    /**
+     * Shows already analysed points in timeline, maps and call table and hides
+     * the loading overlay. Must run on the FX thread.
+     */
+    private void applyPoints(List<DataPoint> points, boolean clearSequenceSelection) {
+        allPoints        = points;
+        currentMapPoints = points;
+        timelineView.setData(points);
+        mapView.setData(points, clearSequenceSelection);
+        mocMtcBase = filterMocMtc(points);
+        presetMocRange();
+        refreshMocMtc();
+        detailPane.clear(theme);
+        loadingOverlay.setVisible(false);
+        loadingOverlay.setManaged(false);
     }
 
     public void setData(
@@ -518,21 +602,30 @@ public class MapViewPane extends BorderPane {
      *            {@code RAGPipeline#build...Sql} fixed templates
      */
     public void runQueryAndDisplay(String sql) throws Exception {
-        if (inMemoryDB == null || sql == null) return;
+        if (database == null || sql == null) return;
         String trimmed = sql.trim();
         if (!trimmed.regionMatches(true, 0, "SELECT", 0, 6)) return;
 
-        ResultSet rs = inMemoryDB.execute(trimmed);
-        if (rs == null) return;
-
-        QueryRows qr = toResponseRecordsTable(rs);
-        rs.close();
+        if (costGate(null, List.of(trimmed), false, null, null) instanceof QueryCost.Cancel) {
+            notRun();
+            return;
+        }
+        QueryRows qr;
+        beginOperation();
+        try {
+            qr = queryForDisplay(trimmed);
+        } finally {
+            endOperation();
+        }
+        if (qr == null) return;
 
         Platform.runLater(() -> {
             setCoLocationTableVisible(false);
+            setParticipantsTableVisible(false);
             setRoamersTableVisible(false);
             setWechslerTableVisible(false);
-            setData(qr.data, qr.headers);
+            showQueryRows(qr);
+            setLlmStatus("✅ " + String.format("%,d", qr.rowCount) + " " + Lang.t("Datensatz/Datensätze", "record(s)"), theme.accent2);
         });
     }
 
@@ -549,7 +642,961 @@ public class MapViewPane extends BorderPane {
             Map<String, List<String>> headers) {
         this.baseResultList = new ConcurrentHashMap<>(resultlist);
         this.baseHeaders    = new HashMap<>(headers);
+        this.basePoints     = null;
         setData(resultlist, headers);
+    }
+
+    /**
+     * Points of the base dataset when it was loaded directly from the database
+     * file (see {@link #setBaseDatabase}); restored as-is by {@link #onLlmReset()}
+     * instead of re-reading and re-analysing the whole table.
+     */
+    private volatile List<DataPoint> basePoints;
+
+    /**
+     * Uses a Lighthouse database file, opened directly and read-only, as the
+     * base dataset — the alternative to {@link #setBaseData} for databases
+     * that are too large to be recovered into memory by fqlite.
+     *
+     * <p>The table {@code response_records} is streamed row by row on a
+     * separate connection (see {@link ReadOnlySqliteDatabase#openConnection()})
+     * on a background thread straight into {@link DataPoint}s (see
+     * {@link DataAnalyzer#analyzeResponseRecordsTable}); no copy of the table
+     * is kept in memory, and complete rows are read on demand by rowid. Analysis presets and the query assistant run
+     * their SQL against the file itself and use the importer's indexes. The
+     * presets are available right away, the query assistant once the LLM is
+     * attached via {@link #attachLLM}.</p>
+     *
+     * @param db the opened database; it stays owned by the caller
+     */
+    public void setBaseDatabase(ReadOnlySqliteDatabase db) {
+        this.baseResultList = null;
+        this.baseHeaders    = null;
+        this.basePoints     = null;
+        closeOverviews();
+        this.baseOverview   = null;
+        this.database       = db;
+        this.dbName         = db.getDbName();
+        policeAnalysisPane.setDatabase(db);
+
+        Platform.runLater(() -> {
+            loadingLabel.setText("Lade Geodaten…");
+            loadingOverlay.setManaged(true);
+            loadingOverlay.setVisible(true);
+        });
+        this.directDb = db;
+        if (rowLoader != null) rowLoader.close();
+        this.rowLoader = new DbRowLoader(db);
+        Thread worker = new Thread(() -> {
+            List<DataPoint> points;
+            try {
+                // large tables: overview (aggregates, records read page by page)
+                long rows = Overview.count(db::openConnection, null);
+                if (Limits.LIGHTHOUSE_OVERVIEW_ROWS == 0 || rows >= Limits.LIGHTHOUSE_OVERVIEW_ROWS) {
+                    // an overview built before for this unchanged file is read from the cache
+                    String key = cacheKey(db.getFile());
+                    java.io.File cache = key == null ? null : cacheFile(key);
+                    Overview cached = cache == null ? null : Overview.load(cache, key, analyzer, db::openConnection, rowLoader);
+                    if (cached != null) cache.setLastModified(System.currentTimeMillis());   // recently used
+                    Overview ov = cached != null ? cached
+                            : Overview.build(analyzer, db::openConnection, rowLoader, null, null, rows,
+                            (doneRows, all) -> Platform.runLater(() -> loadingLabel.setText(String.format(
+                                    Lang.t("Erstelle Übersicht… %,d / %,d Zeilen", "Building overview… %,d / %,d rows"),
+                                    doneRows, all))),
+                            threads());
+                    if (ov != null && cached == null && cache != null) {
+                        try {
+                            ov.save(cache, key);
+                            pruneCache(cache.getParentFile());
+                        } catch (Exception e) {
+                            LOG.log(Level.INFO, "Overview cache not written: " + cache, e);
+                        }
+                    }
+                    if (ov != null) {
+                        Platform.runLater(() -> {
+                            baseOverview = ov;
+                            setupOverviewMode();
+                            applyOverview(ov, true);
+                            setLlmStatus(String.format(Lang.t(
+                                    "Übersicht: %,d Datensätze – Ergebnisse bis %,d Datensätze werden vollständig geladen",
+                                    "Overview: %,d records – results up to %,d records are loaded completely"),
+                                    ov.getRecords(), Limits.LIGHTHOUSE_DETAIL_ROWS)
+                                    + (cached != null ? Lang.t(" (Übersicht aus dem Cache)", " (overview from cache)") : ""),
+                                    theme.label);
+                        });
+                        return;
+                    }
+                }
+                // large tables are read by several connections in parallel
+                points = analyzer.analyzeResponseRecordsTable(db::openConnection, (doneRows, all) ->
+                        Platform.runLater(() -> loadingLabel.setText(String.format(
+                                "Lade Geodaten… %,d / %,d Zeilen", doneRows, all))),
+                        rowLoader, threads());
+            } catch (Exception e) {
+                LOG.log(Level.SEVERE, "Loading response_records from " + db.getFile() + " failed", e);
+                points = null;
+            }
+            if (points == null) {
+                Platform.runLater(() -> {
+                    loadingOverlay.setVisible(false);
+                    loadingOverlay.setManaged(false);
+                    setLlmStatus(Lang.t(
+                            "⚠️ Tabelle response_records konnte nicht gelesen werden",
+                            "⚠️ Table response_records could not be read"), theme.hover);
+                });
+                return;
+            }
+            final List<DataPoint> loaded = points;
+            basePoints = loaded;
+            Platform.runLater(() -> applyPoints(loaded, false));
+        }, "mapview-db-loader");
+        worker.setDaemon(true);
+        worker.start();
+    }
+
+    // =========================================================================
+    // Overview of large databases (see Overview)
+    // =========================================================================
+
+    /** database opened directly (setBaseDatabase), else null */
+    private ReadOnlySqliteDatabase directDb;
+    private DbRowLoader rowLoader;
+    /** overview of the whole table when it is too large to load every record */
+    private volatile Overview baseOverview;
+    /** overview currently shown (base or filtered), or null when single records are shown */
+    private Overview currentOverview;
+    /** condition of the current query / location result (null: whole table) */
+    private String resultCond;
+    /** condition of the timeline filter bar (null: none) */
+    private String timelineCond;
+    /** condition currently displayed (resultCond AND timelineCond) */
+    private String shownCond;
+    /** guards against results of an older filter arriving after a newer one */
+    private int filterGeneration;
+
+    private static int threads() {
+        return Math.max(1, Math.min(8, Runtime.getRuntime().availableProcessors()));
+    }
+
+    private DataAnalyzer.ConnectionSource source() {
+        ReadOnlySqliteDatabase db = directDb;
+        return () -> {
+            checkCancelled();
+            java.sql.Connection c = db.openConnection();
+            try {
+                for (Selection sel : selections) sel.attach(c);
+            } catch (SQLException e) {
+                c.close();
+                throw e;
+            }
+            if (runningOps.get() > 0) {
+                opConnections.removeIf(x -> { try { return x.isClosed(); } catch (SQLException e) { return true; } });
+                opConnections.add(c);
+            }
+            return c;
+        };
+    }
+
+    // ── running operations: cancel and duration estimate ─────────────────
+
+    /** connections opened by running operations (interrupted by "Cancel") */
+    private final Set<java.sql.Connection> opConnections = ConcurrentHashMap.newKeySet();
+    private final java.util.concurrent.atomic.AtomicInteger runningOps = new java.util.concurrent.atomic.AtomicInteger();
+    private volatile boolean cancelRequested;
+    private final Map<String, Long> costRanges = QueryCost.newRangeCache();
+
+    /** An operation (query, filter) starts: shows the cancel button. */
+    private void beginOperation() {
+        if (runningOps.getAndIncrement() == 0) cancelRequested = false;
+        Platform.runLater(() -> {
+            llmCancelButton.setManaged(true);
+            llmCancelButton.setVisible(true);
+            llmCancelButton.setDisable(false);
+        });
+    }
+
+    /** An operation ended: hides the cancel button when none is left. */
+    private void endOperation() {
+        if (runningOps.decrementAndGet() <= 0) {
+            runningOps.set(0);
+            opConnections.clear();
+            Platform.runLater(() -> {
+                if (runningOps.get() > 0) return;
+                llmCancelButton.setManaged(false);
+                llmCancelButton.setVisible(false);
+            });
+        }
+    }
+
+    /**
+     * Stops the running queries: every statement on the connections of the
+     * running operations and on the shared connection is interrupted
+     * (sqlite3_interrupt); the operations end with an error that is shown as
+     * "cancelled", the data shown before stays.
+     */
+    private void cancelOperations() {
+        if (runningOps.get() == 0) return;
+        cancelRequested = true;
+        llmCancelButton.setDisable(true);
+        setLlmStatus(Lang.t("⏹ Wird abgebrochen…", "⏹ Cancelling…"), theme.label);
+        for (java.sql.Connection c : opConnections) QueryCost.interrupt(c);
+        if (database != null) QueryCost.interrupt(database.getConnectionObject());
+    }
+
+    /** true if the running operation was cancelled or {@code e} reports an interrupt */
+    private boolean wasCancelled(Throwable e) {
+        return cancelRequested || (e != null && QueryCost.isInterrupt(e));
+    }
+
+    /**
+     * Estimates the duration of the queries {@code sqls} on a database opened
+     * directly and asks whether to run them when it exceeds the setting
+     * (Settings > Display &amp; limits). Returns {@link QueryCost#RUN} for small
+     * databases and quick queries.
+     *
+     * @param what        description for the question (the request)
+     * @param restrictable true if the query can be run with another time range
+     * @param from        current start of the time range, or null
+     * @param to          current end, or null
+     */
+    private QueryCost.Decision costGate(String what, List<String> sqls, boolean restrictable, String from, String to) {
+        if (directDb == null || Limits.LIGHTHOUSE_CONFIRM_SECONDS == 0) return QueryCost.RUN;
+        QueryCost.Estimate est;
+        try (java.sql.Connection c = directDb.openConnection()) {
+            if (tableRows < 0) tableRows = QueryCost.tableRows(c);
+            est = QueryCost.estimate(c, sqls, tableRows, costRanges);
+        } catch (SQLException e) {
+            return QueryCost.RUN;
+        }
+        if (!QueryCost.needsConfirmation(est)) return QueryCost.RUN;
+        String[] preset = null;
+        if (restrictable) {
+            if (from != null && to != null) {
+                preset = new String[] { from, to };
+            } else {
+                String range = queryDataDateRange();
+                java.util.regex.Matcher m = java.util.regex.Pattern.compile(
+                        "(\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2}).*?(\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2})")
+                        .matcher(range == null ? "" : range);
+                if (m.find()) preset = new String[] { m.group(1), m.group(2) };
+            }
+        }
+        return QueryCost.ask(getScene() != null ? getScene().getWindow() : null, what, est, preset);
+    }
+
+    /**
+     * Ends a cancelled operation: once "Cancel" was pressed, no further step
+     * of the running operation starts (a statement interrupted earlier would
+     * otherwise just be followed by the next one).
+     */
+    private void checkCancelled() throws SQLException {
+        if (cancelRequested && runningOps.get() > 0) throw new SQLException("interrupted (cancelled)");
+    }
+
+    /** {@code database.execute} that stops a cancelled operation */
+    private ResultSet exec(String sql) throws SQLException {
+        checkCancelled();
+        ResultSet rs = database.execute(sql);
+        if (rs == null) checkCancelled();
+        return rs;
+    }
+
+    /** status after "Cancel" in the question */
+    private void notRun() {
+        Platform.runLater(() -> {
+            setLlmStatus(Lang.t("⏹ Nicht ausgeführt", "⏹ Not run"), theme.label);
+            llmRunButton.setDisable(false);
+        });
+    }
+
+    /** results of conditions with subqueries, evaluated once (see Selection) */
+    private final List<Selection> selections = new java.util.concurrent.CopyOnWriteArrayList<>();
+
+    /** Closes the selections no longer used by the shown data or the filters. */
+    private void releaseSelections() {
+        for (Selection sel : selections) {
+            boolean used = sel.isUsedBy(resultCond) || sel.isUsedBy(shownCond)
+                    || currentOverview != null && sel.isUsedBy(currentOverview.getCondition());
+            if (!used) {
+                selections.remove(sel);
+                sel.close();
+            }
+        }
+    }
+
+    /** row counts of start_time ranges (see tuneTimeRanges) */
+    private final Map<String, Long> rangeCounts = new ConcurrentHashMap<>();
+    private long tableRows = -1;
+
+    /**
+     * Without statistics SQLite reads a {@code start_time BETWEEN} range
+     * through the index even when it covers most of the table; on a large
+     * file every row is then read in random order, which takes many minutes.
+     * Ranges with more than 5 % of the records get a unary plus so they are
+     * checked during a sequential scan instead (same result).
+     */
+    private String tuneTimeRanges(String sql) {
+        if (directDb == null || sql == null) return sql;
+        java.util.regex.Matcher m = java.util.regex.Pattern
+                .compile("(?i)(?<![+\\w.\"])start_time(\\s+BETWEEN\\s+'([^']*)'\\s+AND\\s+'([^']*)')").matcher(sql);
+        StringBuilder sb = new StringBuilder();
+        try (java.sql.Connection c = directDb.openConnection()) {
+            if (tableRows < 0) {
+                try (java.sql.Statement st = c.createStatement();
+                     ResultSet rs = st.executeQuery("SELECT COUNT(*) FROM response_records")) {
+                    tableRows = rs.next() ? rs.getLong(1) : 0;
+                }
+            }
+            while (m.find()) {
+                String key = m.group(2) + "\u0000" + m.group(3);
+                Long n = rangeCounts.get(key);
+                if (n == null) {
+                    try (java.sql.PreparedStatement ps = c.prepareStatement(
+                            "SELECT COUNT(*) FROM response_records WHERE start_time BETWEEN ? AND ?")) {
+                        ps.setString(1, m.group(2));
+                        ps.setString(2, m.group(3));
+                        try (ResultSet rs = ps.executeQuery()) { n = rs.next() ? rs.getLong(1) : 0L; }
+                    }
+                    rangeCounts.put(key, n);
+                }
+                boolean broad = tableRows > 0 && n * 20 > tableRows;
+                m.appendReplacement(sb, java.util.regex.Matcher.quoteReplacement((broad ? "+start_time" : "start_time") + m.group(1)));
+            }
+            m.appendTail(sb);
+            return sb.toString();
+        } catch (SQLException e) {
+            return sql;
+        }
+    }
+
+    /** cached overviews kept at most (oldest are deleted) */
+    private static final int CACHE_FILES = 20;
+
+    /**
+     * Identifies the state of a database file for the overview cache: path,
+     * size and modification time of the file and of a -wal file. Any change
+     * gives a new key, so a changed database is analysed again.
+     */
+    static String cacheKey(File db) {
+        try {
+            File f = db.getCanonicalFile();
+            File wal = new File(f.getPath() + "-wal");
+            return f.getPath() + "|" + f.length() + "|" + f.lastModified()
+                    + "|" + (wal.isFile() ? wal.length() + "|" + wal.lastModified() : "-");
+        } catch (java.io.IOException e) {
+            return null;
+        }
+    }
+
+    /**
+     * Cache file of an overview: {@code ~/.fqlite/lighthouse-cache/<hash>.ovc}.
+     * Kept outside the folder of the database, so evidence folders are not
+     * written to.
+     */
+    static File cacheFile(String key) {
+        try {
+            byte[] h = java.security.MessageDigest.getInstance("SHA-256")
+                    .digest(key.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            File dir = new File(new File(System.getProperty("user.home"), ".fqlite"), "lighthouse-cache");
+            if (!dir.isDirectory() && !dir.mkdirs()) return null;
+            return new File(dir, java.util.HexFormat.of().formatHex(h) + ".ovc");
+        } catch (java.security.NoSuchAlgorithmException e) {
+            return null;
+        }
+    }
+
+    /** keeps the most recently written cache files */
+    private static void pruneCache(File dir) {
+        File[] files = dir == null ? null : dir.listFiles((d, n) -> n.endsWith(".ovc"));
+        if (files == null || files.length <= CACHE_FILES) return;
+        Arrays.sort(files, Comparator.comparingLong(File::lastModified).reversed());
+        for (int i = CACHE_FILES; i < files.length; i++) files[i].delete();
+    }
+
+    /** Releases the connections and selections of a database opened directly (window closed). */
+    public void dispose() {
+        closeOverviews();
+        if (mocOverview != null) { mocOverview.close(); mocOverview = null; }
+        for (Selection sel : selections) sel.close();
+        selections.clear();
+        if (rowLoader != null) rowLoader.close();
+    }
+
+    /** closes the page connections of all overviews */
+    private void closeOverviews() {
+        if (currentOverview != null && currentOverview != baseOverview) currentOverview.close();
+        if (baseOverview != null) baseOverview.close();
+        currentOverview = null;
+    }
+
+    /** Wires the timeline for a large database: filters run as SQL, pick lists come from the index. */
+    private void setupOverviewMode() {
+        timelineView.setExternalFilter(this::onTimelineFilter);
+        timelineView.setPickSource(mode -> {
+            Overview ov = baseOverview;
+            return ov == null ? List.of() : ov.distinct(idColumn(mode));
+        });
+        timelineView.setWindowListener(this::onTimelineWindow);
+        resultCond = null;
+        timelineCond = null;
+        shownCond = null;
+    }
+
+    private static String idColumn(TimelineView.IdMode mode) {
+        return switch (mode) {
+            case IMSI -> "imsi";
+            case IMEI -> "na_device_id";
+            case MSISDN -> "msisdn";
+        };
+    }
+
+    /** Shows an overview in timeline, maps and call table. Must run on the FX thread. */
+    private void applyOverview(Overview ov, boolean clearSequenceSelection) {
+        if (currentOverview != null && currentOverview != ov && currentOverview != baseOverview)
+            currentOverview.close();
+        currentOverview = ov;
+        allPoints = List.of();
+        currentMapPoints = List.of();
+        mapView.setOverviewData(ov.getRepresentatives(), ov.getTotals(), ov.getRecords(), ov, clearSequenceSelection);
+        // after the map: the timeline may set the counts of its visible time span
+        timelineView.setPagedData(new TimelineView.PagedSource() {
+            @Override public int size() { return ov.timelineSize(); }
+            @Override public DataPoint get(int idx) { return ov.timelineGet(idx); }
+            @Override public java.time.Instant timeAt(int idx) { return ov.timelineTimeAt(idx); }
+            @Override public int indexOf(DataPoint dp) { return ov.timelineIndexOf(dp); }
+        });
+        mocMtcBase = List.of();
+        presetMocRange();
+        refreshMocMtc();
+        detailPane.clear(theme);
+        loadingOverlay.setVisible(false);
+        loadingOverlay.setManaged(false);
+    }
+
+    // ── MOC/MTC tab: time range ─────────────────────────────────────────────
+
+    private static final java.util.regex.Pattern ISO_SECONDS =
+            java.util.regex.Pattern.compile("\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2}");
+
+    /**
+     * Shows the calls of the current data in the MOC/MTC tab, restricted to the
+     * time range when it is switched on: single records are filtered in memory
+     * by their timestamp; on an overview of a large database the calls of the
+     * range are read from the file (completely up to the detail limit, else as
+     * an overview).
+     */
+    private void refreshMocMtc() {
+        int gen = ++mocGeneration;
+        if (mocOverview != null) { mocOverview.close(); mocOverview = null; }
+        String from = null, to = null;
+        if (mocTimeBox.isSelected()) {
+            from = mocFrom.getText();
+            to = mocTo.getText();
+            if (!ISO_SECONDS.matcher(from).matches() || !ISO_SECONDS.matcher(to).matches()) {
+                mocMtcCountLabel.setText(Lang.t("⚠️ Zeitraum unvollständig", "⚠️ Time range incomplete"));
+                return;
+            }
+        }
+        Overview ov = currentOverview;
+        if (ov == null) {
+            List<DataPoint> list = mocMtcBase;
+            if (from != null) {
+                java.time.Instant a = DataAnalyzer.parseIsoSeconds(from), z = DataAnalyzer.parseIsoSeconds(to);
+                List<DataPoint> f = new ArrayList<>();
+                for (DataPoint dp : list) {
+                    java.time.Instant t = dp.getTimestamp();
+                    if (t != null && a != null && z != null && !t.isBefore(a) && !t.isAfter(z)) f.add(dp);
+                }
+                list = f;
+            }
+            showMocPoints(list);
+            return;
+        }
+        String ci = ov.column("call_indicator") != null ? ov.column("call_indicator") : "call_indicator";
+        String st = ov.column("start_time") != null ? ov.column("start_time") : "start_time";
+        if (from == null) {
+            mocMtcMapView.setOverviewData(ov.getCallRepresentatives(), ov.getCallTotals(), ov.getCallRecords(), ov, false);
+            loadMocTable(ov, gen, ci + " IN ('MOC','MTC')" + (ov.getCondition() != null ? " AND (" + ov.getCondition() + ")" : ""),
+                    ov.getCallRecords());
+            return;
+        }
+        String cond = tuneTimeRanges(ci + " IN ('MOC','MTC') AND " + st + " BETWEEN '" + from + "' AND '" + to + "'")
+                + (ov.getCondition() != null ? " AND (" + ov.getCondition() + ")" : "");
+        mocMtcCountLabel.setText(Lang.t("⏳ Anrufe werden gelesen…", "⏳ Reading calls…"));
+        Thread t = new Thread(() -> {
+            beginOperation();
+            try {
+                long n = Overview.count(source(), cond);
+                if (n <= Limits.LIGHTHOUSE_DETAIL_ROWS) {
+                    List<DataPoint> pts = n == 0 ? List.of()
+                            : analyzer.analyzeResponseRecordsTable(source(), cond, n, null, rowLoader, threads());
+                    List<DataPoint> calls = filterMocMtc(pts == null ? List.of() : pts);
+                    Platform.runLater(() -> { if (gen == mocGeneration) showMocPoints(calls); });
+                } else {
+                    Overview co = Overview.build(analyzer, source(), rowLoader, cond, null, n, null, threads());
+                    Platform.runLater(() -> {
+                        if (gen != mocGeneration || co == null) { if (co != null) co.close(); return; }
+                        mocOverview = co;
+                        mocMtcMapView.setOverviewData(co.getCallRepresentatives(), co.getCallTotals(), co.getCallRecords(), co, false);
+                        mocMtcTable.getItems().clear();
+                        mocMtcCountLabel.setText(String.format(Lang.t(
+                                "%,d Anrufe (Liste erst ab höchstens %,d – bitte filtern)", "%,d calls (list only up to %,d – please filter)"),
+                                co.getCallRecords(), Limits.LIGHTHOUSE_DETAIL_ROWS));
+                    });
+                }
+            } catch (Exception e) {
+                boolean stop = wasCancelled(e);
+                if (!stop) LOG.log(Level.WARNING, "Reading calls failed", e);
+                Platform.runLater(() -> {
+                    if (gen == mocGeneration)
+                        mocMtcCountLabel.setText(stop ? Lang.t("⏹ Abgebrochen", "⏹ Cancelled") : "❌ " + e.getMessage());
+                });
+            } finally {
+                endOperation();
+            }
+        }, "mapview-calls");
+        t.setDaemon(true);
+        t.start();
+    }
+
+    /** MOC/MTC tab with single calls (map and list) */
+    private void showMocPoints(List<DataPoint> calls) {
+        mocMtcMapView.setData(calls);
+        mocMtcCountLabel.setText(String.format(Lang.t("%,d Anrufe", "%,d calls"), calls.size()));
+        List<DataPoint> sorted = new ArrayList<>(calls);
+        sorted.sort(Comparator.comparing(DataPoint::getTimestamp, Comparator.nullsLast(Comparator.naturalOrder())));
+        mocMtcTable.getItems().setAll(sorted);
+    }
+
+    /** call list of an overview: loaded in the background up to the detail limit */
+    private void loadMocTable(Overview ov, int gen, String callCond, long calls) {
+        mocMtcTable.getItems().clear();
+        if (calls > Limits.LIGHTHOUSE_DETAIL_ROWS) {
+            mocMtcCountLabel.setText(String.format(Lang.t(
+                    "%,d Anrufe (Liste erst ab höchstens %,d – bitte filtern)", "%,d calls (list only up to %,d – please filter)"),
+                    calls, Limits.LIGHTHOUSE_DETAIL_ROWS));
+            return;
+        }
+        mocMtcCountLabel.setText(String.format(Lang.t("%,d Anrufe", "%,d calls"), calls));
+        Thread t = new Thread(() -> {
+            try {
+                List<DataPoint> pts = calls == 0 ? List.of()
+                        : analyzer.analyzeResponseRecordsTable(source(), callCond, calls, null, rowLoader, threads());
+                List<DataPoint> mocMtc = new ArrayList<>(filterMocMtc(pts == null ? List.of() : pts));
+                mocMtc.sort(Comparator.comparing(DataPoint::getTimestamp, Comparator.nullsLast(Comparator.naturalOrder())));
+                Platform.runLater(() -> { if (gen == mocGeneration && currentOverview == ov) mocMtcTable.getItems().setAll(mocMtc); });
+            } catch (Exception e) {
+                LOG.log(Level.WARNING, "Reading calls failed", e);
+            }
+        }, "mapview-calls");
+        t.setDaemon(true);
+        t.start();
+    }
+
+    /**
+     * Marks the time span of the data in the calendars of the MOC/MTC tab and
+     * presets empty fields with it: single records from their timestamps, an
+     * overview from the first and last start_time (index).
+     */
+    private void presetMocRange() {
+        if (currentOverview == null) {
+            java.time.Instant a = null, z = null;
+            for (DataPoint dp : mocMtcBase) {
+                java.time.Instant t = dp.getTimestamp();
+                if (t == null) continue;
+                if (a == null || t.isBefore(a)) a = t;
+                if (z == null || t.isAfter(z)) z = t;
+            }
+            setMocRange(a, z);
+            return;
+        }
+        QueryableDatabase db = database;
+        if (db == null) return;
+        Thread t = new Thread(() -> {
+            String min = null, max = null;
+            try {
+                ResultSet rs = db.execute("SELECT start_time FROM response_records WHERE start_time >= '' "
+                        + "AND typeof(start_time) = 'text' ORDER BY start_time LIMIT 1");
+                if (rs != null) { if (rs.next()) min = rs.getString(1); rs.close(); }
+                rs = db.execute("SELECT start_time FROM response_records WHERE start_time >= '' "
+                        + "AND typeof(start_time) = 'text' ORDER BY start_time DESC LIMIT 1");
+                if (rs != null) { if (rs.next()) max = rs.getString(1); rs.close(); }
+            } catch (Exception e) {
+                return;
+            }
+            java.time.Instant a = min == null ? null : DataAnalyzer.parseIsoSeconds(min.trim());
+            java.time.Instant z = max == null ? null : DataAnalyzer.parseIsoSeconds(max.trim());
+            Platform.runLater(() -> setMocRange(a, z));
+        }, "mapview-call-range");
+        t.setDaemon(true);
+        t.start();
+    }
+
+    private void setMocRange(java.time.Instant a, java.time.Instant z) {
+        if (a == null || z == null) return;
+        java.time.LocalDateTime from = java.time.LocalDateTime.ofInstant(a, java.time.ZoneOffset.UTC);
+        java.time.LocalDateTime to = java.time.LocalDateTime.ofInstant(z, java.time.ZoneOffset.UTC);
+        mocFrom.setRange(from, to);
+        mocTo.setRange(from, to);
+        if (mocFrom.isEmpty()) mocFrom.setValue(from);
+        if (mocTo.isEmpty()) mocTo.setValue(to);
+    }
+
+    /** Timeline "Map: visible period": counts of the visible time span on the map. */
+    private void onTimelineWindow(java.time.Instant from, java.time.Instant to) {
+        Overview ov = currentOverview;
+        if (ov == null || !mapView.isOverview()) return;
+        mapView.updateWeights(from == null ? ov.getTotals() : ov.weightsFor(from, to));
+    }
+
+    /** SQL string literal for a LIKE '%term%' (case-insensitive like the filter on loaded points) */
+    private static String likeContains(String term) {
+        String t = term.toLowerCase(Locale.ROOT).replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+                .replace("'", "''");
+        return "'%" + t + "%' ESCAPE '\\'";
+    }
+
+    /** Filter bar of the timeline on a large database: the filter runs as SQL. */
+    private void onTimelineFilter(TimelineView.FilterKind kind, String value, TimelineView.IdMode mode) {
+        Overview base = baseOverview;
+        if (base == null) return;
+        String col = base.column(idColumn(mode));
+        String term = value == null ? "" : value.trim();
+        String st = base.column("start_time") != null ? base.column("start_time") : "start_time";
+        boolean tableMatches = "response_records".contains(term.toLowerCase(Locale.ROOT));
+        String cond;
+        if (kind == TimelineView.FilterKind.PICK) {
+            cond = col == null ? "0" : col + " = '" + term.replace("'", "''") + "'";
+        } else if (term.isEmpty()) {
+            cond = null;
+        } else {
+            String like = likeContains(term);
+            cond = switch (kind) {
+                case ID -> col == null ? "0" : col + " LIKE " + like;
+                case TIMESTAMP -> st + " LIKE " + like;
+                case TABLE -> tableMatches ? null : "0";
+                default -> tableMatches ? null
+                        : "(" + st + " LIKE " + like + (col != null ? " OR " + col + " LIKE " + like : "") + ")";
+            };
+        }
+        timelineCond = cond;
+        showCondition(and(resultCond, timelineCond), null);
+    }
+
+    private static String and(String a, String b) {
+        if (a == null) return b;
+        if (b == null) return a;
+        return "(" + a + ") AND (" + b + ")";
+    }
+
+    /** Overview: double-click on a location loads its records. */
+    private void onOverviewLocationLoad(DataPoint rep) {
+        Overview ov = currentOverview;
+        if (ov == null) return;
+        String cond = ov.locationCondition(rep);
+        if (cond == null) return;
+        timelineView.clearFilterSilently();
+        timelineCond = null;
+        resultCond = cond;
+        String where = rep.getCoordinate() != null ? rep.getCoordinate().toString() : "";
+        showCondition(cond, Lang.t("Standort ", "Location ") + where);
+    }
+
+    /**
+     * Shows the records matching {@code cond} (null: the base overview):
+     * completely if they are at most {@link Limits#LIGHTHOUSE_DETAIL_ROWS},
+     * else as an overview. Runs in the background.
+     */
+    private void showCondition(String cond, String label) {
+        if (baseOverview == null) return;
+        if (Objects.equals(cond, shownCond)) return;
+        shownCond = cond;
+        int gen = ++filterGeneration;
+        if (cond == null) {
+            applyOverview(baseOverview, false);
+            setLlmStatus(String.format(Lang.t("Übersicht: %,d Datensätze", "Overview: %,d records"),
+                    baseOverview.getRecords()), theme.label);
+            return;
+        }
+        setLlmStatus(Lang.t("⏳ Filter wird ausgeführt…", "⏳ Running filter…"), theme.label);
+        Thread worker = new Thread(() -> {
+            beginOperation();
+            try {
+                DisplayResult r = loadCondition(cond, label, (doneRows, all) -> Platform.runLater(() -> {
+                    if (gen == filterGeneration)
+                        setLlmStatus(String.format(Lang.t("⏳ Lade %,d / %,d", "⏳ Loading %,d / %,d"), doneRows, all), theme.label);
+                }));
+                Platform.runLater(() -> {
+                    if (gen != filterGeneration) { if (r.overview != null) r.overview.close(); return; }
+                    showResult(r);
+                    setLlmStatus((r.overview != null
+                            ? String.format(Lang.t("Übersicht: %,d Datensätze", "Overview: %,d records"), r.count)
+                            : String.format(Lang.t("✅ %,d Datensätze", "✅ %,d records"), r.count))
+                            + (label != null ? " | " + label : ""), r.count == 0 ? theme.hover : theme.accent2);
+                });
+            } catch (Exception e) {
+                boolean stop = wasCancelled(e);
+                if (!stop) LOG.log(Level.WARNING, "Filter failed: " + cond, e);
+                Platform.runLater(() -> {
+                    if (gen != filterGeneration) return;
+                    // the filter was not applied: the next change runs it again
+                    shownCond = "\u0000";
+                    setLlmStatus(stop ? Lang.t("⏹ Filter abgebrochen", "⏹ Filter cancelled") : "❌ " + e.getMessage(),
+                            stop ? theme.label : theme.hover);
+                });
+            } finally {
+                endOperation();
+            }
+        }, "mapview-filter");
+        worker.setDaemon(true);
+        worker.start();
+    }
+
+    /** records of a condition: loaded completely or as an overview */
+    private static final class DisplayResult {
+        final List<DataPoint> points;
+        final Overview overview;
+        final long count;
+        /** the condition actually used (a selection replaces a condition with subqueries) */
+        String cond;
+        DisplayResult(List<DataPoint> points, Overview overview, long count) {
+            this.points = points; this.overview = overview; this.count = count;
+        }
+    }
+
+    /** Reads the records matching {@code cond} (on the calling, non-FX thread). */
+    private DisplayResult loadCondition(String cond, String label, DataAnalyzer.ProgressListener progress) throws SQLException {
+        return loadCondition(cond, label, progress, null);
+    }
+
+    /** @param pre the records of {@code cond} if already selected (see directRoamers), else null */
+    private DisplayResult loadCondition(String cond, String label, DataAnalyzer.ProgressListener progress,
+                                        Selection pre) throws SQLException {
+        String loadCond = cond;
+        long count;
+        java.util.BitSet rows = null;
+        if (pre != null || DataAnalyzer.hasSubquery(cond)) {
+            // evaluate the subqueries once; counting, loading and the pages
+            // then use the stored rowids
+            Selection sel = pre;
+            if (sel == null) {
+                try (java.sql.Connection c = source().open()) {
+                    sel = Selection.create(c, cond);
+                }
+            }
+            selections.add(sel);
+            cond = sel.condition();
+            loadCond = sel.lookupCondition();
+            count = sel.count();
+            rows = sel.rows();
+        } else {
+            count = Overview.count(source(), cond);
+        }
+        DisplayResult r;
+        if (baseOverview == null || count <= Limits.LIGHTHOUSE_DETAIL_ROWS) {
+            List<DataPoint> pts = count == 0 ? List.of()
+                    : analyzer.analyzeResponseRecordsTable(source(), loadCond, count, progress, rowLoader, threads());
+            r = new DisplayResult(pts == null ? List.of() : pts, null, count);
+        } else {
+            Overview ov = Overview.build(analyzer, source(), rowLoader, cond, label, count, progress, threads(), rows);
+            r = new DisplayResult(null, ov, count);
+        }
+        r.cond = cond;
+        return r;
+    }
+
+    private void showResult(DisplayResult r) {
+        if (r.overview != null) {
+            applyOverview(r.overview, false);
+        } else {
+            if (currentOverview != null && currentOverview != baseOverview) currentOverview.close();
+            currentOverview = null;
+            applyPoints(r.points, false);
+        }
+        releaseSelections();
+    }
+
+    /**
+     * Condition of a query of the form {@code SELECT * FROM response_records
+     * [WHERE ...] [ORDER BY ...]} (the templates of the query assistant), so
+     * that its result can be read directly from the file; {@code ""} for all
+     * records, {@code null} for any other query.
+     */
+    static String simpleCondition(String sql) {
+        if (sql == null) return null;
+        String t = sql.trim();
+        while (t.endsWith(";")) t = t.substring(0, t.length() - 1).trim();
+        java.util.regex.Matcher m = java.util.regex.Pattern
+                .compile("(?is)^SELECT\\s+\\*\\s+FROM\\s+response_records\\b(.*)$").matcher(t);
+        if (!m.matches()) return null;
+        String rest = m.group(1).trim();
+        if (rest.isEmpty()) return "";
+        // keywords at top level (outside parentheses and quotes)
+        int depth = 0;
+        boolean inStr = false, inId = false;
+        int orderAt = -1;
+        String upper = rest.toUpperCase(Locale.ROOT);
+        for (int i = 0; i < rest.length(); i++) {
+            char ch = rest.charAt(i);
+            if (inStr) { if (ch == '\'') inStr = false; continue; }
+            if (inId) { if (ch == '"') inId = false; continue; }
+            if (ch == '\'') { inStr = true; continue; }
+            if (ch == '"') { inId = true; continue; }
+            if (ch == '(') { depth++; continue; }
+            if (ch == ')') { depth--; continue; }
+            if (depth != 0) continue;
+            boolean wordStart = i == 0 || !(Character.isLetterOrDigit(rest.charAt(i - 1)) || rest.charAt(i - 1) == '_');
+            if (!wordStart) continue;
+            for (String kw : new String[] { "LIMIT", "GROUP", "HAVING", "UNION", "INTERSECT", "EXCEPT", "JOIN", "WINDOW", "OFFSET" }) {
+                int e = i + kw.length();
+                if (upper.startsWith(kw, i) && (e >= rest.length() || !(Character.isLetterOrDigit(rest.charAt(e)) || rest.charAt(e) == '_')))
+                    return null;
+            }
+            if (orderAt < 0 && upper.startsWith("ORDER", i)) orderAt = i;
+        }
+        if (depth != 0 || inStr || inId) return null;
+        String head = (orderAt >= 0 ? rest.substring(0, orderAt) : rest).trim();
+        if (head.isEmpty()) return "";
+        if (head.length() < 6 || !head.regionMatches(true, 0, "WHERE", 0, 5)
+                || !Character.isWhitespace(head.charAt(5))) return null;
+        String cond = head.substring(5).trim();
+        return cond.isEmpty() ? null : cond;
+    }
+
+    /**
+     * Runs a query for display: on a database opened directly, queries of the
+     * simple form ({@link #simpleCondition}) are read from the file (compact
+     * points, or an overview when the base is an overview and the result is
+     * large); any other query is read into memory as before.
+     *
+     * @return the rows, or {@code null} if the query failed
+     */
+    private QueryRows queryForDisplay(String sql) throws Exception {
+        return queryForDisplay(sql, null);
+    }
+
+    /** @param pre the records of {@code sql} if already selected, else null */
+    private QueryRows queryForDisplay(String sql, Selection pre) throws Exception {
+        checkCancelled();
+        sql = tuneTimeRanges(sql);
+        String cond = directDb != null ? simpleCondition(sql) : null;
+        if (cond != null) {
+            String c = cond.isEmpty() ? null : cond;
+            DisplayResult r;
+            try {
+                r = loadCondition(c, null, (doneRows, all) -> Platform.runLater(() ->
+                        setLlmStatus(String.format(Lang.t("⏳ Lade %,d / %,d", "⏳ Loading %,d / %,d"), doneRows, all), theme.label)),
+                        pre);
+            } catch (SQLException e) {
+                LOG.log(Level.INFO, "Query failed: " + sql, e);
+                return null;
+            }
+            List<String> cols = new ArrayList<>();
+            try (java.sql.Connection conn = source().open();
+                 java.sql.Statement st = conn.createStatement();
+                 ResultSet rs = st.executeQuery("SELECT * FROM response_records LIMIT 0")) {
+                for (int i = 1; i <= rs.getMetaData().getColumnCount(); i++) cols.add(rs.getMetaData().getColumnName(i));
+            }
+            ConcurrentHashMap<String, ObservableList<ObservableList<String>>> data = new ConcurrentHashMap<>();
+            data.put("response_records", FXCollections.observableArrayList());
+            Map<String, List<String>> headers = new HashMap<>();
+            headers.put("response_records", cols);
+            QueryRows qr = new QueryRows(data, headers, (int) Math.min(Integer.MAX_VALUE, r.count));
+            qr.direct = r;
+            qr.cond = r.cond;
+            return qr;
+        }
+        ResultSet rs = exec(sql);
+        if (rs == null) return null;
+        try {
+            return toResponseRecordsTable(rs);
+        } finally {
+            rs.close();
+        }
+    }
+
+    /** Shows rows returned by {@link #queryForDisplay}. Must run on the FX thread. */
+    private void showQueryRows(QueryRows qr) {
+        if (baseOverview != null) {
+            timelineView.clearFilterSilently();
+            timelineCond = null;
+            ++filterGeneration;
+        }
+        if (qr.direct != null) {
+            if (baseOverview != null) {
+                timelineView.setExternalFilter(this::onTimelineFilter);
+                resultCond = qr.cond;
+                shownCond = qr.cond;
+            }
+            showResult(qr.direct);
+        } else {
+            if (baseOverview != null) {
+                // a query that is no simple condition: the timeline filter then
+                // filters the loaded records only
+                timelineView.setExternalFilter(null);
+                resultCond = null;
+                shownCond = "\u0000";
+                if (currentOverview != null && currentOverview != baseOverview) currentOverview.close();
+                currentOverview = null;
+            }
+            setData(qr.data, qr.headers, false);
+        }
+    }
+
+    /**
+     * Reads single {@code response_records} rows by rowid for points loaded via
+     * {@link #setBaseDatabase} (tooltip, detail panel, copy). The last row is
+     * cached, since a tooltip or the detail panel asks for several fields of
+     * the same point in a row.
+     */
+    private static final class DbRowLoader implements DataAnalyzer.RawRowLoader {
+        private final ReadOnlySqliteDatabase db;
+        private long lastRowId = Long.MIN_VALUE;
+        private List<String> lastRow;
+        /**
+         * Own connection: the shared one of the database is used by the
+         * analyses and the query assistant, and a long query there (a preset,
+         * a Wanderer grouping) would block this lookup - it runs on the FX
+         * thread for tooltips and the detail panel, so the whole window hung
+         * until the query had finished.
+         */
+        private java.sql.Connection conn;
+        private java.sql.PreparedStatement byRowid;
+
+        DbRowLoader(ReadOnlySqliteDatabase db) { this.db = db; }
+
+        @Override
+        public synchronized List<String> load(long rowId) {
+            if (rowId == lastRowId && lastRow != null) return lastRow;
+            List<String> row = new ArrayList<>();
+            try {
+                if (conn == null) {
+                    conn = db.openConnection();
+                    byRowid = conn.prepareStatement("SELECT * FROM response_records WHERE rowid = ?");
+                }
+                java.sql.PreparedStatement ps = byRowid;
+                ps.setLong(1, rowId);
+                try (ResultSet rs = ps.executeQuery()) {
+                    if (rs.next()) {
+                        int n = rs.getMetaData().getColumnCount();
+                        for (int i = 1; i <= n; i++) row.add(rs.getString(i));
+                    }
+                }
+            } catch (SQLException e) {
+                LOG.log(Level.WARNING, "Reading response_records row " + rowId + " failed", e);
+                close();
+                return List.of();
+            }
+            lastRowId = rowId;
+            lastRow = row;
+            return row;
+        }
+
+        synchronized void close() {
+            try { if (conn != null) conn.close(); } catch (SQLException ignored) { }
+            conn = null;
+            byRowid = null;
+        }
     }
 
     public void setTheme(Theme t) {
@@ -559,6 +1606,14 @@ public class MapViewPane extends BorderPane {
         mapView.applyTheme(t);
         mocMtcMapView.applyTheme(t);
         mocMtcTable.setStyle(theme.bgStyle() + theme.borderTopStyle());
+        String fieldCss = "-fx-background-color: " + Theme.hex(t.bg) + "; -fx-text-fill: " + Theme.hex(t.labelStrong) + ";"
+                + "-fx-border-color: " + Theme.hex(t.border) + "; -fx-border-width: 1px; -fx-background-radius: 3; -fx-border-radius: 3;";
+        mocFrom.setFieldStyle(fieldCss);
+        mocTo.setFieldStyle(fieldCss);
+        mocFrom.setLabelColor(t.label);
+        mocTo.setLabelColor(t.label);
+        mocTimeBox.setTextFill(t.label);
+        mocArrow.setTextFill(t.label);
         detailPane.applyTheme(t);
         policeAnalysisPane.applyTheme(t);
     }
@@ -636,7 +1691,7 @@ public class MapViewPane extends BorderPane {
         });
 
         // Copy selected cells to clipboard via context menu or Ctrl/Cmd+C.
-        TableClipboardSupport.install(table);
+        TableClipboardSupport.install(table, "lighthouse_moc_mtc.csv");
 
         return table;
     }
@@ -721,9 +1776,9 @@ public class MapViewPane extends BorderPane {
      * calendar year. Returns {@code null} if the DB is unavailable or empty.
      */
     private String queryDataDateRange() {
-        if (inMemoryDB == null) return null;
+        if (database == null) return null;
         try {
-            java.sql.ResultSet rs = inMemoryDB.execute(
+            java.sql.ResultSet rs = exec(
                     "SELECT MIN(start_time), MAX(start_time) FROM response_records WHERE start_time IS NOT NULL");
             if (rs == null) return null;
             try {
@@ -745,15 +1800,19 @@ public class MapViewPane extends BorderPane {
         String prompt = llmPromptField.getText().trim();
         if (prompt.isEmpty() || ragPipeline == null) return;
         lastLlmQuestion = prompt;
+        participantsGen++;
 
         llmRunButton.setDisable(true);
         setLlmStatus(Lang.t("⏳ Analysiere Anfrage…", "⏳ Analyzing query…"), theme.label);
         setCoLocationTableVisible(false);
+        setParticipantsTableVisible(false);
         setRoamersTableVisible(false);
         setWechslerTableVisible(false);
 
         Thread worker = new Thread(() -> {
+            beginOperation();
             try {
+                llmDuration = RAGPipeline.findDurationMentionedInText(prompt);
                 RAGPipeline.QueryIntent intent = ragPipeline.classifyIntent(prompt, queryDataDateRange());
 
                 if (intent.isAmbiguousTimeOfDayWithoutDate()) {
@@ -837,8 +1896,17 @@ public class MapViewPane extends BorderPane {
                     runFilterQuery(filterPrompt);
                 }
             } catch (Exception ex) {
+                boolean stop = wasCancelled(ex);
                 Platform.runLater(() -> {
-                    setLlmStatus("❌ " + ex.getMessage(), theme.hover);
+                    setLlmStatus(stop ? Lang.t("⏹ Abgebrochen", "⏹ Cancelled") : "❌ " + ex.getMessage(),
+                            stop ? theme.label : theme.hover);
+                    llmRunButton.setDisable(false);
+                });
+            } finally {
+                boolean stop = cancelRequested;
+                endOperation();
+                if (stop) Platform.runLater(() -> {
+                    setLlmStatus(Lang.t("⏹ Abgebrochen – die bisherige Anzeige bleibt", "⏹ Cancelled – the previous view stays"), theme.label);
                     llmRunButton.setDisable(false);
                 });
             }
@@ -863,13 +1931,17 @@ public class MapViewPane extends BorderPane {
             });
             return;
         }
+        if (costGate(prompt, List.of(sql), false, null, null) instanceof QueryCost.Cancel) {
+            notRun();
+            return;
+        }
         Platform.runLater(() -> setLlmStatus(Lang.t("⚙️ Führe aus: ", "⚙️ Running: ") + abbreviate(sql, 60), theme.label));
 
-        // 2. Execute SQL against in-memory DB
-        ResultSet rs = inMemoryDB.execute(sql);
-        if (rs == null) {
+        // 2. Execute SQL (database file or in-memory DB)
+        QueryRows qr = queryForDisplay(sql);
+        if (qr == null) {
             // Statt nur "Kein Ergebnis": die SQLite-Fehlermeldung anzeigen (z.B. unbekannte Spalte)
-            String err = fqlite.rag.SqlRepair.prepareError(inMemoryDB.getConnectionObject(), sql);
+            String err = fqlite.rag.SqlRepair.prepareError(database.getConnectionObject(), sql);
             final String msg = err != null
                     ? Lang.t("⚠️ SQL-Fehler: ", "⚠️ SQL error: ") + abbreviate(err, 90)
                     : Lang.t("⚠️ Kein Ergebnis", "⚠️ No result");
@@ -879,10 +1951,6 @@ public class MapViewPane extends BorderPane {
             });
             return;
         }
-
-        // 3. Convert ResultSet → ConcurrentHashMap (same format as setData)
-        QueryRows qr = toResponseRecordsTable(rs);
-        rs.close();
 
         final String finalSql = sql;
 
@@ -908,14 +1976,16 @@ public class MapViewPane extends BorderPane {
 
         Platform.runLater(() -> {
             setCoLocationTableVisible(false);
+            setParticipantsTableVisible(false);
             setRoamersTableVisible(false);
             setWechslerTableVisible(false);
-            setData(qr.data, qr.headers);
+            showQueryRows(qr);
             setLlmStatus(
                     "✅ " + qr.rowCount + " " + Lang.t("Zeile(n)", "row(s)") + " | " + abbreviate(finalSql, 50),
                     theme.accent2);
             llmRunButton.setDisable(false);
         });
+        showParticipants(sql, qr);
     }
 
     /**
@@ -930,7 +2000,8 @@ public class MapViewPane extends BorderPane {
     private void runCallsSmsQuery(RAGPipeline.QueryIntent intent) throws Exception {
         Platform.runLater(() -> setLlmStatus(Lang.t("⚙️ Suche Anrufe/SMS…", "⚙️ Searching calls/SMS…"), theme.label));
 
-        String sql = RAGPipeline.buildCallsSmsSql(intent.callSmsType, intent.startTime, intent.endTime);
+        String sql0 = RAGPipeline.buildCallsSmsSql(intent.callSmsType, intent.startTime, intent.endTime);
+        String sql = withDuration(sql0);
         if (sql == null) {
             Platform.runLater(() -> {
                 setLlmStatus(Lang.t("⚠️ Anfrage konnte nicht zugeordnet werden", "⚠️ Could not classify the query"), theme.hover);
@@ -939,8 +2010,18 @@ public class MapViewPane extends BorderPane {
             return;
         }
 
-        ResultSet rs = inMemoryDB.execute(sql);
-        if (rs == null) {
+        QueryCost.Decision decision = costGate(lastLlmQuestion, List.of(sql), true, intent.startTime, intent.endTime);
+        if (decision instanceof QueryCost.Cancel) {
+            notRun();
+            return;
+        }
+        if (decision instanceof QueryCost.Restrict r) {
+            runCallsSmsQuery(intent.withTimeRange(r.from(), r.to()));
+            return;
+        }
+
+        QueryRows qr = queryForDisplay(sql);
+        if (qr == null) {
             Platform.runLater(() -> {
                 setLlmStatus(Lang.t("⚠️ Kein Ergebnis", "⚠️ No result"), theme.hover);
                 llmRunButton.setDisable(false);
@@ -948,22 +2029,23 @@ public class MapViewPane extends BorderPane {
             return;
         }
 
-        QueryRows qr = toResponseRecordsTable(rs);
-        rs.close();
         if (showNoHitsIfEmpty(qr, sql)) return;   // Karte unveraendert lassen, "Keine Treffer" im Fenster
 
         Platform.runLater(() -> {
             setCoLocationTableVisible(false);
+            setParticipantsTableVisible(false);
             setRoamersTableVisible(false);
             setWechslerTableVisible(false);
-            setData(qr.data, qr.headers);
+            showQueryRows(qr);
             setLlmStatus(
                     qr.rowCount == 0
                             ? Lang.t("⚠️ Keine passenden Anrufe/SMS im Zeitfenster gefunden", "⚠️ No matching calls/SMS found in the time window")
                             : "✅ " + qr.rowCount + " " + Lang.t("Datensatz/Datensätze gefunden", "record(s) found"),
                     qr.rowCount == 0 ? theme.hover : theme.accent2);
+            appendDurationStatus();
             llmRunButton.setDisable(false);
         });
+        showParticipants(sql, qr);
     }
 
     /**
@@ -977,7 +2059,8 @@ public class MapViewPane extends BorderPane {
     private void runPlainTimeFilterQuery(RAGPipeline.QueryIntent intent) throws Exception {
         Platform.runLater(() -> setLlmStatus(Lang.t("⚙️ Suche Teilnehmer im Zeitfenster…", "⚙️ Searching subscribers in the time window…"), theme.label));
 
-        String sql = RAGPipeline.buildPlainFilterSql(intent.startTime, intent.endTime);
+        String sql0 = RAGPipeline.buildPlainFilterSql(intent.startTime, intent.endTime);
+        String sql = withDuration(sql0);
         if (sql == null) {
             Platform.runLater(() -> {
                 setLlmStatus(Lang.t("⚠️ Zeitraum konnte nicht erkannt werden — bitte Zeitraum präzisieren", "⚠️ Could not recognize the time range — please specify a time range"), theme.hover);
@@ -986,8 +2069,18 @@ public class MapViewPane extends BorderPane {
             return;
         }
 
-        ResultSet rs = inMemoryDB.execute(sql);
-        if (rs == null) {
+        QueryCost.Decision decision = costGate(lastLlmQuestion, List.of(sql), true, intent.startTime, intent.endTime);
+        if (decision instanceof QueryCost.Cancel) {
+            notRun();
+            return;
+        }
+        if (decision instanceof QueryCost.Restrict r) {
+            runPlainTimeFilterQuery(intent.withTimeRange(r.from(), r.to()));
+            return;
+        }
+
+        QueryRows qr = queryForDisplay(sql);
+        if (qr == null) {
             Platform.runLater(() -> {
                 setLlmStatus(Lang.t("⚠️ Kein Ergebnis", "⚠️ No result"), theme.hover);
                 llmRunButton.setDisable(false);
@@ -995,22 +2088,23 @@ public class MapViewPane extends BorderPane {
             return;
         }
 
-        QueryRows qr = toResponseRecordsTable(rs);
-        rs.close();
         if (showNoHitsIfEmpty(qr, sql)) return;   // Karte unveraendert lassen, "Keine Treffer" im Fenster
 
         Platform.runLater(() -> {
             setCoLocationTableVisible(false);
+            setParticipantsTableVisible(false);
             setRoamersTableVisible(false);
             setWechslerTableVisible(false);
-            setData(qr.data, qr.headers);
+            showQueryRows(qr);
             setLlmStatus(
                     qr.rowCount == 0
                             ? Lang.t("⚠️ Keine Teilnehmer im Zeitfenster gefunden", "⚠️ No subscribers found in the time window")
                             : "✅ " + qr.rowCount + " " + Lang.t("Datensatz/Datensätze gefunden", "record(s) found"),
                     qr.rowCount == 0 ? theme.hover : theme.accent2);
+            appendDurationStatus();
             llmRunButton.setDisable(false);
         });
+        showParticipants(sql, qr);
     }
 
     /**
@@ -1042,7 +2136,8 @@ public class MapViewPane extends BorderPane {
         };
         Platform.runLater(() -> setLlmStatus(Lang.t("⚙️ Suche ", "⚙️ Searching ") + directionLabel + Lang.t("an Funkzelle ", "at cell site ") + label + "…", theme.label));
 
-        String sql = RAGPipeline.buildCellFilterSql(lac, ci, callSmsType, startTime, endTime);
+        String sql0 = RAGPipeline.buildCellFilterSql(lac, ci, callSmsType, startTime, endTime);
+        String sql = withDuration(sql0);
         if (sql == null) {
             Platform.runLater(() -> {
                 setLlmStatus(Lang.t("⚠️ Funkzelle konnte nicht erkannt werden", "⚠️ Could not recognize the cell site"), theme.hover);
@@ -1051,8 +2146,18 @@ public class MapViewPane extends BorderPane {
             return;
         }
 
-        ResultSet rs = inMemoryDB.execute(sql);
-        if (rs == null) {
+        QueryCost.Decision decision = costGate(lastLlmQuestion, List.of(sql), true, startTime, endTime);
+        if (decision instanceof QueryCost.Cancel) {
+            notRun();
+            return;
+        }
+        if (decision instanceof QueryCost.Restrict r) {
+            runCellFilterQuery(lac, ci, callSmsType, r.from(), r.to());
+            return;
+        }
+
+        QueryRows qr = queryForDisplay(sql);
+        if (qr == null) {
             Platform.runLater(() -> {
                 setLlmStatus(Lang.t("⚠️ Kein Ergebnis", "⚠️ No result"), theme.hover);
                 llmRunButton.setDisable(false);
@@ -1060,22 +2165,23 @@ public class MapViewPane extends BorderPane {
             return;
         }
 
-        QueryRows qr = toResponseRecordsTable(rs);
-        rs.close();
         if (showNoHitsIfEmpty(qr, sql)) return;   // Karte unveraendert lassen, "Keine Treffer" im Fenster
 
         Platform.runLater(() -> {
             setCoLocationTableVisible(false);
+            setParticipantsTableVisible(false);
             setRoamersTableVisible(false);
             setWechslerTableVisible(false);
-            setData(qr.data, qr.headers);
+            showQueryRows(qr);
             setLlmStatus(
                     qr.rowCount == 0
                             ? Lang.t("⚠️ Keine ", "⚠️ No ") + directionLabel + Lang.t("an Funkzelle ", "at cell site ") + label + Lang.t(" im Zeitfenster gefunden", " found in the time window")
                             : "✅ " + qr.rowCount + " " + directionLabel + Lang.t("an Funkzelle ", "at cell site ") + label,
                     qr.rowCount == 0 ? theme.hover : theme.accent2);
+            appendDurationStatus();
             llmRunButton.setDisable(false);
         });
+        showParticipants(sql, qr);
     }
 
     /**
@@ -1100,7 +2206,8 @@ public class MapViewPane extends BorderPane {
     private void runCountryFilterQuery(String country, String startTime, String endTime) throws Exception {
         Platform.runLater(() -> setLlmStatus(Lang.t("⚙️ Suche Rufnummern aus ", "⚙️ Searching phone numbers from ") + country + "…", theme.label));
 
-        String sql = RAGPipeline.buildCountryFilterSql(country, startTime, endTime);
+        String sql0 = RAGPipeline.buildCountryFilterSql(country, startTime, endTime);
+        String sql = withDuration(sql0);
         if (sql == null) {
             Platform.runLater(() -> {
                 setLlmStatus(Lang.t("⚠️ Land \"" + country + "\" konnte keiner Vorwahl zugeordnet werden", "⚠️ Country \"" + country + "\" could not be matched to a calling code"), theme.hover);
@@ -1109,8 +2216,18 @@ public class MapViewPane extends BorderPane {
             return;
         }
 
-        ResultSet rs = inMemoryDB.execute(sql);
-        if (rs == null) {
+        QueryCost.Decision decision = costGate(lastLlmQuestion, List.of(sql), true, startTime, endTime);
+        if (decision instanceof QueryCost.Cancel) {
+            notRun();
+            return;
+        }
+        if (decision instanceof QueryCost.Restrict r) {
+            runCountryFilterQuery(country, r.from(), r.to());
+            return;
+        }
+
+        QueryRows qr = queryForDisplay(sql);
+        if (qr == null) {
             Platform.runLater(() -> {
                 setLlmStatus(Lang.t("⚠️ Kein Ergebnis", "⚠️ No result"), theme.hover);
                 llmRunButton.setDisable(false);
@@ -1118,22 +2235,23 @@ public class MapViewPane extends BorderPane {
             return;
         }
 
-        QueryRows qr = toResponseRecordsTable(rs);
-        rs.close();
         if (showNoHitsIfEmpty(qr, sql)) return;   // Karte unveraendert lassen, "Keine Treffer" im Fenster
 
         Platform.runLater(() -> {
             setCoLocationTableVisible(false);
+            setParticipantsTableVisible(false);
             setRoamersTableVisible(false);
             setWechslerTableVisible(false);
-            setData(qr.data, qr.headers);
+            showQueryRows(qr);
             setLlmStatus(
                     qr.rowCount == 0
                             ? Lang.t("⚠️ Keine Rufnummern aus ", "⚠️ No phone numbers from ") + country + Lang.t(" im Zeitfenster gefunden", " found in the time window")
                             : "✅ " + qr.rowCount + " " + Lang.t("Datensatz/Datensätze aus ", "record(s) from ") + country,
                     qr.rowCount == 0 ? theme.hover : theme.accent2);
+            appendDurationStatus();
             llmRunButton.setDisable(false);
         });
+        showParticipants(sql, qr);
     }
 
     /**
@@ -1155,10 +2273,33 @@ public class MapViewPane extends BorderPane {
     private void runRoamersQuery(RAGPipeline.QueryIntent intent) throws Exception {
         Platform.runLater(() -> setLlmStatus(Lang.t("⚙️ Suche Wanderer…", "⚙️ Searching roamers…"), theme.label));
 
-        String sql = RAGPipeline.buildRoamersSql(intent.startTime, intent.endTime, intent.identifierColumn);
+        QueryCost.Decision decision = costGate(lastLlmQuestion, List.of(RAGPipeline.buildRoamersSql(intent.startTime, intent.endTime, intent.identifierColumn), PoliceAnalysisQueries.buildSql(PoliceAnalysisQueries.AnalysisType.ROAMERS, intent.startTime, intent.endTime)), true, intent.startTime, intent.endTime);
+        if (decision instanceof QueryCost.Cancel) {
+            notRun();
+            return;
+        }
+        if (decision instanceof QueryCost.Restrict r) {
+            runRoamersQuery(intent.withTimeRange(r.from(), r.to()));
+            return;
+        }
+        if (intent.allCells) {
+            runAllCellsRoamers(intent);
+            return;
+        }
 
-        ResultSet rs = inMemoryDB.execute(sql);
-        if (rs == null) {
+        String sql = RAGPipeline.buildRoamersSql(intent.startTime, intent.endTime, intent.identifierColumn);
+        String summarySql = PoliceAnalysisQueries.buildSql(
+                PoliceAnalysisQueries.AnalysisType.ROAMERS, intent.startTime, intent.endTime);
+
+        // Database opened directly: the table below the map (Wanderer per
+        // IMSI) is computed first. Its IMSIs are the result of the template's
+        // subquery, so the records are then selected by membership in that
+        // list instead of grouping the whole table a second time.
+        List<RoamerRow> summaryRows = new ArrayList<>();
+        Selection pre = directDb != null ? roamerSelection(sql, summarySql, summaryRows) : null;
+
+        QueryRows qr = queryForDisplay(sql, pre);
+        if (qr == null) {
             Platform.runLater(() -> {
                 setLlmStatus(Lang.t("⚠️ Kein Ergebnis", "⚠️ No result"), theme.hover);
                 llmRunButton.setDisable(false);
@@ -1166,33 +2307,23 @@ public class MapViewPane extends BorderPane {
             return;
         }
 
-        QueryRows qr = toResponseRecordsTable(rs);
-        rs.close();
         if (showNoHitsIfEmpty(qr, sql)) return;   // Karte unveraendert lassen, "Keine Treffer" im Fenster
 
-        String summarySql = PoliceAnalysisQueries.buildSql(
-                PoliceAnalysisQueries.AnalysisType.ROAMERS, intent.startTime, intent.endTime);
-        List<RoamerRow> summaryRows = new ArrayList<>();
-        ResultSet summaryRs = inMemoryDB.execute(summarySql);
-        if (summaryRs != null) {
-            while (summaryRs.next()) {
-                summaryRows.add(new RoamerRow(
-                        summaryRs.getString("IMSI"),
-                        summaryRs.getString(Lang.t("Rufnummer", "Phone_Number")),
-                        summaryRs.getInt(Lang.t("Anzahl_Funkzellen", "Cell_Site_Count")),
-                        summaryRs.getString(Lang.t("Funkzellen", "Cell_Sites")),
-                        summaryRs.getString(Lang.t("Von", "From_Time")),
-                        summaryRs.getString(Lang.t("Bis", "To_Time"))));
+        if (pre == null) {
+            ResultSet summaryRs = exec(tuneTimeRanges(summarySql));
+            if (summaryRs != null) {
+                while (summaryRs.next()) summaryRows.add(roamerRow(summaryRs));
+                summaryRs.close();
             }
-            summaryRs.close();
         }
 
         Platform.runLater(() -> {
             setCoLocationTableVisible(false);
+            setParticipantsTableVisible(false);
             setWechslerTableVisible(false);
             roamersTable.getItems().setAll(summaryRows);
             setRoamersTableVisible(!summaryRows.isEmpty());
-            setData(qr.data, qr.headers);
+            showQueryRows(qr);
             setLlmStatus(
                     qr.rowCount == 0
                             ? Lang.t("⚠️ Keine Wanderer im Zeitfenster gefunden", "⚠️ No roamers found in the time window")
@@ -1223,8 +2354,18 @@ public class MapViewPane extends BorderPane {
 
         String sql = RAGPipeline.buildWechslerSql(intent.startTime, intent.endTime);
 
-        ResultSet rs = inMemoryDB.execute(sql);
-        if (rs == null) {
+        QueryCost.Decision decision = costGate(lastLlmQuestion, List.of(sql, PoliceAnalysisQueries.buildSql(PoliceAnalysisQueries.AnalysisType.DEVICE_SIM_SWAP, intent.startTime, intent.endTime)), true, intent.startTime, intent.endTime);
+        if (decision instanceof QueryCost.Cancel) {
+            notRun();
+            return;
+        }
+        if (decision instanceof QueryCost.Restrict r) {
+            runWechslerQuery(intent.withTimeRange(r.from(), r.to()));
+            return;
+        }
+
+        QueryRows qr = queryForDisplay(sql);
+        if (qr == null) {
             Platform.runLater(() -> {
                 setLlmStatus(Lang.t("⚠️ Kein Ergebnis", "⚠️ No result"), theme.hover);
                 llmRunButton.setDisable(false);
@@ -1232,14 +2373,12 @@ public class MapViewPane extends BorderPane {
             return;
         }
 
-        QueryRows qr = toResponseRecordsTable(rs);
-        rs.close();
         if (showNoHitsIfEmpty(qr, sql)) return;   // Karte unveraendert lassen, "Keine Treffer" im Fenster
 
         String summarySql = PoliceAnalysisQueries.buildSql(
                 PoliceAnalysisQueries.AnalysisType.DEVICE_SIM_SWAP, intent.startTime, intent.endTime);
         List<WechslerRow> summaryRows = new ArrayList<>();
-        ResultSet summaryRs = inMemoryDB.execute(summarySql);
+        ResultSet summaryRs = exec(tuneTimeRanges(summarySql));
         if (summaryRs != null) {
             while (summaryRs.next()) {
                 summaryRows.add(new WechslerRow(
@@ -1253,10 +2392,11 @@ public class MapViewPane extends BorderPane {
 
         Platform.runLater(() -> {
             setCoLocationTableVisible(false);
+            setParticipantsTableVisible(false);
             setRoamersTableVisible(false);
             wechslerTable.getItems().setAll(summaryRows);
             setWechslerTableVisible(!summaryRows.isEmpty());
-            setData(qr.data, qr.headers);
+            showQueryRows(qr);
             setLlmStatus(
                     qr.rowCount == 0
                             ? Lang.t("⚠️ Keine Wechsler im Zeitfenster gefunden", "⚠️ No swaps found in the time window")
@@ -1283,7 +2423,12 @@ public class MapViewPane extends BorderPane {
 
         ObservableList<ObservableList<String>> rows = FXCollections.observableArrayList();
         int rowCount = 0;
+        int limit = baseOverview != null ? Limits.LIGHTHOUSE_DETAIL_ROWS : Integer.MAX_VALUE;
         while (rs.next()) {
+            if (rowCount >= limit)
+                throw new SQLException(String.format(Lang.t(
+                        "Ergebnis hat mehr als %,d Datensätze – bitte die Anfrage einschränken (z. B. Zeitraum)",
+                        "Result has more than %,d records – please narrow the query (e.g. time range)"), limit));
             ObservableList<String> row = FXCollections.observableArrayList();
             for (int i = 1; i <= cols; i++) row.add(rs.getString(i));
             rows.add(row);
@@ -1344,6 +2489,10 @@ public class MapViewPane extends BorderPane {
         final ConcurrentHashMap<String, ObservableList<ObservableList<String>>> data;
         final Map<String, List<String>> headers;
         final int rowCount;
+        /** read directly from the file (see queryForDisplay), else null */
+        DisplayResult direct;
+        /** condition of a direct result */
+        String cond;
 
         QueryRows(ConcurrentHashMap<String, ObservableList<ObservableList<String>>> data,
                   Map<String, List<String>> headers, int rowCount) {
@@ -1372,7 +2521,17 @@ public class MapViewPane extends BorderPane {
             return;
         }
 
-        ResultSet rs = inMemoryDB.execute(sql);
+        QueryCost.Decision decision = costGate(lastLlmQuestion, List.of(sql), true, intent.startTime, intent.endTime);
+        if (decision instanceof QueryCost.Cancel) {
+            notRun();
+            return;
+        }
+        if (decision instanceof QueryCost.Restrict r) {
+            runColocationQuery(intent.withTimeRange(r.from(), r.to()));
+            return;
+        }
+
+        ResultSet rs = exec(sql);
         if (rs == null) {
             Platform.runLater(() -> {
                 setLlmStatus(Lang.t("⚠️ Kein Ergebnis", "⚠️ No result"), theme.hover);
@@ -1424,7 +2583,7 @@ public class MapViewPane extends BorderPane {
         if (!result.isEmpty()) {
             String detailSql = RAGPipeline.buildColocationDetailSql(intent.startTime, intent.endTime, intent.identifierColumn);
             if (detailSql != null) {
-                ResultSet detailRs = inMemoryDB.execute(detailSql);
+                ResultSet detailRs = exec(detailSql);
                 if (detailRs != null) {
                     detailRows = toResponseRecordsTable(detailRs);
                     detailRs.close();
@@ -1438,6 +2597,7 @@ public class MapViewPane extends BorderPane {
             colCoLocationIds.setText(intent.identifierLabel + "s");
             coLocationTable.getItems().setAll(result);
             setCoLocationTableVisible(!result.isEmpty());
+            setParticipantsTableVisible(false);
             setRoamersTableVisible(false);
             setWechslerTableVisible(false);
             if (finalDetailRows != null) {
@@ -1460,10 +2620,25 @@ public class MapViewPane extends BorderPane {
      * Restores the full base dataset (before any LLM filter was applied).
      */
     private void onLlmReset() {
+        participantsGen++;
         setCoLocationTableVisible(false);
+        setParticipantsTableVisible(false);
         setRoamersTableVisible(false);
         setWechslerTableVisible(false);
-        if (baseResultList != null) {
+        if (baseOverview != null) {
+            timelineView.clearFilterSilently();
+            timelineCond = null;
+            resultCond = null;
+            shownCond = null;
+            ++filterGeneration;
+            timelineView.setExternalFilter(this::onTimelineFilter);
+            applyOverview(baseOverview, true);
+            releaseSelections();
+            setLlmStatus(Lang.t("↺ Alle Daten wiederhergestellt", "↺ All data restored"), theme.label);
+        } else if (basePoints != null) {
+            applyPoints(basePoints, true);
+            setLlmStatus(Lang.t("↺ Alle Daten wiederhergestellt", "↺ All data restored"), theme.label);
+        } else if (baseResultList != null) {
             setData(baseResultList, baseHeaders != null ? baseHeaders : Map.of(), true);
             setLlmStatus(Lang.t("↺ Alle Daten wiederhergestellt", "↺ All data restored"), theme.label);
         }
@@ -1538,7 +2713,7 @@ public class MapViewPane extends BorderPane {
         });
 
         // Copy selected cells to clipboard via context menu or Ctrl/Cmd+C.
-        TableClipboardSupport.install(table);
+        TableClipboardSupport.install(table, "lighthouse_gleiche_funkzelle.csv");
 
         return table;
     }
@@ -1582,6 +2757,296 @@ public class MapViewPane extends BorderPane {
     private static Integer getNullableInt(ResultSet rs, String columnLabel) throws SQLException {
         int v = rs.getInt(columnLabel);
         return rs.wasNull() ? null : v;
+    }
+
+    // =========================================================================
+    // Statistics result in map and timeline
+    // =========================================================================
+
+    /**
+     * Shows the records of the identifiers named by a result of the
+     * Statistics tab (e.g. every record of the Wanderer found) in map and
+     * timeline: records in the analysis' time range whose phone number, IMSI
+     * or IMEI is one of them. On a database opened directly they are selected
+     * in one pass over the file (membership checked in memory, see
+     * {@link Selection#create(java.sql.Connection, String, String, Selection.RowFilter)}).
+     * Runs in the background; the cancel button stops it.
+     */
+    private void showStatisticsResult(PoliceAnalysisPane.ResultIds ids) {
+        participantsGen++;
+        llmRunButton.setDisable(true);
+        setLlmStatus(String.format(Lang.t("⏳ Statistik \"%s\": Datensätze von %,d Kennungen werden geladen …",
+                "⏳ Statistics \"%s\": loading the records of %,d identifiers …"), ids.label, ids.size()), theme.label);
+        Thread worker = new Thread(() -> {
+            beginOperation();
+            try {
+                loadStatisticsResult(ids);
+            } catch (Exception ex) {
+                boolean stop = wasCancelled(ex);
+                if (!stop) LOG.log(Level.WARNING, "Statistics result could not be shown on the map", ex);
+                Platform.runLater(() -> {
+                    setLlmStatus(stop ? Lang.t("⏹ Abgebrochen – die bisherige Anzeige bleibt", "⏹ Cancelled – the previous view stays")
+                            : "❌ " + ex.getMessage(), stop ? theme.label : theme.hover);
+                    llmRunButton.setDisable(false);
+                });
+            } finally {
+                boolean stop = cancelRequested;
+                endOperation();
+                if (stop) Platform.runLater(() -> {
+                    setLlmStatus(Lang.t("⏹ Abgebrochen – die bisherige Anzeige bleibt", "⏹ Cancelled – the previous view stays"), theme.label);
+                    llmRunButton.setDisable(false);
+                });
+            }
+        }, "statistics-map-worker");
+        worker.setDaemon(true);
+        worker.start();
+    }
+
+    private void loadStatisticsResult(PoliceAnalysisPane.ResultIds ids) throws Exception {
+        String time = ids.fromIso != null && !ids.fromIso.isBlank() && ids.toIso != null && !ids.toIso.isBlank()
+                ? " AND start_time BETWEEN '" + ids.fromIso.replace("'", "''") + "' AND '" + ids.toIso.replace("'", "''") + "'"
+                : "";
+        String base = "latitude_dec IS NOT NULL AND longitude_dec IS NOT NULL" + time;
+        QueryRows qr;
+        if (directDb != null) {
+            String sql = "SELECT * FROM response_records WHERE " + base;
+            String outer = simpleCondition(tuneTimeRanges(sql));
+            Selection sel;
+            try (java.sql.Connection c = source().open()) {
+                sel = Selection.create(c, outer, "msisdn, imsi, na_device_id", r -> {
+                    String m = r.getString(2), i = r.getString(3), e = r.getString(4);
+                    return m != null && ids.msisdn.contains(m) || i != null && ids.imsi.contains(i) || e != null && ids.imei.contains(e);
+                });
+            }
+            checkCancelled();
+            qr = queryForDisplay(sql, sel);
+        } else {
+            // database analysed in memory: small enough for literal lists
+            String sql = "SELECT * FROM response_records WHERE " + base + " AND ("
+                    + inList("msisdn", ids.msisdn) + " OR " + inList("imsi", ids.imsi) + " OR " + inList("na_device_id", ids.imei)
+                    + ") ORDER BY start_time";
+            qr = queryForDisplay(sql);
+        }
+        if (qr == null) {
+            Platform.runLater(() -> {
+                setLlmStatus(Lang.t("⚠️ Kein Ergebnis", "⚠️ No result"), theme.hover);
+                llmRunButton.setDisable(false);
+            });
+            return;
+        }
+        Platform.runLater(() -> {
+            setCoLocationTableVisible(false);
+            setParticipantsTableVisible(false);
+            setRoamersTableVisible(false);
+            setWechslerTableVisible(false);
+            if (qr.rowCount > 0) showQueryRows(qr);
+            else releaseSelections();
+            setLlmStatus(qr.rowCount == 0
+                            ? String.format(Lang.t("⚠️ Statistik \"%s\": keine Datensätze mit Koordinaten – die Karte bleibt unverändert",
+                                    "⚠️ Statistics \"%s\": no records with coordinates – the map stays unchanged"), ids.label)
+                            : String.format(Lang.t("📊 Statistik \"%s\": %,d Datensätze von %,d Kennungen",
+                                    "📊 Statistics \"%s\": %,d records of %,d identifiers"), ids.label, (long) qr.rowCount, ids.size()),
+                    qr.rowCount == 0 ? theme.hover : theme.accent2);
+            llmRunButton.setDisable(false);
+        });
+    }
+
+    /** {@code column IN ('a', 'b', ...)}, or {@code 0} for no values */
+    private static String inList(String column, java.util.Set<String> values) {
+        if (values.isEmpty()) return "0";
+        StringBuilder sb = new StringBuilder(column).append(" IN (");
+        boolean first = true;
+        for (String v : values) {
+            if (!first) sb.append(',');
+            first = false;
+            sb.append('\'').append(v.replace("'", "''")).append('\'');
+        }
+        return sb.append(')').toString();
+    }
+
+    // =========================================================================
+    // Participants list (filter queries of the assistant)
+    // =========================================================================
+
+    /**
+     * SQL of the participants list for the records of {@code sql}: one row per
+     * IMSI with phone numbers, devices, number of records and first/last
+     * record; {@code null} if {@code sql} is not a plain
+     * {@code SELECT * FROM response_records WHERE ...} query.
+     */
+    static String participantsSql(String sql) {
+        String cond = simpleCondition(sql);
+        if (cond == null) return null;
+        String where = cond.isEmpty() ? "" : "(" + cond + ") AND ";
+        return "SELECT imsi, GROUP_CONCAT(DISTINCT msisdn), GROUP_CONCAT(DISTINCT na_device_id),"
+                + " COUNT(*), MIN(start_time), MAX(start_time)"
+                + " FROM response_records WHERE " + where + "imsi IS NOT NULL AND imsi <> ''"
+                + " GROUP BY +imsi ORDER BY COUNT(*) DESC, imsi";
+    }
+
+    /** the participants list from records already in memory, sorted as {@link #participantsSql} */
+    private static List<ParticipantRow> participantsOf(List<DataPoint> points) {
+        final class Acc {
+            final java.util.LinkedHashSet<String> msisdns = new java.util.LinkedHashSet<>(), imeis = new java.util.LinkedHashSet<>();
+            long n;
+            java.time.Instant first, last;
+        }
+        Map<String, Acc> by = new HashMap<>();
+        for (DataPoint dp : points) {
+            String imsi = dp.getImsi();
+            if (imsi == null || imsi.isEmpty()) continue;
+            Acc a = by.computeIfAbsent(imsi, k -> new Acc());
+            a.n++;
+            if (dp.getMsisdn() != null) a.msisdns.add(dp.getMsisdn());
+            if (dp.getImei() != null) a.imeis.add(dp.getImei());
+            java.time.Instant t = dp.getTimestamp();
+            if (t != null) {
+                if (a.first == null || t.isBefore(a.first)) a.first = t;
+                if (a.last == null || t.isAfter(a.last)) a.last = t;
+            }
+        }
+        java.time.format.DateTimeFormatter f = java.time.format.DateTimeFormatter
+                .ofPattern("yyyy-MM-dd HH:mm:ss").withZone(java.time.ZoneOffset.UTC);
+        List<ParticipantRow> rows = new ArrayList<>(by.size());
+        for (Map.Entry<String, Acc> e : by.entrySet()) {
+            Acc a = e.getValue();
+            rows.add(new ParticipantRow(e.getKey(), String.join(",", a.msisdns), String.join(",", a.imeis), a.n,
+                    a.first == null ? null : f.format(a.first), a.last == null ? null : f.format(a.last)));
+        }
+        rows.sort((x, y) -> x.records != y.records ? Long.compare(y.records, x.records) : x.imsi.compareTo(y.imsi));
+        return rows;
+    }
+
+    /**
+     * Computes the participants list of a filter query after its records are
+     * shown and puts it below the map: from the loaded records if the result
+     * is in memory, else by a query (overview of a large result, or a
+     * database analysed in memory). Runs on the worker of the query (the
+     * cancel button stays active meanwhile); a list that arrives after a new
+     * query was started is dropped.
+     */
+    private void showParticipants(String sql, QueryRows qr) throws Exception {
+        int gen = participantsGen;
+        String psql = participantsSql(tuneTimeRanges(sql));
+        if (psql == null) return;
+        List<ParticipantRow> rows;
+        if (qr != null && qr.direct != null && qr.direct.points != null) {
+            rows = participantsOf(qr.direct.points);
+        } else {
+            Platform.runLater(() -> {
+                if (gen == participantsGen)
+                    setLlmStatus(llmStatusLabel.getText() + Lang.t("  |  ⏳ Teilnehmerliste …", "  |  ⏳ Participants list …"), theme.accent2);
+            });
+            rows = new ArrayList<>();
+            ResultSet rs = exec(psql);
+            if (rs == null) {
+                Platform.runLater(() -> {
+                    if (gen != participantsGen) return;
+                    String t = llmStatusLabel.getText();
+                    int at = t.lastIndexOf("  |  ⏳");
+                    setLlmStatus((at >= 0 ? t.substring(0, at) : t)
+                            + Lang.t("  |  Teilnehmerliste abgebrochen", "  |  participants list cancelled"), theme.accent2);
+                });
+                return;
+            }
+            try {
+                while (rs.next()) {
+                    rows.add(new ParticipantRow(rs.getString(1), rs.getString(2), rs.getString(3),
+                            rs.getLong(4), rs.getString(5), rs.getString(6)));
+                }
+            } finally {
+                rs.close();
+            }
+        }
+        final List<ParticipantRow> result = rows;
+        Platform.runLater(() -> {
+            if (gen != participantsGen) return;
+            participantsTable.getItems().setAll(result);
+            setParticipantsTableVisible(!result.isEmpty());
+            String t = llmStatusLabel.getText();
+            int at = t.lastIndexOf("  |  ⏳");
+            setLlmStatus((at >= 0 ? t.substring(0, at) : t) + "  |  " + String.format("%,d", result.size())
+                    + Lang.t(" Teilnehmer (IMSI) – Liste unten", " participants (IMSI) – list below"), theme.accent2);
+        });
+    }
+
+    /** Shows/hides the participants table beneath the LLM bar. */
+    private void setParticipantsTableVisible(boolean visible) {
+        participantsTable.setManaged(visible);
+        participantsTable.setVisible(visible);
+        if (visible) participantsTable.setPrefHeight(220);
+        else participantsTable.getItems().clear();
+    }
+
+    /** Builds the (initially empty/hidden) participants table. */
+    private TableView<ParticipantRow> buildParticipantsTable() {
+        TableView<ParticipantRow> table = new TableView<>();
+        Label placeholder = new Label(Lang.t("Keine Teilnehmer.", "No participants."));
+        table.setPlaceholder(placeholder);
+
+        TableColumn<ParticipantRow, String> colImsi = new TableColumn<>("IMSI");
+        colImsi.setCellValueFactory(cd -> new ReadOnlyObjectWrapper<>(cd.getValue().imsi));
+        colImsi.setPrefWidth(160);
+
+        TableColumn<ParticipantRow, String> colMsisdn = new TableColumn<>(Lang.t("Rufnummer(n)", "Phone number(s)"));
+        colMsisdn.setCellValueFactory(cd -> new ReadOnlyObjectWrapper<>(cd.getValue().msisdns));
+        colMsisdn.setPrefWidth(160);
+
+        TableColumn<ParticipantRow, String> colImei = new TableColumn<>(Lang.t("Gerät(e) (IMEI)", "Device(s) (IMEI)"));
+        colImei.setCellValueFactory(cd -> new ReadOnlyObjectWrapper<>(cd.getValue().imeis));
+        colImei.setPrefWidth(180);
+
+        TableColumn<ParticipantRow, Number> colCount = new TableColumn<>(Lang.t("Datensätze", "Records"));
+        colCount.setCellValueFactory(cd -> new ReadOnlyObjectWrapper<>(cd.getValue().records));
+        colCount.setPrefWidth(90);
+
+        TableColumn<ParticipantRow, String> colFrom = new TableColumn<>(Lang.t("Erster Datensatz", "First record"));
+        colFrom.setCellValueFactory(cd -> new ReadOnlyObjectWrapper<>(cd.getValue().first));
+        colFrom.setPrefWidth(150);
+
+        TableColumn<ParticipantRow, String> colTo = new TableColumn<>(Lang.t("Letzter Datensatz", "Last record"));
+        colTo.setCellValueFactory(cd -> new ReadOnlyObjectWrapper<>(cd.getValue().last));
+        colTo.setPrefWidth(150);
+
+        table.getColumns().addAll(List.of(colImsi, colMsisdn, colImei, colCount, colFrom, colTo));
+        table.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY);
+        Lang.addListener(() -> {
+            placeholder.setText(Lang.t("Keine Teilnehmer.", "No participants."));
+            colMsisdn.setText(Lang.t("Rufnummer(n)", "Phone number(s)"));
+            colImei.setText(Lang.t("Gerät(e) (IMEI)", "Device(s) (IMEI)"));
+            colCount.setText(Lang.t("Datensätze", "Records"));
+            colFrom.setText(Lang.t("Erster Datensatz", "First record"));
+            colTo.setText(Lang.t("Letzter Datensatz", "Last record"));
+        });
+
+        // click: path of the IMSI on the map (as in the Wanderer table)
+        table.setRowFactory(tv -> {
+            TableRow<ParticipantRow> row = new TableRow<>();
+            row.setOnMouseClicked(e -> {
+                ParticipantRow r = row.getItem();
+                if (r != null && r.imsi != null && !r.imsi.isBlank()) mapView.selectImsiForPath(r.imsi);
+            });
+            return row;
+        });
+
+        // Copy selected cells to clipboard via context menu or Ctrl/Cmd+C.
+        TableClipboardSupport.install(table, "lighthouse_teilnehmer.csv");
+        return table;
+    }
+
+    /** one row of the participants list */
+    private static final class ParticipantRow {
+        final String imsi, msisdns, imeis, first, last;
+        final long records;
+
+        ParticipantRow(String imsi, String msisdns, String imeis, long records, String first, String last) {
+            this.imsi = imsi;
+            this.msisdns = msisdns == null ? "" : msisdns.replace(",", ", ");
+            this.imeis = imeis == null ? "" : imeis.replace(",", ", ");
+            this.records = records;
+            this.first = first;
+            this.last = last;
+        }
     }
 
     // =========================================================================
@@ -1651,7 +3116,7 @@ public class MapViewPane extends BorderPane {
         });
 
         // Copy selected cells to clipboard via context menu or Ctrl/Cmd+C.
-        TableClipboardSupport.install(table);
+        TableClipboardSupport.install(table, "lighthouse_wanderer.csv");
 
         return table;
     }
@@ -1664,6 +3129,147 @@ public class MapViewPane extends BorderPane {
      * {@code GROUP_CONCAT} — here we only need the first site to
      * center the map on a row click.
      */
+    /**
+     * "Wanderer in allen Funkzellen": the IMSIs seen at every cell site of the
+     * time range. The Wanderer table is computed first (sorted by the number
+     * of cell sites); the IMSIs with the highest number are shown with their
+     * records. If none reached every cell site, those with the most cell sites
+     * are shown and the status line says so.
+     */
+    private void runAllCellsRoamers(RAGPipeline.QueryIntent intent) throws Exception {
+        String time = PoliceAnalysisQueries.timeFilterClause(intent.startTime, intent.endTime, "");
+        String summarySql = PoliceAnalysisQueries.buildSql(
+                PoliceAnalysisQueries.AnalysisType.ROAMERS, intent.startTime, intent.endTime);
+        List<RoamerRow> rows = new ArrayList<>();
+        ResultSet rs = exec(tuneTimeRanges(summarySql));
+        if (rs != null) {
+            try {
+                while (rs.next()) rows.add(roamerRow(rs));
+            } finally {
+                rs.close();
+            }
+        }
+        long sites = 0;
+        ResultSet cs = exec(tuneTimeRanges("SELECT COUNT(DISTINCT latitude_dec || ',' || longitude_dec) "
+                + "FROM response_records WHERE latitude_dec IS NOT NULL AND longitude_dec IS NOT NULL" + time));
+        if (cs != null) {
+            try {
+                if (cs.next()) sites = cs.getLong(1);
+            } finally {
+                cs.close();
+            }
+        }
+        if (rows.isEmpty()) {
+            Platform.runLater(() -> {
+                setLlmStatus(Lang.t("⚠️ Keine Wanderer im Zeitfenster gefunden", "⚠️ No roamers found in the time window"), theme.hover);
+                llmRunButton.setDisable(false);
+            });
+            return;
+        }
+        int max = 0;
+        for (RoamerRow r : rows) max = Math.max(max, r.cellCount);
+        List<RoamerRow> top = new ArrayList<>();
+        StringBuilder in = new StringBuilder();
+        for (RoamerRow r : rows) {
+            if (r.cellCount != max) continue;
+            top.add(r);
+            if (in.length() > 0) in.append(',');
+            in.append('\'').append(r.imsi.replace("'", "''")).append('\'');
+        }
+        String sql = "SELECT * FROM response_records WHERE imsi IN (" + in + ") "
+                + "AND latitude_dec IS NOT NULL AND longitude_dec IS NOT NULL" + time + " ORDER BY imsi, start_time";
+        QueryRows qr = queryForDisplay(sql);
+        if (qr == null) {
+            Platform.runLater(() -> {
+                setLlmStatus(Lang.t("⚠️ Kein Ergebnis", "⚠️ No result"), theme.hover);
+                llmRunButton.setDisable(false);
+            });
+            return;
+        }
+        final int best = max;
+        final long allSites = sites;
+        Platform.runLater(() -> {
+            setCoLocationTableVisible(false);
+            setParticipantsTableVisible(false);
+            setWechslerTableVisible(false);
+            roamersTable.getItems().setAll(top);
+            setRoamersTableVisible(true);
+            showQueryRows(qr);
+            setLlmStatus(best >= allSites
+                    ? String.format(Lang.t("✅ %,d Wanderer in allen %,d Funkzellen (%,d Datensätze)",
+                            "✅ %,d roamer(s) in all %,d cell sites (%,d records)"), top.size(), allSites, qr.rowCount)
+                    : String.format(Lang.t("⚠️ Kein Wanderer war in allen %,d Funkzellen – angezeigt: %,d Wanderer mit den meisten (%,d) Funkzellen",
+                            "⚠️ No roamer was in all %,d cell sites – shown: %,d roamer(s) with the most (%,d) cell sites"),
+                            allSites, top.size(), best),
+                    best >= allSites ? theme.accent2 : theme.hover);
+            llmRunButton.setDisable(false);
+        });
+    }
+
+    private static RoamerRow roamerRow(ResultSet rs) throws SQLException {
+        return new RoamerRow(
+                rs.getString("IMSI"),
+                rs.getString(Lang.t("Rufnummer", "Phone_Number")),
+                rs.getInt(Lang.t("Anzahl_Funkzellen", "Cell_Site_Count")),
+                rs.getString(Lang.t("Funkzellen", "Cell_Sites")),
+                rs.getString(Lang.t("Von", "From_Time")),
+                rs.getString(Lang.t("Bis", "To_Time")));
+    }
+
+    /**
+     * Runs the Wanderer summary into {@code rows} and selects the records of
+     * the Wanderer query by membership in its IMSIs (one pass, no second
+     * grouping). Returns {@code null} - nothing done - if the query is not the
+     * IMSI template or both do not cover the same time range.
+     */
+    private Selection roamerSelection(String sql, String summarySql, List<RoamerRow> rows) throws SQLException {
+        String marker = "AND +imsi IN (";
+        int at = sql.indexOf(marker);
+        if (at < 0 || sql.contains("start_time BETWEEN") != summarySql.contains("start_time BETWEEN")) return null;
+        int depth = 0, close = -1;
+        for (int i = at + marker.length() - 1; i < sql.length(); i++) {
+            char ch = sql.charAt(i);
+            if (ch == '(') depth++;
+            else if (ch == ')' && --depth == 0) { close = i; break; }
+        }
+        if (close < 0) return null;
+        String outer = simpleCondition(tuneTimeRanges(sql.substring(0, at) + sql.substring(close + 1)));
+        if (outer == null || outer.isEmpty()) return null;
+        java.util.regex.Matcher tm = java.util.regex.Pattern.compile("start_time BETWEEN '[^']*' AND '[^']*'").matcher(sql);
+        String time = tm.find() ? " AND " + tm.group() : "";
+
+        List<RoamerRow> found = new ArrayList<>();
+        Set<String> imsis = new HashSet<>();
+        ResultSet rs = exec(tuneTimeRanges(summarySql));
+        if (rs == null) return null;
+        try {
+            while (rs.next()) {
+                RoamerRow r = roamerRow(rs);
+                found.add(r);
+                imsis.add(r.imsi);
+            }
+        } finally {
+            rs.close();
+        }
+        // The template only requires imsi <> '', the summary TRIM(imsi) <> '':
+        // add Wanderer whose IMSI consists of spaces only (small index range).
+        ResultSet sp = exec("SELECT imsi FROM response_records WHERE imsi >= ' ' AND imsi < '!' "
+                + "AND TRIM(imsi) = '' AND latitude_dec IS NOT NULL AND longitude_dec IS NOT NULL" + time
+                + " GROUP BY imsi HAVING COUNT(DISTINCT latitude_dec || ',' || longitude_dec) > 1");
+        if (sp == null) return null;
+        try {
+            while (sp.next()) imsis.add(sp.getString(1));
+        } finally {
+            sp.close();
+        }
+        Selection sel;
+        try (java.sql.Connection c = source().open()) {
+            sel = Selection.create(c, outer, "imsi", r -> imsis.contains(r.getString(2)));
+        }
+        rows.addAll(found);
+        return sel;
+    }
+
     private static final class RoamerRow {
         final String imsi;
         final String msisdn;
@@ -1761,7 +3367,7 @@ public class MapViewPane extends BorderPane {
         });
 
         // Copy selected cells to clipboard via context menu or Ctrl/Cmd+C.
-        TableClipboardSupport.install(table);
+        TableClipboardSupport.install(table, "lighthouse_wechsler.csv");
 
         return table;
     }
@@ -1805,7 +3411,10 @@ public class MapViewPane extends BorderPane {
 
     private void onTimelinePointSelected(DataPoint dp) {
         detailPane.show(dp, theme);
-        if (dp.getCoordinate() != null) {
+        if (dp.getCoordinate() != null && mapView.isOverview()) {
+            // keep the overview, only centre on the record's location
+            mapView.focusPoint(dp);
+        } else if (dp.getCoordinate() != null) {
             mapView.setData(List.of(dp));
             mapView.focusPoint(dp);
         }
@@ -1947,6 +3556,7 @@ public class MapViewPane extends BorderPane {
         coLocationTable.setStyle(theme.bgStyle() + theme.borderTopStyle());
         roamersTable.setStyle(theme.bgStyle() + theme.borderTopStyle());
         wechslerTable.setStyle(theme.bgStyle() + theme.borderTopStyle());
+        participantsTable.setStyle(theme.bgStyle() + theme.borderTopStyle());
     }
 
     // =========================================================================

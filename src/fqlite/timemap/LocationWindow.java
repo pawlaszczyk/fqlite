@@ -2,7 +2,8 @@ package fqlite.timemap;
 
 import fqlite.rag.RAGPipeline;
 import fqlite.sql.DBManager;
-import fqlite.sql.InMemoryDatabase;
+import fqlite.sql.QueryableDatabase;
+import fqlite.sql.ReadOnlySqliteDatabase;
 import javafx.animation.PauseTransition;
 import javafx.application.Application;
 import javafx.application.Platform;
@@ -59,7 +60,7 @@ public class LocationWindow extends Application {
      *
      * <p>Pass the same {@link RAGPipeline} instance that is used by
      * {@link fqlite.rag.LLMWindow} so the schemas are already loaded.
-     * The {@link InMemoryDatabase} must match the database shown in the map.</p>
+     * The database must match the data shown in the map.</p>
      *
      * @param tblname  name of the table to analyse
      * @param rows     table row data set
@@ -72,16 +73,33 @@ public class LocationWindow extends Application {
                           ObservableList<ObservableList<String>> rows,
                           List<String> header,
                           RAGPipeline pipeline,
-                          InMemoryDatabase mdb) {
+                          QueryableDatabase mdb) {
         this.headers.put(tblname, header);
         data.put(tblname, rows);
         this.ragPipeline = pipeline;
         this.inMemoryDB  = mdb;
     }
 
+    /**
+     * Constructor for a Lighthouse database that is opened directly and
+     * read-only instead of being recovered into memory by fqlite (see
+     * {@link MapViewPane#setBaseDatabase}). Intended for large databases.
+     *
+     * <p>The window takes ownership of {@code db} and closes it when it is
+     * closed.</p>
+     *
+     * @param db the opened database file
+     */
+    public LocationWindow(ReadOnlySqliteDatabase db) {
+        this.directDb = db;
+    }
+
     // Optional LLM components – null when not configured
     private RAGPipeline    ragPipeline = null;
-    private InMemoryDatabase inMemoryDB = null;
+    private QueryableDatabase inMemoryDB = null;
+
+    /** Set when the database file is used directly instead of recovered rows. */
+    private ReadOnlySqliteDatabase directDb = null;
 
     /** No-arg constructor required by {@link Application#launch}. */
     public LocationWindow() {}
@@ -150,7 +168,7 @@ public class LocationWindow extends Application {
     @Override
     public void start(Stage primaryStage) {
         // If no data was injected via the constructor, use synthetic samples.
-        if (data.isEmpty()) buildSampleData();
+        if (data.isEmpty() && directDb == null) buildSampleData();
 
         // Show a brief splash (lighthouse logo + version badge) before the
         // actual MapView window opens — purely cosmetic, doesn't delay/block
@@ -168,9 +186,14 @@ public class LocationWindow extends Application {
         livePane = analyzerPane;   // ermöglicht live-attach via setRagPipeline()
         activePane = analyzerPane; // ermöglicht Zugriff von außen, siehe getActivePane()
 
-        // Use setBaseData so the "↺ Reset" button in the LLM bar can restore
-        // the full original dataset after an LLM-filtered view.
-        analyzerPane.setBaseData(data, headers);
+        // Use setBaseData/setBaseDatabase so the "↺ Reset" button in the LLM
+        // bar can restore the full original dataset after an LLM-filtered view.
+        if (directDb != null) {
+            directDb.setStage(primaryStage);
+            analyzerPane.setBaseDatabase(directDb);
+        } else {
+            analyzerPane.setBaseData(data, headers);
+        }
 
         // Wire LLM if a pipeline was supplied (either via the extended
         // constructor or set after construction via setRagPipeline()).
@@ -179,11 +202,15 @@ public class LocationWindow extends Application {
         }
 
         Scene scene = new Scene(analyzerPane, Screen.getPrimary().getVisualBounds().getWidth() * 0.8, Screen.getPrimary().getVisualBounds().getHeight() * 0.8);
-        primaryStage.setTitle("FQLite – Lighthouse");
+        primaryStage.setTitle(directDb != null
+                ? "FQLite – Lighthouse – " + directDb.getDbName() + " (read-only)"
+                : "FQLite – Lighthouse");
         primaryStage.setScene(scene);
         primaryStage.setOnCloseRequest(e -> {
             livePane = null;    // aufräumen
             if (activePane == analyzerPane) activePane = null;
+            analyzerPane.dispose();
+            if (directDb != null) directDb.close();
         });
         primaryStage.show();
     }
@@ -212,7 +239,7 @@ public class LocationWindow extends Application {
         logo.setPreserveRatio(true);
         logo.setFitWidth(380);
 
-        Label version = new Label("Lighthouse Plugin 0.5 Beta");
+        Label version = new Label("Lighthouse Plugin 0.9 Beta");
         version.setStyle(
                 "-fx-text-fill: white;"
               + "-fx-font-size: 15px;"
@@ -244,9 +271,9 @@ public class LocationWindow extends Application {
      * is not yet open the pipeline is stored and wired inside {@link #start}.</p>
      *
      * @param pipeline an initialised pipeline
-     * @param mdb      the backing in-memory database
+     * @param mdb      the backing database (in-memory copy or the file itself)
      */
-    public void setRagPipeline(RAGPipeline pipeline, InMemoryDatabase mdb) {
+    public void setRagPipeline(RAGPipeline pipeline, QueryableDatabase mdb) {
         this.ragPipeline = pipeline;
         this.inMemoryDB  = mdb;
         // Falls das Fenster bereits offen ist, sofort einhängen

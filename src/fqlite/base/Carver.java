@@ -344,21 +344,21 @@ public class Carver{
 		if (job.resultlist.containsKey(line.getFirst())) {
 			ObservableList<ObservableList<String>> tablelist = job.resultlist.get(line.getFirst());
 
-				tablelist.add(FXCollections.observableList(line)); // add row
+				tablelist.add(job.stringPool.row(line)); // add row
 
 				// save the original hex-values of a table row separately to a different list
 				ObservableList<ObservableList<byte[]>> hexlist = job.hexdumplist.get(line.getFirst());
-				hexlist.add(FXCollections.observableList(hex));
+				hexlist.add(CompactList.hexRow(hex));
 
 		}
 		// create a new data set since the table name occurs for the first time
 		else {
 		          ObservableList<ObservableList<String>> tablelist = FXCollections.observableArrayList();
-				  tablelist.add(FXCollections.observableList(line)); // add row 
+				  tablelist.add(job.stringPool.row(line)); // add row 
 				  job.resultlist.put(line.getFirst(),tablelist);
 
 				  ObservableList<ObservableList<byte[]>> hexlist = FXCollections.observableArrayList();
-				  hexlist.add(FXCollections.observableList(hex));
+				  hexlist.add(CompactList.hexRow(hex));
 				  job.hexdumplist.put(line.getFirst(),hexlist);
 
 		}

@@ -160,6 +160,20 @@ public class DataAnalyzer {
     }
 
     /**
+     * Reads the complete row of a record by its SQLite rowid. Used for points
+     * loaded directly from a database file, so the raw rows need not be kept in
+     * memory (see {@link #analyzeResponseRecordsTable}).
+     */
+    public interface RawRowLoader {
+        /**
+         * @param rowId the rowid of the record
+         * @return the row aligned with the point's column names, or an empty
+         *         list if it cannot be read
+         */
+        List<String> load(long rowId);
+    }
+
+    /**
      * Same as {@link #analyze(ConcurrentHashMap, Map)}, but reports progress
      * via {@code listener} (may be {@code null} to skip reporting). Progress
      * is reported in batches (not after every single row) to keep the
@@ -213,6 +227,501 @@ public class DataAnalyzer {
                 DataPoint::getTimestamp,
                 Comparator.nullsLast(Comparator.naturalOrder())));
         return points;
+    }
+
+    /**
+     * Streaming variant for a {@code response_records} table that is read
+     * directly from the database file (see
+     * {@link fqlite.sql.ReadOnlySqliteDatabase}) instead of from rows that
+     * fqlite recovered into memory.
+     *
+     * <p>Rows are consumed one at a time from {@code rs}; only the resulting
+     * {@link DataPoint}s are kept. There is no intermediate
+     * {@code ObservableList} copy of the table and no in-memory SQLite copy,
+     * which is what makes databases larger than the Java heap usable.</p>
+     *
+     * <p>The rows carry no fqlite meta fields, and the column order is that of
+     * the result set itself, so the positions are exact and no value-based
+     * shift detection is needed. {@link DataPoint#getRawRow()} therefore lines
+     * up 1:1 with {@link DataPoint#getColumnNames()}.</p>
+     *
+     * @param rs        result of a {@code SELECT ... FROM response_records}
+     *                  (the caller closes it)
+     * @param totalRows expected number of rows, only used for progress
+     *                  reporting ({@code <= 0} if unknown)
+     * @param listener  progress callback, may be {@code null}
+     * @return the detected points sorted by timestamp (nulls last), or
+     *         {@code null} if the result set lacks the columns of the
+     *         {@code response_records} schema ({@code start_time} plus a
+     *         latitude/longitude pair)
+     * @throws java.sql.SQLException if reading from {@code rs} fails
+     */
+    public List<DataPoint> analyzeResponseRecords(
+            java.sql.ResultSet rs,
+            long totalRows,
+            ProgressListener listener) throws java.sql.SQLException {
+
+        java.sql.ResultSetMetaData md = rs.getMetaData();
+        int n = md.getColumnCount();
+        List<String> names = new ArrayList<>(n);
+        for (int i = 1; i <= n; i++) names.add(md.getColumnLabel(i));
+        // One shared, immutable header list for all points.
+        List<String> cols = List.copyOf(names);
+
+        if (!isResponseRecordsSchema(SCHEMA_RESPONSE_RECORDS, cols)) return null;
+
+        RrColumns c = new RrColumns(cols, 0, 0);
+        AtomicLong processed = new AtomicLong();
+        List<DataPoint> points = new ArrayList<>(
+                totalRows > 0 ? (int) Math.min(totalRows, 1 << 24) : 1024);
+        StringCanonicalizer[] canon = new StringCanonicalizer[n];
+        for (int i = 0; i < n; i++) canon[i] = new StringCanonicalizer();
+
+        int rowIdx = 0;
+        while (rs.next()) {
+            String[] values = new String[n];
+            for (int i = 0; i < n; i++) values[i] = canon[i].canonical(rs.getString(i + 1));
+            // Fixed-size, array-backed: random access without the spare
+            // capacity of an ArrayList. Raw rows are only ever read.
+            DataPoint dp = buildResponseRecordPoint(
+                    SCHEMA_RESPONSE_RECORDS, Arrays.asList(values), rowIdx, cols, c);
+            if (dp != null) points.add(dp);
+            reportProgress(processed, totalRows, listener);
+            rowIdx++;
+        }
+        if (listener != null) listener.onProgress(processed.get(), Math.max(totalRows, processed.get()));
+
+        points.sort(Comparator.comparing(
+                DataPoint::getTimestamp,
+                Comparator.nullsLast(Comparator.naturalOrder())));
+        return points;
+    }
+
+    /**
+     * Reads the {@code response_records} table of a Lighthouse database
+     * directly through {@code conn} and turns it into {@link DataPoint}s.
+     * Optimised for tables with millions of rows:
+     *
+     * <ul>
+     *   <li>Rows are streamed; no copy of the table is kept.</li>
+     *   <li>With a {@code loader}, only the columns the analysis needs are
+     *       read. The complete raw rows and the display-only fields with
+     *       mostly unique values (other information, session id, ...) are not
+     *       kept but read on demand through {@code loader} (tooltips, detail
+     *       panel, copy).</li>
+     *   <li>Repeated values of a column (APN, party type, cell ids,
+     *       IMSI/MSISDN/IMEI, ...) share one {@code String} instance.</li>
+     * </ul>
+     *
+     * @param conn     connection to the database (see
+     *                 {@link fqlite.sql.ReadOnlySqliteDatabase#openConnection()})
+     * @param listener progress callback, may be {@code null}
+     * @param loader   reads a complete row by rowid, or {@code null} to keep
+     *                 the raw rows in memory
+     * @return the points sorted by timestamp (nulls last), or {@code null} if
+     *         the table lacks the columns of the {@code response_records} schema
+     * @throws java.sql.SQLException if reading fails
+     */
+    public List<DataPoint> analyzeResponseRecordsTable(
+            java.sql.Connection conn,
+            ProgressListener listener,
+            RawRowLoader loader) throws java.sql.SQLException {
+        return readResponseRecords(conn, null, listener, loader, 1);
+    }
+
+    /** Opens a database connection (one per range when reading in parallel). */
+    @FunctionalInterface
+    public interface ConnectionSource {
+        java.sql.Connection open() throws java.sql.SQLException;
+    }
+
+    /** below this row count the table is read by one thread */
+    static final long PARALLEL_MIN_ROWS = 200_000;
+
+    /**
+     * As {@link #analyzeResponseRecordsTable(java.sql.Connection, ProgressListener, RawRowLoader)},
+     * but reads large tables with up to {@code threads} connections in
+     * parallel, each one a range of rowids. The result is the same as with a
+     * single reader: the ranges are joined in rowid order, the row indices
+     * continue across ranges, and the sort by timestamp is stable.
+     *
+     * @param source  opens the connections (closed again by this method)
+     * @param threads maximum number of reading threads
+     */
+    public List<DataPoint> analyzeResponseRecordsTable(
+            ConnectionSource source,
+            ProgressListener listener,
+            RawRowLoader loader,
+            int threads) throws java.sql.SQLException {
+        try (java.sql.Connection conn = source.open()) {
+            return readResponseRecords(conn, source, listener, loader, Math.max(1, threads));
+        }
+    }
+
+    /** one range of rows: its points (row indices relative to the range) and its row count */
+    private record Chunk(List<DataPoint> points, int rows) { }
+
+    private List<DataPoint> readResponseRecords(
+            java.sql.Connection conn, ConnectionSource source,
+            ProgressListener listener, RawRowLoader loader, int threads) throws java.sql.SQLException {
+        return readResponseRecords(conn, source, listener, loader, threads, null, -1);
+    }
+
+    /**
+     * Prepared reading of {@code response_records}: the column positions and
+     * the SELECT (rowid first, then the columns the points need, without
+     * FROM/WHERE) - shared by the full reader, the page reader and the overview.
+     */
+    static final class RrQuery {
+        final List<String> cols;
+        final RrColumns c;
+        final int[] read;
+        /** {@code SELECT rowid, ... FROM response_records} */
+        final String select;
+        final boolean endTimeOmitted;
+
+        private RrQuery(List<String> cols, RrColumns c, int[] read, String select, boolean endTimeOmitted) {
+            this.cols = cols; this.c = c; this.read = read; this.select = select; this.endTimeOmitted = endTimeOmitted;
+        }
+
+        /** quoted name of column {@code i} */
+        String q(int i) {
+            return "\"" + cols.get(i).replace("\"", "\"\"") + "\"";
+        }
+    }
+
+    /**
+     * Reads the column names of {@code response_records} and prepares the query.
+     *
+     * @return the query, or {@code null} if the table lacks the columns of the schema
+     */
+    static RrQuery prepareResponseRecords(java.sql.Connection conn) throws java.sql.SQLException {
+        List<String> names = new ArrayList<>();
+        try (java.sql.Statement st = conn.createStatement();
+             java.sql.ResultSet rs = st.executeQuery("SELECT * FROM " + SCHEMA_RESPONSE_RECORDS + " LIMIT 0")) {
+            java.sql.ResultSetMetaData md = rs.getMetaData();
+            for (int i = 1; i <= md.getColumnCount(); i++) names.add(md.getColumnLabel(i));
+        }
+        List<String> cols = List.copyOf(names);
+        if (cols.isEmpty() || !new DataAnalyzer().isResponseRecordsSchema(SCHEMA_RESPONSE_RECORDS, cols)) return null;
+        RrColumns c = new RrColumns(cols, 0, 0);
+
+        // Positions read from the file. Display-only columns and columns the
+        // analysis does not use stay null and are loaded on demand.
+        int[] read = java.util.stream.IntStream.of(
+                c.startTime, c.endTime, c.duration, c.naDevice,
+                c.ltRaw, c.loRaw, c.latitude, c.longitude, c.mapDatum, c.azimuth,
+                c.userLoc, c.cellMcc, c.cellMnc, c.cellLacTac, c.cellCi,
+                c.imsi, c.msisdn, c.apn,
+                c.callIndicator, c.callAction, c.callSubtype,
+                c.partyType, c.nwAccess)
+                .filter(i -> i >= 0).distinct().toArray();
+        // end_time is only needed when start_time is not a plain
+        // "yyyy-MM-dd HH:mm:ss" (fallback timestamp), the raw coordinates only
+        // when the decimal ones are not finite numbers (fallback coordinate): SQLite
+        // returns them only in that case, which saves reading two of three
+        // long text columns for nearly every row. A start_time of that shape
+        // that still does not parse is handled in readChunk.
+        RrQuery tmp = new RrQuery(cols, c, read, null, false);
+        StringBuilder sql = new StringBuilder("SELECT rowid");
+        boolean endTimeOmitted = c.startTime >= 0 && c.endTime >= 0;
+        for (int i : read) {
+            sql.append(", ");
+            if (i == c.endTime && c.startTime >= 0)
+                sql.append("CASE WHEN ").append(tmp.q(c.startTime)).append(" GLOB '").append(ISO_SECONDS_GLOB)
+                   .append("' THEN NULL ELSE ").append(tmp.q(i)).append(" END");
+            else if (i == c.ltRaw && c.latitude >= 0)
+                sql.append(rawCoordinate(tmp, c.latitude, i));
+            else if (i == c.loRaw && c.longitude >= 0)
+                sql.append(rawCoordinate(tmp, c.longitude, i));
+            else
+                sql.append(tmp.q(i));
+        }
+        sql.append(" FROM ").append(SCHEMA_RESPONSE_RECORDS);
+        return new RrQuery(cols, c, read, sql.toString(), endTimeOmitted);
+    }
+
+    /** the raw coordinate column {@code raw}, only where the decimal column {@code dec} is no finite number */
+    static String rawCoordinate(RrQuery q, int dec, int raw) {
+        return "CASE WHEN typeof(" + q.q(dec) + ") IN ('integer','real') AND "
+                + q.q(dec) + " BETWEEN -1e308 AND 1e308 THEN NULL ELSE " + q.q(raw) + " END";
+    }
+
+    /**
+     * Reads the rows selected by {@code tail} (appended to the prepared
+     * SELECT, e.g. {@code WHERE ... ORDER BY ... LIMIT ...}) in the order of
+     * the query, without sorting - used for pages of the overview timeline and
+     * the records of one identifier or location.
+     *
+     * @param params values for the {@code ?} in {@code tail}
+     * @param placeholders keep rows without timestamp and coordinate as empty
+     *                     points (timeline pages must stay aligned) instead of skipping them
+     * @return the points in query order; row index = rowid - 1
+     */
+    List<DataPoint> readResponseRecordRows(java.sql.Connection conn, RrQuery q, String tail, Object[] params,
+                                           RawRowLoader loader, boolean placeholders) throws java.sql.SQLException {
+        try (java.sql.PreparedStatement ps = conn.prepareStatement(q.select + " " + tail)) {
+            if (params != null)
+                for (int i = 0; i < params.length; i++) ps.setObject(i + 1, params[i]);
+            try (java.sql.ResultSet rs = ps.executeQuery()) {
+                StringCanonicalizer[] canon = new StringCanonicalizer[q.read.length];
+                for (int k = 0; k < q.read.length; k++) canon[k] = new StringCanonicalizer();
+                List<DataPoint> pts = readChunk(rs, q.cols, q.c, q.read, canon, new ValuePool(), q.endTimeOmitted, loader,
+                        new AtomicLong(), -1, null, 16, placeholders).points();
+                for (DataPoint dp : pts)
+                    dp.setRowIndex((int) Math.min(Integer.MAX_VALUE, Math.max(0, dp.getRowId() - 1)));
+                return pts;
+            }
+        }
+    }
+
+    /** true if the SQL condition contains a subquery */
+    static boolean hasSubquery(String where) {
+        return where != null && java.util.regex.Pattern.compile("(?i)\\bSELECT\\b").matcher(where).find();
+    }
+
+    /**
+     * As {@link #analyzeResponseRecordsTable(ConnectionSource, ProgressListener, RawRowLoader, int)},
+     * restricted to the rows matching {@code where}.
+     *
+     * @param where      SQL condition on {@code response_records}, or {@code null} for all rows
+     * @param knownTotal number of matching rows if known (progress), else -1
+     */
+    public List<DataPoint> analyzeResponseRecordsTable(
+            ConnectionSource source, String where, long knownTotal,
+            ProgressListener listener, RawRowLoader loader, int threads) throws java.sql.SQLException {
+        try (java.sql.Connection conn = source.open()) {
+            return readResponseRecords(conn, source, listener, loader, Math.max(1, threads), where, knownTotal);
+        }
+    }
+
+    private List<DataPoint> readResponseRecords(
+            java.sql.Connection conn, ConnectionSource source,
+            ProgressListener listener, RawRowLoader loader, int threads,
+            String where, long knownTotal) throws java.sql.SQLException {
+
+        long total = 0, minRowid = 0, maxRowid = -1;
+        try (java.sql.Statement st = conn.createStatement()) {
+            if (loader == null) {
+                try (java.sql.ResultSet rs = st.executeQuery("SELECT COUNT(*) FROM " + SCHEMA_RESPONSE_RECORDS)) {
+                    if (rs.next()) total = rs.getLong(1);
+                }
+                try (java.sql.ResultSet rs = st.executeQuery("SELECT * FROM " + SCHEMA_RESPONSE_RECORDS)) {
+                    return analyzeResponseRecords(rs, total, listener);
+                }
+            }
+            if (where == null) {
+                try (java.sql.ResultSet rs = st.executeQuery("SELECT COUNT(*) FROM " + SCHEMA_RESPONSE_RECORDS)) {
+                    if (rs.next()) total = rs.getLong(1);
+                }
+            } else {
+                total = knownTotal;
+            }
+            long tableRows = where == null ? total : Math.max(knownTotal, PARALLEL_MIN_ROWS);
+            // a condition with a subquery would be evaluated again for every range
+            if (hasSubquery(where)) threads = 1;
+            if (source != null && threads > 1 && tableRows >= PARALLEL_MIN_ROWS) {
+                try (java.sql.ResultSet rs = st.executeQuery(
+                        "SELECT MIN(rowid), MAX(rowid) FROM " + SCHEMA_RESPONSE_RECORDS)) {
+                    if (rs.next()) { minRowid = rs.getLong(1); maxRowid = rs.getLong(2); }
+                }
+            }
+        }
+
+        RrQuery rq = prepareResponseRecords(conn);
+        if (rq == null) return null;
+        List<String> cols = rq.cols;
+        RrColumns c = rq.c;
+        int[] read = rq.read;
+        boolean endTimeOmitted = rq.endTimeOmitted;
+        StringBuilder sql = new StringBuilder(rq.select);
+        String cond = where == null ? null : "(" + where + ")";
+
+        AtomicLong processed = new AtomicLong();
+        // shared by all reading threads, so equal values share one instance
+        StringCanonicalizer[] canon = new StringCanonicalizer[read.length];
+        for (int k = 0; k < read.length; k++) canon[k] = new StringCanonicalizer();
+        ValuePool vp = new ValuePool();
+        final long totalRows = total;
+
+        List<Chunk> chunks;
+        if (maxRowid >= minRowid && maxRowid - minRowid >= threads) {
+            // Ranges of equal rowid width; more ranges than threads so that
+            // gaps in the rowids do not leave a thread idle for long.
+            int nRanges = threads * 4;
+            long width = (maxRowid - minRowid) / nRanges + 1;
+            String rangeSql = sql + " WHERE rowid BETWEEN ? AND ?" + (cond != null ? " AND " + cond : "") + " ORDER BY rowid";
+            List<java.util.concurrent.Callable<Chunk>> tasks = new ArrayList<>();
+            for (int i = 0; i < nRanges; i++) {
+                long from = minRowid + i * width;
+                if (from > maxRowid) break;
+                long to = i == nRanges - 1 ? maxRowid : Math.min(maxRowid, from + width - 1);
+                tasks.add(() -> {
+                    try (java.sql.Connection cc = source.open();
+                         java.sql.PreparedStatement ps = cc.prepareStatement(rangeSql)) {
+                        ps.setLong(1, from);
+                        ps.setLong(2, to);
+                        try (java.sql.ResultSet rs = ps.executeQuery()) {
+                            return readChunk(rs, cols, c, read, canon, vp, endTimeOmitted, loader, processed, totalRows, listener,
+                                    (int) Math.min(1 << 24, Math.max(0, totalRows) / nRanges + 16));
+                        }
+                    }
+                });
+            }
+            java.util.concurrent.ExecutorService pool = java.util.concurrent.Executors.newFixedThreadPool(threads, r -> {
+                Thread t = new Thread(r, "response_records-reader");
+                t.setDaemon(true);
+                return t;
+            });
+            try {
+                chunks = new ArrayList<>();
+                for (java.util.concurrent.Future<Chunk> f : pool.invokeAll(tasks)) chunks.add(f.get());
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new java.sql.SQLException("interrupted", e);
+            } catch (java.util.concurrent.ExecutionException e) {
+                Throwable cause = e.getCause();
+                if (cause instanceof java.sql.SQLException se) throw se;
+                if (cause instanceof RuntimeException re) throw re;
+                throw new java.sql.SQLException(cause);
+            } finally {
+                pool.shutdownNow();
+            }
+        } else {
+            try (java.sql.Statement st = conn.createStatement();
+                 java.sql.ResultSet rs = st.executeQuery(sql + (cond != null ? " WHERE " + cond : ""))) {
+                chunks = List.of(readChunk(rs, cols, c, read, canon, vp, endTimeOmitted, loader, processed, totalRows, listener,
+                        (int) Math.min(Math.max(totalRows, 1024), 1 << 24)));
+            }
+        }
+
+        // join the ranges in rowid order; row indices continue across ranges
+        int size = 0;
+        for (Chunk ch : chunks) size += ch.points().size();
+        DataPoint[] all = new DataPoint[size];
+        int pos = 0, offset = 0;
+        for (Chunk ch : chunks) {
+            for (DataPoint dp : ch.points()) {
+                if (offset != 0) dp.setRowIndex(dp.getRowIndex() + offset);
+                all[pos++] = dp;
+            }
+            offset += ch.rows();
+        }
+        chunks = null;
+        if (listener != null) listener.onProgress(processed.get(), Math.max(total, processed.get()));
+        return new ArrayList<>(Arrays.asList(sortByTimestamp(all)));
+    }
+
+    /**
+     * Stable sort by timestamp, nulls last - the same order as
+     * {@code List.sort(comparing(getTimestamp, nullsLast(naturalOrder())))}.
+     * For whole-second timestamps (the ETSI format) the order is computed on
+     * one {@code long} per point (seconds and original position), which is
+     * many times faster for millions of points than comparing the objects;
+     * otherwise the points are sorted as objects.
+     */
+    private static DataPoint[] sortByTimestamp(DataPoint[] all) {
+        final int idxBits = 28;
+        final long nullKey = (1L << (63 - idxBits)) - 1;
+        long[] keys = all.length < (1 << idxBits) ? new long[all.length] : null;
+        for (int i = 0; keys != null && i < all.length; i++) {
+            Instant t = all[i].getTimestamp();
+            long sec;
+            if (t == null) sec = nullKey;
+            else if (t.getNano() != 0 || t.getEpochSecond() < 0 || t.getEpochSecond() >= nullKey) { keys = null; break; }
+            else sec = t.getEpochSecond();
+            keys[i] = (sec << idxBits) | i;
+        }
+        if (keys == null) {
+            Arrays.parallelSort(all, Comparator.comparing(
+                    DataPoint::getTimestamp,
+                    Comparator.nullsLast(Comparator.naturalOrder())));
+            return all;
+        }
+        Arrays.parallelSort(keys);
+        DataPoint[] sorted = new DataPoint[all.length];
+        long mask = (1L << idxBits) - 1;
+        for (int i = 0; i < keys.length; i++) sorted[i] = all[(int) (keys[i] & mask)];
+        return sorted;
+    }
+
+    /** GLOB pattern of a "yyyy-MM-dd HH:mm:ss" value (see {@link #isIsoSecondsShape}) */
+    private static final String ISO_SECONDS_GLOB =
+            "[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9] [0-9][0-9]:[0-9][0-9]:[0-9][0-9]";
+
+    /** Java equivalent of {@code s GLOB ISO_SECONDS_GLOB} */
+    static boolean isIsoSecondsShape(String s) {
+        if (s == null || s.length() != 19) return false;
+        for (int i = 0; i < 19; i++) {
+            char ch = s.charAt(i);
+            boolean ok = switch (i) {
+                case 4, 7 -> ch == '-';
+                case 10 -> ch == ' ';
+                case 13, 16 -> ch == ':';
+                default -> ch >= '0' && ch <= '9';
+            };
+            if (!ok) return false;
+        }
+        return true;
+    }
+
+    /**
+     * Reads the rows of {@code rs} (rowid first, then the columns {@code read}).
+     *
+     * @param endTimeOmitted end_time was only selected when start_time does
+     *                       not have the "yyyy-MM-dd HH:mm:ss" shape
+     */
+    private Chunk readChunk(java.sql.ResultSet rs, List<String> cols, RrColumns c, int[] read,
+                            StringCanonicalizer[] canon, ValuePool vp,
+                            boolean endTimeOmitted, RawRowLoader loader,
+                            AtomicLong processed, long total, ProgressListener listener,
+                            int expected) throws java.sql.SQLException {
+        return readChunk(rs, cols, c, read, canon, vp, endTimeOmitted, loader, processed, total, listener, expected, false);
+    }
+
+    private Chunk readChunk(java.sql.ResultSet rs, List<String> cols, RrColumns c, int[] read,
+                            StringCanonicalizer[] canon, ValuePool vp,
+                            boolean endTimeOmitted, RawRowLoader loader,
+                            AtomicLong processed, long total, ProgressListener listener,
+                            int expected, boolean placeholders) throws java.sql.SQLException {
+        int n = cols.size();
+        ArrayList<DataPoint> points = new ArrayList<>(Math.max(16, expected));
+        int rowIdx = 0;
+        while (rs.next()) {
+            long rowid = rs.getLong(1);
+            String[] values = new String[n];
+            for (int k = 0; k < read.length; k++) values[read[k]] = canon[k].canonical(rs.getString(k + 2));
+            DataPoint dp = buildResponseRecordPoint(
+                    SCHEMA_RESPONSE_RECORDS, Arrays.asList(values), rowIdx, cols, c, vp);
+            if (endTimeOmitted && (dp == null || dp.getTimestamp() == null)
+                    && isIsoSecondsShape(values[c.startTime])) {
+                // start_time has the usual shape but no valid value (e.g.
+                // month 13): end_time is the fallback, read it now (rare)
+                List<String> full = loader.load(rowid);
+                if (full.size() == n) {
+                    values[c.endTime] = full.get(c.endTime);
+                    dp = buildResponseRecordPoint(
+                            SCHEMA_RESPONSE_RECORDS, Arrays.asList(values), rowIdx, cols, c, vp);
+                }
+            }
+            if (dp == null && placeholders) {
+                ResponseRecordDataPoint empty = new ResponseRecordDataPoint();
+                empty.setTableName(SCHEMA_RESPONSE_RECORDS);
+                empty.setRowIndex(rowIdx);
+                empty.setColumnNames(cols);
+                dp = empty;
+            }
+            if (dp != null) {
+                dp.setRawRow(null);
+                dp.setRawRowLoader(loader, rowid);
+                ((ResponseRecordDataPoint) dp).dropDisplayOnlyFields();
+                points.add(dp);
+            }
+            reportProgress(processed, total, listener);
+            rowIdx++;
+        }
+        points.trimToSize();
+        return new Chunk(points, rowIdx);
     }
 
     /** How many rows to process between {@link ProgressListener} callbacks. */
@@ -291,7 +800,7 @@ public class DataAnalyzer {
      * {@code start_time} column plus a recognised latitude/longitude column
      * pair (see {@link #RR_LATITUDE_NAMES}/{@link #RR_LONGITUDE_NAMES}).
      */
-    private boolean isResponseRecordsSchema(String tableName, List<String> cols) {
+    boolean isResponseRecordsSchema(String tableName, List<String> cols) {
         if (!SCHEMA_RESPONSE_RECORDS.equalsIgnoreCase(tableName)) return false;
         if (cols.isEmpty()) return false;
         List<String> lower = cols.stream().map(String::toLowerCase).toList();
@@ -359,7 +868,7 @@ public class DataAnalyzer {
      *         validates as well as or better than any shifted candidate
      */
     private static int findShiftPaired(
-            ObservableList<ObservableList<String>> rows,
+            List<? extends List<String>> rows,
             int naiveIdx,
             Predicate<String> validator,
             int maxShift) {
@@ -382,7 +891,7 @@ public class DataAnalyzer {
 
     /** Scores {@code idx} only when both {@code idx} and {@code idx + 1} validate. */
     private static int scorePairAt(
-            ObservableList<ObservableList<String>> rows,
+            List<? extends List<String>> rows,
             int idx,
             Predicate<String> validator,
             int sampleSize) {
@@ -390,7 +899,7 @@ public class DataAnalyzer {
         if (idx < 0) return 0;
         int score = 0;
         for (int r = 0; r < sampleSize; r++) {
-            ObservableList<String> row = rows.get(r);
+            List<String> row = rows.get(r);
             if (idx + 1 >= row.size()) continue;
             String v1 = row.get(idx);
             String v2 = row.get(idx + 1);
@@ -444,35 +953,7 @@ public class DataAnalyzer {
         // correctly aligned even when the later shift exists).
         int naiveStartTime = colIndex(cols, RR_START_TIME);
         int delta = findShiftPaired(rows, naiveStartTime, this::looksLikeTimestamp, 12);
-
-        int idxStartTime    = naiveStartTime < 0 ? -1 : naiveStartTime + delta;
-        int idxEndTime      = colIndex(cols, delta, "end_time");
-        int idxDuration     = colIndex(cols, delta, "duration_seconds");
-        int idxNaDevice     = colIndex(cols, delta, "na_device_id");
-        int idxLtRaw        = colIndex(cols, delta, RR_LAT_RAW_NAMES);
-        int idxLoRaw        = colIndex(cols, delta, RR_LON_RAW_NAMES);
-        int idxLatitude     = colIndex(cols, delta, RR_LATITUDE_NAMES);
-        int idxLongitude    = colIndex(cols, delta, RR_LONGITUDE_NAMES);
-        int idxMapDatum     = colIndex(cols, delta, "map_datum");
-        int idxAzimuth      = colIndex(cols, delta, "azimuth");
-        int idxUserLoc      = colIndex(cols, delta, "user_location_info");
-        int idxCellMcc      = colIndex(cols, delta, "cell_mcc");
-        int idxCellMnc      = colIndex(cols, delta, "cell_mnc");
-        int idxCellLacTac   = colIndex(cols, delta, "cell_lac_tac");
-        int idxCellCi       = colIndex(cols, delta, "cell_ci");
-        int idxImsi         = colIndex(cols, delta, "imsi");
-        int idxMsisdn       = colIndex(cols, delta, "msisdn");
-        int idxApn          = colIndex(cols, delta, "apn");
-        int idxOtherInfo    = colIndex(cols, delta, "other_information");
-        int idxCallIndicator= colIndex(cols, delta, "call_indicator");
-        int idxCallAction   = colIndex(cols, delta, "call_action_code");
-        int idxCallSubtype  = colIndex(cols, delta, "call_subtype");
-        int idxSessionId    = colIndex(cols, delta, "session_id");
-        int idxTypeExtra    = colIndex(cols, delta, "type_of_data_extra");
-        // party_type / nw_access_type precede the shift point, so they're
-        // read from their naive (unshifted) position.
-        int idxPartyType    = colIndex(cols, "party_type");
-        int idxNwAccess     = colIndex(cols, "nw_access_type");
+        RrColumns c = new RrColumns(cols, RR_META_OFFSET, delta);
 
         // Iterate via the list's own iterator instead of an indexed
         // `rows.get(rowIdx)` loop — see the identical comment in
@@ -499,108 +980,278 @@ public class DataAnalyzer {
             // not O(columns) per lookup.
             List<String> r = new ArrayList<>(row);
 
-            // ── Timestamp ────────────────────────────────────────────────────
-            Instant timestamp = parseTimestamp(cell(r, idxStartTime));
-            if (timestamp == null)
-                timestamp = parseTimestamp(cell(r, idxEndTime));
-
-            // ── Coordinates ──────────────────────────────────────────────────
-            // Prefer the precomputed latitude_dec/longitude_dec columns (a
-            // plain Double.parseDouble is enough there). Some records end up
-            // with NULL there anyway -- e.g. providers whose XML export uses
-            // a decimal-degree coordinate with no N/S/E/W hemisphere prefix,
-            // which older importer runs failed to convert -- so fall back to
-            // re-parsing the untouched latitude_raw/longitude_raw text via
-            // GPSParser's fuller DMS/decimal/hemisphere-less parser instead of
-            // silently dropping the point from the map.
-            GeoCoordinate coord = null;
-            Double lat = parseDecimalCell(cell(r, idxLatitude));
-            Double lon = parseDecimalCell(cell(r, idxLongitude));
-            if (lat == null) lat = GPSParser.parseAnyCoordinate(cell(r, idxLtRaw));
-            if (lon == null) lon = GPSParser.parseAnyCoordinate(cell(r, idxLoRaw));
-            if (lat != null && lon != null && isValidLat(lat) && isValidLon(lon))
-                coord = new GeoCoordinate(lat, lon);
-
-            // Skip rows that carry neither timestamp nor coordinates.
-            if (timestamp == null && coord == null) {
-                reportProgress(processed, totalRows, listener);
-                rowIdx++;
-                continue;
-            }
-
-            // ── Build DataPoint ──────────────────────────────────────────────
-            ResponseRecordDataPoint rrdp = new ResponseRecordDataPoint();
-            rrdp.setTableName(tableName);
-            rrdp.setRowIndex(rowIdx);
-            rrdp.setTimestamp(timestamp);
-            rrdp.setCoordinate(coord);
-            rrdp.setRawRow(r);
-            rrdp.setColumnNames(cols);
-
-            rrdp.setEndTime(cell(r, idxEndTime));
-            rrdp.setPartyType(cell(r, idxPartyType));
-            rrdp.setNwAccessType(cell(r, idxNwAccess));
-            rrdp.setNaDeviceId(cell(r, idxNaDevice));
-            rrdp.setLtRaw(cell(r, idxLtRaw));
-            rrdp.setLoRaw(cell(r, idxLoRaw));
-            rrdp.setMapDatum(cell(r, idxMapDatum));
-            rrdp.setAzimuth(cell(r, idxAzimuth));
-            rrdp.setUserLocationInfo(cell(r, idxUserLoc));
-            rrdp.setImsi(cell(r, idxImsi));
-            rrdp.setMsisdn(cell(r, idxMsisdn));
-            rrdp.setApn(cell(r, idxApn));
-            rrdp.setOtherInformation(cell(r, idxOtherInfo));
-            rrdp.setCallIndicator(cell(r, idxCallIndicator));
-            rrdp.setCallActionCode(cell(r, idxCallAction));
-            rrdp.setCallSubtype(cell(r, idxCallSubtype));
-            rrdp.setSessionId(cell(r, idxSessionId));
-            rrdp.setTypeOfDataExtra(cell(r, idxTypeExtra));
-            rrdp.setDurationSeconds(cell(r, idxDuration));
-
-            // ── Cell identity ────────────────────────────────────────────────
-            // Prefer cell_mcc/cell_mnc/cell_lac_tac/cell_ci — decoded ONCE,
-            // correctly, from the raw ULI bytes at import time (see
-            // EtsiXmlImporter.writeRow's javadoc: these columns exist
-            // specifically "so that forensic SQL ... can match on cell
-            // identity directly without having to re-decode
-            // user_location_info at query time"). Re-decoding the raw hex
-            // again here, from a column position resolved by name and by
-            // this method's own value-based shift heuristic, previously
-            // made every stop in a subscriber's movement path
-            // (SequenceAnalyzer.Stop.cellLabel()) show the identical
-            // CellID regardless of how far apart the records' actual
-            // (correctly positioned) coordinates were — the on-the-fly
-            // decode of idxUserLoc was landing on the same value across
-            // rows even though cell_lac_tac/cell_ci differ correctly.
-            // Only fall back to the raw-hex decode for older databases
-            // that predate these columns (both NULL for every row).
-            Integer cellMcc    = parseIntCell(cell(r, idxCellMcc));
-            Integer cellMnc    = parseIntCell(cell(r, idxCellMnc));
-            Integer cellLacTac = parseIntCell(cell(r, idxCellLacTac));
-            Integer cellCi     = parseIntCell(cell(r, idxCellCi));
-            UliDecoder.CellInfo cellInfo;
-            if (cellLacTac != null || cellCi != null) {
-                UliDecoder.CellInfo rawDecoded = UliDecoder.decode(cell(r, idxUserLoc));
-                cellInfo = new UliDecoder.CellInfo(
-                        rawDecoded != null ? rawDecoded.networkType : null,
-                        cellMcc    != null ? cellMcc    : -1,
-                        cellMnc    != null ? cellMnc    : -1,
-                        cellLacTac != null ? cellLacTac : -1,
-                        cellCi     != null ? cellCi     : -1,
-                        rawDecoded != null ? rawDecoded.eci : -1);
-            } else {
-                cellInfo = UliDecoder.decode(cell(r, idxUserLoc));
-            }
-            rrdp.setCellInfo(cellInfo);
-            // CellTower resolution (OpenCelliD lookup) is deferred: MapView
-            // triggers it asynchronously when the cell-tower layer is enabled.
-
-            points.add(rrdp);
+            DataPoint dp = buildResponseRecordPoint(tableName, r, rowIdx, cols, c);
+            if (dp != null) points.add(dp);
             reportProgress(processed, totalRows, listener);
             rowIdx++;
         }
 
         return points;
+    }
+
+    /**
+     * Shares one {@code String} instance per distinct value of a column.
+     * Pays off for columns whose values repeat (APN, party type, cell ids,
+     * IMSI/MSISDN/IMEI of subscribers with many records). A column is only
+     * given up when it is clearly unique (hit rate below 5 % after
+     * {@link #PROBE} values: ids, session ids, timestamps) - identifiers of
+     * subscribers repeat only later in a large table, so a decision after a few
+     * thousand rows would miss them. Thread-safe (used by the parallel reader);
+     * the pool exists only while one table is loaded.
+     */
+    private static final class StringCanonicalizer {
+        private static final int PROBE = 100_000;
+        private volatile java.util.concurrent.ConcurrentHashMap<String, String> pool = new java.util.concurrent.ConcurrentHashMap<>();
+        private final java.util.concurrent.atomic.LongAdder seen = new java.util.concurrent.atomic.LongAdder();
+        private final java.util.concurrent.atomic.LongAdder hits = new java.util.concurrent.atomic.LongAdder();
+        private volatile boolean decided;
+
+        String canonical(String v) {
+            java.util.concurrent.ConcurrentHashMap<String, String> p = pool;
+            if (v == null || p == null) return v;
+            String c = p.get(v);                      // lock-free for the usual hit
+            if (c == null) c = p.putIfAbsent(v, v);
+            if (decided) return c != null ? c : v;
+            seen.increment();
+            if (c != null) {
+                hits.increment();
+                return c;
+            }
+            long n = seen.sum();
+            if (n >= PROBE) {
+                decided = true;
+                if (hits.sum() * 20 < n) pool = null;     // clearly unique: stop pooling
+            }
+            return v;
+        }
+    }
+
+    /**
+     * Shares equal immutable value objects (coordinates, cell identities,
+     * timestamps) between the points of one load: millions of records refer to
+     * a few thousand cells and repeat their timestamps, so one instance per
+     * value instead of one per record saves a large part of the memory per
+     * point. Thread-safe; exists only while one table is loaded.
+     */
+    private static final class ValuePool {
+        private record GeoKey(long lat, long lon) { }
+        private record CellKey(String type, int mcc, int mnc, int lac, int ci, int eci) { }
+        private final java.util.concurrent.ConcurrentHashMap<GeoKey, GeoCoordinate> geo = new java.util.concurrent.ConcurrentHashMap<>();
+        private final java.util.concurrent.ConcurrentHashMap<CellKey, UliDecoder.CellInfo> cells = new java.util.concurrent.ConcurrentHashMap<>();
+        private final java.util.concurrent.ConcurrentHashMap<String, Object> uli = new java.util.concurrent.ConcurrentHashMap<>();
+        private final java.util.concurrent.ConcurrentHashMap<Long, Instant> seconds = new java.util.concurrent.ConcurrentHashMap<>();
+        private static final Object NONE = new Object();
+
+        GeoCoordinate geo(double lat, double lon) {
+            GeoKey k = new GeoKey(Double.doubleToRawLongBits(lat), Double.doubleToRawLongBits(lon));
+            GeoCoordinate g = geo.get(k);
+            return g != null ? g : geo.computeIfAbsent(k, x -> new GeoCoordinate(lat, lon));
+        }
+
+        UliDecoder.CellInfo cell(UliDecoder.CellInfo c) {
+            if (c == null) return null;
+            CellKey k = new CellKey(c.networkType, c.mcc, c.mnc, c.lac, c.cellId, c.eci);
+            UliDecoder.CellInfo e = cells.get(k);
+            return e != null ? e : cells.computeIfAbsent(k, x -> c);
+        }
+
+        /** {@link UliDecoder#decode} with the result cached per ULI string (the decoder is a pure function) */
+        UliDecoder.CellInfo decodeUli(String hex) {
+            if (hex == null) return UliDecoder.decode(null);
+            Object o = uli.get(hex);
+            if (o == null) {
+                UliDecoder.CellInfo d = UliDecoder.decode(hex);
+                o = d == null ? NONE : cell(d);
+                if (uli.size() < 1_000_000) uli.putIfAbsent(hex, o);
+            }
+            return o == NONE ? null : (UliDecoder.CellInfo) o;
+        }
+
+        Instant instant(Instant t) {
+            if (t == null || t.getNano() != 0) return t;
+            Long key = t.getEpochSecond();
+            Instant c = seconds.get(key);
+            if (c == null) c = seconds.putIfAbsent(key, t);
+            return c != null ? c : t;
+        }
+    }
+
+    /**
+     * Column positions of a {@code response_records} row, resolved once per
+     * table by name and corrected by the value-based shift {@code delta} for
+     * every field from {@code start_time} onward (see {@link #findShiftPaired}).
+     * {@code party_type} and {@code nw_access_type} precede the shift point
+     * and are read unshifted.
+     */
+    static final class RrColumns {
+        final int startTime, endTime, duration, naDevice,
+                  ltRaw, loRaw, latitude, longitude, mapDatum, azimuth,
+                  userLoc, cellMcc, cellMnc, cellLacTac, cellCi,
+                  imsi, msisdn, apn, otherInfo,
+                  callIndicator, callAction, callSubtype, sessionId, typeExtra,
+                  partyType, nwAccess;
+
+        /**
+         * @param metaOffset number of leading meta fields in every raw row
+         *                   ({@link #RR_META_OFFSET} for rows recovered by
+         *                   fqlite, {@code 0} for rows read directly via JDBC)
+         * @param delta      shift for all fields from {@code start_time} onward
+         */
+        RrColumns(List<String> cols, int metaOffset, int delta) {
+            int naiveStartTime = idx(cols, metaOffset, 0, RR_START_TIME);
+            startTime = naiveStartTime < 0 ? -1 : naiveStartTime + delta;
+            endTime = idx(cols, metaOffset, delta, "end_time");
+            duration = idx(cols, metaOffset, delta, "duration_seconds");
+            naDevice = idx(cols, metaOffset, delta, "na_device_id");
+            ltRaw = idx(cols, metaOffset, delta, RR_LAT_RAW_NAMES);
+            loRaw = idx(cols, metaOffset, delta, RR_LON_RAW_NAMES);
+            latitude = idx(cols, metaOffset, delta, RR_LATITUDE_NAMES);
+            longitude = idx(cols, metaOffset, delta, RR_LONGITUDE_NAMES);
+            mapDatum = idx(cols, metaOffset, delta, "map_datum");
+            azimuth = idx(cols, metaOffset, delta, "azimuth");
+            userLoc = idx(cols, metaOffset, delta, "user_location_info");
+            cellMcc = idx(cols, metaOffset, delta, "cell_mcc");
+            cellMnc = idx(cols, metaOffset, delta, "cell_mnc");
+            cellLacTac = idx(cols, metaOffset, delta, "cell_lac_tac");
+            cellCi = idx(cols, metaOffset, delta, "cell_ci");
+            imsi = idx(cols, metaOffset, delta, "imsi");
+            msisdn = idx(cols, metaOffset, delta, "msisdn");
+            apn = idx(cols, metaOffset, delta, "apn");
+            otherInfo = idx(cols, metaOffset, delta, "other_information");
+            callIndicator = idx(cols, metaOffset, delta, "call_indicator");
+            callAction = idx(cols, metaOffset, delta, "call_action_code");
+            callSubtype = idx(cols, metaOffset, delta, "call_subtype");
+            sessionId = idx(cols, metaOffset, delta, "session_id");
+            typeExtra = idx(cols, metaOffset, delta, "type_of_data_extra");
+            partyType = idx(cols, metaOffset, 0, "party_type");
+            nwAccess = idx(cols, metaOffset, 0, "nw_access_type");
+        }
+
+        /** Position of the first matching name plus {@code metaOffset + delta}, or {@code -1}. */
+        private static int idx(List<String> cols, int metaOffset, int delta, String... candidateNames) {
+            for (String name : candidateNames) {
+                for (int i = 0; i < cols.size(); i++) {
+                    if (name.equalsIgnoreCase(cols.get(i))) return metaOffset + i + delta;
+                }
+            }
+            return -1;
+        }
+    }
+
+    /**
+     * Builds the {@link ResponseRecordDataPoint} for one raw row, or returns
+     * {@code null} if the row carries neither a timestamp nor coordinates.
+     * Shared by the list-based path (rows recovered by fqlite) and the
+     * streaming path that reads rows directly from a {@link java.sql.ResultSet}
+     * (see {@link #analyzeResponseRecords(java.sql.ResultSet, long, ProgressListener)}).
+     *
+     * @param r random-access copy of the row
+     */
+    private DataPoint buildResponseRecordPoint(String tableName, List<String> r, int rowIdx,
+                                               List<String> cols, RrColumns c) {
+        return buildResponseRecordPoint(tableName, r, rowIdx, cols, c, null);
+    }
+
+    /** @param vp shares equal value objects between the points of one load (may be {@code null}) */
+    private DataPoint buildResponseRecordPoint(String tableName, List<String> r, int rowIdx,
+                                               List<String> cols, RrColumns c, ValuePool vp) {
+
+        // ── Timestamp ────────────────────────────────────────────────────
+        Instant timestamp = parseTimestamp(cell(r, c.startTime));
+        if (timestamp == null)
+            timestamp = parseTimestamp(cell(r, c.endTime));
+        if (vp != null)
+            timestamp = vp.instant(timestamp);
+
+        // ── Coordinates ──────────────────────────────────────────────────
+        // Prefer the precomputed latitude_dec/longitude_dec columns (a
+        // plain Double.parseDouble is enough there). Some records end up
+        // with NULL there anyway -- e.g. providers whose XML export uses
+        // a decimal-degree coordinate with no N/S/E/W hemisphere prefix,
+        // which older importer runs failed to convert -- so fall back to
+        // re-parsing the untouched latitude_raw/longitude_raw text via
+        // GPSParser's fuller DMS/decimal/hemisphere-less parser instead of
+        // silently dropping the point from the map.
+        GeoCoordinate coord = null;
+        Double lat = parseDecimalCell(cell(r, c.latitude));
+        Double lon = parseDecimalCell(cell(r, c.longitude));
+        if (lat == null) lat = GPSParser.parseAnyCoordinate(cell(r, c.ltRaw));
+        if (lon == null) lon = GPSParser.parseAnyCoordinate(cell(r, c.loRaw));
+        if (lat != null && lon != null && isValidLat(lat) && isValidLon(lon))
+            coord = vp != null ? vp.geo(lat, lon) : new GeoCoordinate(lat, lon);
+
+        // Skip rows that carry neither timestamp nor coordinates.
+        if (timestamp == null && coord == null) {
+            return null;
+        }
+
+        // ── Build DataPoint ──────────────────────────────────────────────
+        ResponseRecordDataPoint rrdp = new ResponseRecordDataPoint();
+        rrdp.setTableName(tableName);
+        rrdp.setRowIndex(rowIdx);
+        rrdp.setTimestamp(timestamp);
+        rrdp.setCoordinate(coord);
+        rrdp.setRawRow(r);
+        rrdp.setColumnNames(cols);
+
+        rrdp.setEndTime(cell(r, c.endTime));
+        rrdp.setPartyType(cell(r, c.partyType));
+        rrdp.setNwAccessType(cell(r, c.nwAccess));
+        rrdp.setNaDeviceId(cell(r, c.naDevice));
+        rrdp.setLtRaw(cell(r, c.ltRaw));
+        rrdp.setLoRaw(cell(r, c.loRaw));
+        rrdp.setMapDatum(cell(r, c.mapDatum));
+        rrdp.setAzimuth(cell(r, c.azimuth));
+        rrdp.setUserLocationInfo(cell(r, c.userLoc));
+        rrdp.setImsi(cell(r, c.imsi));
+        rrdp.setMsisdn(cell(r, c.msisdn));
+        rrdp.setApn(cell(r, c.apn));
+        rrdp.setOtherInformation(cell(r, c.otherInfo));
+        rrdp.setCallIndicator(cell(r, c.callIndicator));
+        rrdp.setCallActionCode(cell(r, c.callAction));
+        rrdp.setCallSubtype(cell(r, c.callSubtype));
+        rrdp.setSessionId(cell(r, c.sessionId));
+        rrdp.setTypeOfDataExtra(cell(r, c.typeExtra));
+        rrdp.setDurationSeconds(cell(r, c.duration));
+
+        // ── Cell identity ────────────────────────────────────────────────
+        // Prefer cell_mcc/cell_mnc/cell_lac_tac/cell_ci — decoded ONCE,
+        // correctly, from the raw ULI bytes at import time (see
+        // EtsiXmlImporter.writeRow's javadoc: these columns exist
+        // specifically "so that forensic SQL ... can match on cell
+        // identity directly without having to re-decode
+        // user_location_info at query time"). Re-decoding the raw hex
+        // again here, from a column position resolved by name and by
+        // this method's own value-based shift heuristic, previously
+        // made every stop in a subscriber's movement path
+        // (SequenceAnalyzer.Stop.cellLabel()) show the identical
+        // CellID regardless of how far apart the records' actual
+        // (correctly positioned) coordinates were — the on-the-fly
+        // decode of c.userLoc was landing on the same value across
+        // rows even though cell_lac_tac/cell_ci differ correctly.
+        // Only fall back to the raw-hex decode for older databases
+        // that predate these columns (both NULL for every row).
+        Integer cellMcc    = parseIntCell(cell(r, c.cellMcc));
+        Integer cellMnc    = parseIntCell(cell(r, c.cellMnc));
+        Integer cellLacTac = parseIntCell(cell(r, c.cellLacTac));
+        Integer cellCi     = parseIntCell(cell(r, c.cellCi));
+        UliDecoder.CellInfo cellInfo;
+        if (cellLacTac != null || cellCi != null) {
+            UliDecoder.CellInfo rawDecoded = vp != null ? vp.decodeUli(cell(r, c.userLoc)) : UliDecoder.decode(cell(r, c.userLoc));
+            cellInfo = new UliDecoder.CellInfo(
+                    rawDecoded != null ? rawDecoded.networkType : null,
+                    cellMcc    != null ? cellMcc    : -1,
+                    cellMnc    != null ? cellMnc    : -1,
+                    cellLacTac != null ? cellLacTac : -1,
+                    cellCi     != null ? cellCi     : -1,
+                    rawDecoded != null ? rawDecoded.eci : -1);
+        } else {
+            cellInfo = vp != null ? vp.decodeUli(cell(r, c.userLoc)) : UliDecoder.decode(cell(r, c.userLoc));
+        }
+        rrdp.setCellInfo(vp != null ? vp.cell(cellInfo) : cellInfo);
+        // CellTower resolution (OpenCelliD lookup) is deferred: MapView
+        // triggers it asynchronously when the cell-tower layer is enabled.
+        return rrdp;
     }
 
     /** Safely retrieves a cell value; returns {@code null} for out-of-range or negative indices. */
@@ -609,7 +1260,7 @@ public class DataAnalyzer {
     }
 
     /** Parses a plain (already hemisphere-free) decimal-degree cell, or {@code null} if blank/unparseable. */
-    private static Double parseDecimalCell(String s) {
+    static Double parseDecimalCell(String s) {
         if (s == null || s.isBlank()) return null;
         try {
             return Double.parseDouble(s.trim());
@@ -773,6 +1424,31 @@ public class DataAnalyzer {
     // Parsing
     // -------------------------------------------------------------------------
 
+    /** "yyyy-MM-dd HH:mm:ss" with every field in its valid range, else {@code null} */
+    static Instant parseIsoSeconds(String s) {
+        if (s.length() != 19 || s.charAt(4) != '-' || s.charAt(7) != '-' || s.charAt(10) != ' '
+                || s.charAt(13) != ':' || s.charAt(16) != ':')
+            return null;
+        int y = digits(s, 0, 4), mo = digits(s, 5, 2), d = digits(s, 8, 2),
+            h = digits(s, 11, 2), mi = digits(s, 14, 2), se = digits(s, 17, 2);
+        if (y < 1 || mo < 1 || mo > 12 || d < 1 || h < 0 || h > 23 || mi < 0 || mi > 59 || se < 0 || se > 59)
+            return null;
+        if (d > java.time.YearMonth.of(y, mo).lengthOfMonth())
+            return null;
+        return LocalDateTime.of(y, mo, d, h, mi, se).toInstant(ZoneOffset.UTC);
+    }
+
+    /** value of {@code n} ASCII digits at {@code from}, or -1 */
+    private static int digits(String s, int from, int n) {
+        int v = 0;
+        for (int i = from; i < from + n; i++) {
+            char ch = s.charAt(i);
+            if (ch < '0' || ch > '9') return -1;
+            v = v * 10 + (ch - '0');
+        }
+        return v;
+    }
+
     /**
      * Attempts to parse {@code s} as a timestamp using all known formats.
      *
@@ -782,6 +1458,13 @@ public class DataAnalyzer {
     public Instant parseTimestamp(String s) {
         if (s == null || s.isBlank()) return null;
         s = s.trim();
+
+        // Fast path for the usual "yyyy-MM-dd HH:mm:ss" (ETSI importer): same
+        // result as the first formatter below, without regular expressions and
+        // exceptions. Anything unusual (other format, out-of-range field) takes
+        // the general path, exactly as before.
+        Instant fast = parseIsoSeconds(s);
+        if (fast != null) return fast;
 
         if (EPOCH_MILLIS.matcher(s).matches()) {
             try { return Instant.ofEpochMilli(Long.parseLong(s)); }
@@ -894,13 +1577,52 @@ public class DataAnalyzer {
         private GeoCoordinate coordinate;
         private List<String>  rawRow;
         private List<String>  columnNames;
+        /** When set, {@link #rawRow} is not kept but read on demand (see {@link RawRowLoader}). */
+        private RawRowLoader  rawRowLoader;
+        private long          rowId = -1;
 
         public String        getTableName()   { return tableName;   }
         public int           getRowIndex()    { return rowIndex;    }
         public Instant       getTimestamp()   { return timestamp;   }
         public GeoCoordinate getCoordinate()  { return coordinate;  }
-        public List<String>  getRawRow()      { return rawRow;      }
         public List<String>  getColumnNames() { return columnNames; }
+
+        /**
+         * The complete row, aligned with {@link #getColumnNames()}. For points
+         * loaded directly from a database file the row is not kept in memory
+         * but read from the file on demand (only used for tooltips, the detail
+         * panel and copying).
+         */
+        public List<String> getRawRow() {
+            if (rawRow == null && rawRowLoader != null) return rawRowLoader.load(rowId);
+            return rawRow;
+        }
+
+        /** True if the raw row is read on demand instead of being kept in memory. */
+        boolean isRawRowLazy() { return rawRow == null && rawRowLoader != null; }
+
+        /** Value of column {@code name} in the (possibly lazily loaded) raw row, or {@code null}. */
+        String rawValue(String name) {
+            if (columnNames == null) return null;
+            int i = columnNames.indexOf(name);
+            if (i < 0) return null;
+            List<String> r = getRawRow();
+            return (r != null && i < r.size()) ? r.get(i) : null;
+        }
+
+        /**
+         * Lets {@link #getRawRow()} read the row on demand instead of keeping it.
+         *
+         * @param loader reads a row by its rowid
+         * @param rowId  the SQLite rowid of this point's record
+         */
+        public void setRawRowLoader(RawRowLoader loader, long rowId) {
+            this.rawRowLoader = loader;
+            this.rowId = rowId;
+        }
+
+        /** SQLite rowid of the record if it was read directly from the database file, else -1 */
+        public long getRowId() { return rowId; }
 
         public void setTableName(String v)         { tableName   = v; }
         public void setRowIndex(int v)             { rowIndex    = v; }
@@ -997,25 +1719,34 @@ public class DataAnalyzer {
      */
     public static class ResponseRecordDataPoint extends DataPoint {
 
-        private String endTime;
         private String partyType;
         private String nwAccessType;
         private String naDeviceId;
-        private String ltRaw;
-        private String loRaw;
         private String mapDatum;
         private String azimuth;
-        private String userLocationInfo;
         private String imsi;
         private String msisdn;
         private String apn;
-        private String otherInformation;   // concatenated "Key"="Value" pairs
         private String callIndicator;
         private String callActionCode;
         private String callSubtype;
-        private String sessionId;
-        private String typeOfDataExtra;
         private String durationSeconds;
+
+        /**
+         * Display-only fields (detail panel), kept in a separate object that is
+         * only allocated when one of them is set - points loaded directly from a
+         * database file read them on demand and do not carry seven empty fields.
+         */
+        private static final class Extra {
+            String endTime, ltRaw, loRaw, userLocationInfo, sessionId, typeOfDataExtra;
+            String otherInformation;   // concatenated "Key"="Value" pairs
+        }
+        private Extra extra;
+
+        private Extra extra(String v) {
+            if (extra == null && v != null) extra = new Extra();
+            return extra;
+        }
 
         /**
          * Decoded ULI (User Location Information) cell identity, or {@code null}
@@ -1032,52 +1763,75 @@ public class DataAnalyzer {
          */
         private volatile CellTower cellTower;
 
+        /**
+         * Display-only fields with mostly unique values (end time, raw
+         * coordinates, ULI hex, session id, other information) are not kept for
+         * points loaded directly from a database file — they make up a large
+         * share of the memory per point. Their getters read them from the raw
+         * row on demand instead (see {@link DataPoint#getRawRow()}).
+         */
+        void dropDisplayOnlyFields() {
+            extra = null;
+        }
+
+        private String lazy(String value, String column) {
+            return (value == null && isRawRowLazy()) ? rawValue(column) : value;
+        }
+
+        private String lazyAny(String value, String[] columns) {
+            if (value != null || !isRawRowLazy()) return value;
+            for (String c : columns) {
+                if (getColumnNames() != null && getColumnNames().contains(c)) return rawValue(c);
+            }
+            return null;
+        }
+
         // Getters
-        public String getEndTime()              { return endTime;          }
+        public String getEndTime() { return lazy(extra == null ? null : extra.endTime, "end_time"); }
         public String getPartyType()            { return partyType;        }
         public String getNwAccessType()         { return nwAccessType;     }
         public String getNaDeviceId()           { return naDeviceId;       }
         @Override
         public String getImei()                 { return naDeviceId;       }
-        public String getLtRaw()                { return ltRaw;            }
-        public String getLoRaw()                { return loRaw;            }
+        public String getLtRaw() { return lazyAny(extra == null ? null : extra.ltRaw, RR_LAT_RAW_NAMES); }
+        public String getLoRaw() { return lazyAny(extra == null ? null : extra.loRaw, RR_LON_RAW_NAMES); }
         public String getMapDatum()             { return mapDatum;         }
         public String getAzimuth()              { return azimuth;          }
-        public String getUserLocationInfo()     { return userLocationInfo; }
+        public String getUserLocationInfo() { return lazy(extra == null ? null : extra.userLocationInfo, "user_location_info"); }
         @Override
         public String getImsi()                 { return imsi;             }
         @Override
         public String getMsisdn()               { return msisdn;           }
         public String getApn()                  { return apn;              }
-        public String getOtherInformation()     { return otherInformation; }
+        public String getOtherInformation() { return lazy(extra == null ? null : extra.otherInformation, "other_information"); }
         public String getCallIndicator()        { return callIndicator;    }
         public String getCallActionCode()       { return callActionCode;   }
         public String getCallSubtype()          { return callSubtype;      }
-        public String getSessionId()            { return sessionId;        }
-        public String getTypeOfDataExtra()      { return typeOfDataExtra;  }
+        public String getSessionId() { return lazy(extra == null ? null : extra.sessionId, "session_id"); }
+        public String getTypeOfDataExtra() { return lazy(extra == null ? null : extra.typeOfDataExtra, "type_of_data_extra"); }
         public String getDurationSeconds()      { return durationSeconds;  }
         public UliDecoder.CellInfo getCellInfo(){ return cellInfo;         }
         public CellTower getCellTower()         { return cellTower;        }
 
         // Setters
-        public void setEndTime(String v)              { endTime          = v; }
+        public void setEndTime(String v)              { Extra e = extra(v); if (e != null) e.endTime = v; }
         public void setPartyType(String v)            { partyType        = v; }
         public void setNwAccessType(String v)         { nwAccessType     = v; }
         public void setNaDeviceId(String v)           { naDeviceId       = v; }
-        public void setLtRaw(String v)                { ltRaw            = v; }
-        public void setLoRaw(String v)                { loRaw            = v; }
+        public void setLtRaw(String v)                { Extra e = extra(v); if (e != null) e.ltRaw = v; }
+        public void setLoRaw(String v)                { Extra e = extra(v); if (e != null) e.loRaw = v; }
         public void setMapDatum(String v)             { mapDatum         = v; }
         public void setAzimuth(String v)              { azimuth          = v; }
-        public void setUserLocationInfo(String v)     { userLocationInfo = v; }
+        public void setUserLocationInfo(String v)     { Extra e = extra(v); if (e != null) e.userLocationInfo = v; }
         public void setImsi(String v)                 { imsi             = v; }
         public void setMsisdn(String v)               { msisdn           = v; }
         public void setApn(String v)                  { apn              = v; }
-        public void setOtherInformation(String v)     { otherInformation = v; }
+        public void setOtherInformation(String v)     { Extra e = extra(v); if (e != null) e.otherInformation = v; }
         public void setCallIndicator(String v)        { callIndicator    = v; }
         public void setCallActionCode(String v)       { callActionCode   = v; }
         public void setCallSubtype(String v)          { callSubtype      = v; }
-        public void setSessionId(String v)            { sessionId        = v; }
-        public void setTypeOfDataExtra(String v)      { typeOfDataExtra  = v; }
+        public void setSessionId(String v)            { Extra e = extra(v); if (e != null) e.sessionId = v; }
+        public void setTypeOfDataExtra(String v)      { Extra e = extra(v); if (e != null) e.typeOfDataExtra = v; }
         public void setDurationSeconds(String v)      { durationSeconds  = v; }
         public void setCellInfo(UliDecoder.CellInfo v){ cellInfo         = v; }
         public void setCellTower(CellTower v)         { cellTower        = v; }
