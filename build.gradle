@@ -176,6 +176,7 @@ runtime {
         'java.naming',
         'java.sql',
         'java.xml',
+        'jdk.crypto.ec',     // EC/ECDHE ciphers for HTTPS (OSM tiles, beaconDB, HiCellTek)
         'jdk.unsupported'  
 	]
 	

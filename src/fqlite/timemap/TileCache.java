@@ -81,13 +81,20 @@ public class TileCache {
      * Subdomains a/b/c are rotated for load balancing.
      */
     private static final String[] TILE_SERVERS = {
-        "https://a.tile.openstreetmap.org/%d/%d/%d.png",
-        "https://b.tile.openstreetmap.org/%d/%d/%d.png",
-        "https://c.tile.openstreetmap.org/%d/%d/%d.png"
+        // OSM recommends the single host without a/b/c subdomains (since 2023)
+        "https://tile.openstreetmap.org/%d/%d/%d.png"
     };
 
     /** User-Agent required by OSM tile usage policy. */
-    private static final String USER_AGENT = "FQLite GeoTimeAnalyzer/1.0 (JavaFX)";
+    private static final String USER_AGENT =
+            "FQLite-GeoTimeAnalyzer/4.0 (+https://github.com/pawlaszczyk/fqlite)";
+
+    /**
+     * After a failed download a tile is not requested again for this many
+     * milliseconds. Prevents hammering the tile server on every render()
+     * while still allowing recovery once the network is back.
+     */
+    private static final long RETRY_BACKOFF_MS = 15_000;
 
     private static final int TILE_PX = 256;
 
@@ -124,6 +131,9 @@ public class TileCache {
         }
     };
 
+    /** Tile key -> time (ms) of the last failed load; used for retry backoff. */
+    private final Map<String, Long> failedAt = new java.util.concurrent.ConcurrentHashMap<>();
+
     /** Round-robin index for subdomain rotation across TILE_SERVERS. */
     private int serverIndex = 0;
 
@@ -143,6 +153,40 @@ public class TileCache {
      * is changed or cleared.  Access is guarded by {@code mbLock}.
      */
     private Connection mbConn = null;
+
+    /** Result of probing the configured MBTiles file. */
+    private volatile MbTilesInfo mbInfo = MbTilesInfo.none();
+
+    /** Outcome of the MBTiles check. */
+    public enum MbStatus {
+        /** No MBTiles file configured. */
+        NONE,
+        /** File is readable and contains raster tiles JavaFX can display. */
+        OK,
+        /** Configured file does not exist. */
+        NOT_FOUND,
+        /** File cannot be opened as SQLite or has no {@code tiles} table. */
+        UNREADABLE,
+        /** File contains no tiles. */
+        EMPTY,
+        /** Tiles are in a format JavaFX cannot decode (PBF vector tiles, WebP …). */
+        UNSUPPORTED_FORMAT
+    }
+
+    /**
+     * Summary of an MBTiles file for the UI.
+     *
+     * @param status  check result
+     * @param format  detected tile format ("png", "jpg", "pbf", "webp", …) or {@code null}
+     * @param minZoom minimum zoom from metadata, or -1 if unknown
+     * @param maxZoom maximum zoom from metadata, or -1 if unknown
+     * @param detail  human-readable detail (error message etc.) or {@code null}
+     */
+    public record MbTilesInfo(MbStatus status, String format,
+                              int minZoom, int maxZoom, String detail) {
+        static MbTilesInfo none() { return new MbTilesInfo(MbStatus.NONE, null, -1, -1, null); }
+        static MbTilesInfo of(MbStatus s, String detail) { return new MbTilesInfo(s, null, -1, -1, detail); }
+    }
 
     /** Guards {@link #mbConn} and {@link #mbTilesPath}. */
     private final Object mbLock = new Object();
@@ -173,6 +217,9 @@ public class TileCache {
         // Already being fetched (null placeholder) → nothing to do
         if (ramCache.containsKey(key)) return null;
 
+        // Recently failed → wait for backoff before retrying
+        if (inBackoff(key)) return null;
+
         // 2. Schedule MBTiles / disk / network fetch
         ramCache.put(key, null);
         String url = nextTileUrl(zoom, tileX, tileY);
@@ -189,8 +236,14 @@ public class TileCache {
 
             if (img != null) {
                 final Image fi = img;
+                failedAt.remove(key);
                 synchronized (TileCache.this) { ramCache.put(key, fi); }
                 Platform.runLater(() -> onLoaded.accept(key, fi));
+            } else {
+                // Remove the in-flight placeholder so the tile can be retried
+                // (after the backoff) instead of staying grey forever.
+                failedAt.put(key, System.currentTimeMillis());
+                synchronized (TileCache.this) { ramCache.remove(key); }
             }
         });
         return null;
@@ -209,6 +262,7 @@ public class TileCache {
         String key = cacheKey(zoom, tileX, tileY);
         synchronized (this) {
             if (ramCache.containsKey(key)) return;
+            if (inBackoff(key)) return;
             ramCache.put(key, null);
         }
         String url = nextTileUrl(zoom, tileX, tileY);
@@ -218,9 +272,22 @@ public class TileCache {
             if (img == null) img = downloadAndCache(url, zoom, tileX, tileY);
             if (img != null) {
                 final Image fi = img;
+                failedAt.remove(key);
                 synchronized (TileCache.this) { ramCache.put(key, fi); }
+            } else {
+                failedAt.put(key, System.currentTimeMillis());
+                synchronized (TileCache.this) { ramCache.remove(key); }
             }
         });
+    }
+
+    /** {@code true} if the tile failed recently and should not be retried yet. */
+    private boolean inBackoff(String key) {
+        Long t = failedAt.get(key);
+        if (t == null) return false;
+        if (System.currentTimeMillis() - t < RETRY_BACKOFF_MS) return true;
+        failedAt.remove(key);
+        return false;
     }
 
     /** Returns the pixel size of one tile (always 256). */
@@ -246,10 +313,13 @@ public class TileCache {
         synchronized (mbLock) {
             closeMbConnection();
             mbTilesPath = path;
+            mbInfo = probeMbTiles(path);
         }
+        if (path != null) LOG.info("MBTiles check: " + mbInfo);
         // Clear RAM cache: tiles already decoded may have come from the
         // previous source and must not outlive the configuration change.
         synchronized (this) { ramCache.clear(); }
+        failedAt.clear();
         LOG.info("MBTiles source " + (path != null ? "set: " + path : "cleared"));
     }
 
@@ -259,9 +329,12 @@ public class TileCache {
      */
     public boolean isMbTilesLoaded() {
         synchronized (mbLock) {
-            return mbTilesPath != null && Files.exists(mbTilesPath);
+            return mbTilesPath != null && mbInfo.status == MbStatus.OK;
         }
     }
+
+    /** Result of the last MBTiles check (never {@code null}). */
+    public MbTilesInfo getMbTilesInfo() { return mbInfo; }
 
     /** Returns the file name of the active MBTiles file, or {@code null}. */
     public String getMbTilesName() {
@@ -343,7 +416,11 @@ public class TileCache {
             conn.setConnectTimeout(8_000);
             conn.setReadTimeout(10_000);
             conn.connect();
-            if (conn.getResponseCode() != 200) return null;
+            int code = conn.getResponseCode();
+            if (code != 200) {
+                LOG.warning("Tile download HTTP " + code + ": " + urlStr);
+                return null;
+            }
 
             byte[] bytes;
             try (InputStream is = conn.getInputStream()) {
@@ -365,7 +442,7 @@ public class TileCache {
             return img.isError() ? null : img;
 
         } catch (Exception ex) {
-            LOG.log(Level.FINE, "Tile download failed: " + urlStr, ex);
+            LOG.log(Level.WARNING, "Tile download failed: " + urlStr + " – " + ex);
             return null;
         }
     }
@@ -385,7 +462,7 @@ public class TileCache {
      */
     private Image loadFromMbTiles(int zoom, int tileX, int tileY) {
         synchronized (mbLock) {
-            if (mbTilesPath == null) return null;
+            if (mbTilesPath == null || mbInfo.status != MbStatus.OK) return null;
             try {
                 Connection conn = getMbConnection();
                 if (conn == null) return null;
@@ -443,6 +520,78 @@ public class TileCache {
             LOG.log(Level.WARNING, "Cannot open MBTiles: " + mbTilesPath, ex);
             return null;
         }
+    }
+
+    /**
+     * Checks an MBTiles file: readable, has tiles, and the tile format is one
+     * JavaFX can decode (PNG, JPEG, GIF, BMP).  The format is taken from the
+     * actual bytes of one tile (magic number) because the {@code metadata}
+     * entry is often missing or wrong; the metadata value is only a fallback.
+     * Must be called with {@link #mbLock} held.
+     */
+    private MbTilesInfo probeMbTiles(Path path) {
+        if (path == null) return MbTilesInfo.none();
+        if (!Files.exists(path)) return MbTilesInfo.of(MbStatus.NOT_FOUND, path.toString());
+
+        Connection conn = getMbConnection();
+        if (conn == null) return MbTilesInfo.of(MbStatus.UNREADABLE, "cannot open SQLite database");
+
+        String metaFormat = null;
+        int minZ = -1, maxZ = -1;
+        try (Statement st = conn.createStatement();
+             ResultSet rs = st.executeQuery("SELECT name, value FROM metadata")) {
+            while (rs.next()) {
+                String n = rs.getString(1), v = rs.getString(2);
+                if (n == null || v == null) continue;
+                switch (n.trim().toLowerCase()) {
+                    case "format"  -> metaFormat = v.trim().toLowerCase();
+                    case "minzoom" -> minZ = parseIntOr(v, -1);
+                    case "maxzoom" -> maxZ = parseIntOr(v, -1);
+                    default -> { }
+                }
+            }
+        } catch (SQLException ex) {
+            LOG.fine("MBTiles without metadata table: " + ex.getMessage());
+        }
+
+        byte[] sample;
+        try (Statement st = conn.createStatement();
+             ResultSet rs = st.executeQuery("SELECT tile_data FROM tiles LIMIT 1")) {
+            if (!rs.next()) return new MbTilesInfo(MbStatus.EMPTY, metaFormat, minZ, maxZ, "no tiles");
+            sample = rs.getBytes(1);
+        } catch (SQLException ex) {
+            return MbTilesInfo.of(MbStatus.UNREADABLE, ex.getMessage());
+        }
+
+        String fmt = sniffFormat(sample);
+        if (fmt == null) fmt = metaFormat != null ? metaFormat : "unknown";
+
+        boolean supported = switch (fmt) {
+            case "png", "jpg", "jpeg", "gif", "bmp" -> true;
+            default -> false;
+        };
+        return new MbTilesInfo(supported ? MbStatus.OK : MbStatus.UNSUPPORTED_FORMAT,
+                fmt, minZ, maxZ, null);
+    }
+
+    /** Detects the tile format from its leading bytes; {@code null} if unknown. */
+    private static String sniffFormat(byte[] b) {
+        if (b == null || b.length < 4) return null;
+        int b0 = b[0] & 0xFF, b1 = b[1] & 0xFF, b2 = b[2] & 0xFF, b3 = b[3] & 0xFF;
+        if (b0 == 0x89 && b1 == 0x50 && b2 == 0x4E && b3 == 0x47) return "png";
+        if (b0 == 0xFF && b1 == 0xD8 && b2 == 0xFF)                return "jpg";
+        if (b0 == 0x47 && b1 == 0x49 && b2 == 0x46)                return "gif";
+        if (b0 == 0x42 && b1 == 0x4D)                              return "bmp";
+        if (b0 == 0x52 && b1 == 0x49 && b2 == 0x46 && b3 == 0x46
+                && b.length >= 12 && b[8] == 'W' && b[9] == 'E' && b[10] == 'B' && b[11] == 'P')
+            return "webp";
+        if (b0 == 0x1F && b1 == 0x8B)                              return "pbf";  // gzip-compressed vector tile
+        if (b0 == 0x1A || b0 == 0x0A || b0 == 0x12)                return "pbf";  // uncompressed MVT (protobuf)
+        return null;
+    }
+
+    private static int parseIntOr(String s, int def) {
+        try { return Integer.parseInt(s.trim()); } catch (Exception e) { return def; }
     }
 
     /** Closes the JDBC connection if open. Must be called with {@link #mbLock} held. */

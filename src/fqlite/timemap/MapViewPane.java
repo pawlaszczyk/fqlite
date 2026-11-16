@@ -3447,7 +3447,7 @@ public class MapViewPane extends BorderPane {
      * Klick auf „Offline-Karte laden…".</p>
      */
     private static void autoLoadMbTilesFromConfig() {
-        if (TileCache.getInstance().isMbTilesLoaded()) return;  // bereits gesetzt
+        if (TileCache.getInstance().getMbTilesPath() != null) return;  // bereits gesetzt
 
         try {
             java.io.File baseDir = new java.io.File(
@@ -3492,15 +3492,59 @@ public class MapViewPane extends BorderPane {
 
     private void updateMbTilesStatus() {
         TileCache tc = TileCache.getInstance();
-        if (tc.isMbTilesLoaded()) {
-            mbTilesStatus.setText("\u2705 " + tc.getMbTilesName());
-            mbTilesStatus.setTextFill(theme.accent2);
-            mbTilesButton.setText(Lang.t("\uD83D\uDDFA\uFE0F Andere Karte\u2026", "\uD83D\uDDFA\uFE0F Other map\u2026"));
-        } else {
-            mbTilesStatus.setText("\u26AA offline");
-            mbTilesStatus.setTextFill(theme.detailMuted);
-            mbTilesButton.setText(Lang.t("\uD83D\uDDFA\uFE0F Offline-Karte laden\u2026", "\uD83D\uDDFA\uFE0F Load offline map\u2026"));
+        TileCache.MbTilesInfo info = tc.getMbTilesInfo();
+        String name = tc.getMbTilesName();
+        Color warn = Color.web("#e0703a");
+        String tip;
+
+        switch (info.status()) {
+            case OK -> {
+                String zoom = (info.minZoom() >= 0 && info.maxZoom() >= 0)
+                        ? " z" + info.minZoom() + "\u2013" + info.maxZoom() : "";
+                mbTilesStatus.setText("\u2705 " + name + " (" + info.format().toUpperCase() + zoom + ")");
+                mbTilesStatus.setTextFill(theme.accent2);
+                tip = Lang.t("Offline-Karte aktiv. Fehlende Kacheln werden online nachgeladen.",
+                             "Offline map active. Missing tiles are loaded online.");
+            }
+            case UNSUPPORTED_FORMAT -> {
+                String fmt = info.format() == null ? "?" : info.format().toUpperCase();
+                mbTilesStatus.setText("\u26A0\uFE0F " + name + ": "
+                        + Lang.t("Format " + fmt + " nicht unterst\u00FCtzt",
+                                 "format " + fmt + " not supported"));
+                mbTilesStatus.setTextFill(warn);
+                tip = Lang.t("Die Datei enth\u00E4lt " + fmt + "-Kacheln (z.\u00A0B. Vektorkacheln oder WebP).\n"
+                           + "Unterst\u00FCtzt werden nur Rasterkacheln (PNG/JPEG).\n"
+                           + "Die Datei wird ignoriert, Kacheln werden online geladen.",
+                             "The file contains " + fmt + " tiles (e.g. vector tiles or WebP).\n"
+                           + "Only raster tiles (PNG/JPEG) are supported.\n"
+                           + "The file is ignored; tiles are loaded online.");
+            }
+            case NOT_FOUND -> {
+                mbTilesStatus.setText("\u26A0\uFE0F " + name + ": " + Lang.t("nicht gefunden", "not found"));
+                mbTilesStatus.setTextFill(warn);
+                tip = String.valueOf(tc.getMbTilesPath());
+            }
+            case UNREADABLE -> {
+                mbTilesStatus.setText("\u26A0\uFE0F " + name + ": " + Lang.t("nicht lesbar", "unreadable"));
+                mbTilesStatus.setTextFill(warn);
+                tip = Lang.t("Keine g\u00FCltige MBTiles-Datei: ", "Not a valid MBTiles file: ") + info.detail();
+            }
+            case EMPTY -> {
+                mbTilesStatus.setText("\u26A0\uFE0F " + name + ": " + Lang.t("keine Kacheln", "no tiles"));
+                mbTilesStatus.setTextFill(warn);
+                tip = Lang.t("Die Tabelle 'tiles' ist leer.", "The 'tiles' table is empty.");
+            }
+            default -> {
+                mbTilesStatus.setText("\u26AA online");
+                mbTilesStatus.setTextFill(theme.detailMuted);
+                tip = Lang.t("Keine Offline-Karte gesetzt, Kacheln werden von OpenStreetMap geladen.",
+                             "No offline map set; tiles are loaded from OpenStreetMap.");
+            }
         }
+        mbTilesStatus.setTooltip(new Tooltip(tip));
+        mbTilesButton.setText(info.status() == TileCache.MbStatus.NONE
+                ? Lang.t("\uD83D\uDDFA\uFE0F Offline-Karte laden\u2026", "\uD83D\uDDFA\uFE0F Load offline map\u2026")
+                : Lang.t("\uD83D\uDDFA\uFE0F Andere Karte\u2026", "\uD83D\uDDFA\uFE0F Other map\u2026"));
     }
 
     private File lastMbTilesDir() {
