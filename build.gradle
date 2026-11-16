@@ -86,6 +86,13 @@ dependencies {
     implementation("io.github.willena:sqlite-jdbc:3.51.1.0")
     implementation group: 'org.antlr', name: 'antlr4', version: '4.8'
     implementation group: 'org.apache.xmlgraphics', name: 'batik-transcoder', version:'1.19'
+    // Offline maps: render Mapsforge .map files to tiles (pure Java2D).
+    // 0.25.0 is the last release on Maven Central (mapsforge stopped publishing
+    // there when OSSRH shut down in 06/2025; newer versions only via source build).
+    implementation 'org.mapsforge:mapsforge-map-awt:0.25.0'
+    implementation 'org.mapsforge:mapsforge-themes:0.25.0'
+    implementation 'guru.nidi.com.kitfox:svgSalamander:1.1.3'
+    implementation 'net.sf.kxml:kxml2:2.3.0'
 }
 
 

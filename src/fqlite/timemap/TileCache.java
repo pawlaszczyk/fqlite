@@ -131,6 +131,16 @@ public class TileCache {
         }
     };
 
+    /**
+     * If {@code false}, no tiles are requested from the internet: only the
+     * local map file and the disk cache are used.  For investigations where
+     * requests must not reveal the area under analysis.
+     */
+    private volatile boolean onlineEnabled = true;
+
+    /** Notified (on the calling thread) when the tile source configuration changes. */
+    private final java.util.List<Runnable> configListeners = new java.util.concurrent.CopyOnWriteArrayList<>();
+
     /** Tile key -> time (ms) of the last failed load; used for retry backoff. */
     private final Map<String, Long> failedAt = new java.util.concurrent.ConcurrentHashMap<>();
 
@@ -153,6 +163,12 @@ public class TileCache {
      * is changed or cleared.  Access is guarded by {@code mbLock}.
      */
     private Connection mbConn = null;
+
+    /**
+     * Renderer for a Mapsforge {@code .map} file, if one is configured instead
+     * of an MBTiles file.  Guarded by {@code mbLock}.
+     */
+    private MapsforgeRenderer mapsforge = null;
 
     /** Result of probing the configured MBTiles file. */
     private volatile MbTilesInfo mbInfo = MbTilesInfo.none();
@@ -232,7 +248,7 @@ public class TileCache {
             if (img == null) img = loadFromDisk(zoom, tileX, tileY);
 
             // 2c. Network download (also persists to disk cache)
-            if (img == null) img = downloadAndCache(url, zoom, tileX, tileY);
+            if (img == null && onlineEnabled) img = downloadAndCache(url, zoom, tileX, tileY);
 
             if (img != null) {
                 final Image fi = img;
@@ -269,7 +285,7 @@ public class TileCache {
         pool.submit(() -> {
             Image img = loadFromMbTiles(zoom, tileX, tileY);
             if (img == null) img = loadFromDisk(zoom, tileX, tileY);
-            if (img == null) img = downloadAndCache(url, zoom, tileX, tileY);
+            if (img == null && onlineEnabled) img = downloadAndCache(url, zoom, tileX, tileY);
             if (img != null) {
                 final Image fi = img;
                 failedAt.remove(key);
@@ -312,14 +328,18 @@ public class TileCache {
     public void setMbTilesPath(Path path) {
         synchronized (mbLock) {
             closeMbConnection();
+            closeMapsforge();
             mbTilesPath = path;
-            mbInfo = probeMbTiles(path);
+            mbInfo = MapsforgeRenderer.isMapsforgeFile(path)
+                    ? openMapsforge(path)
+                    : probeMbTiles(path);
         }
         if (path != null) LOG.info("MBTiles check: " + mbInfo);
         // Clear RAM cache: tiles already decoded may have come from the
         // previous source and must not outlive the configuration change.
         synchronized (this) { ramCache.clear(); }
         failedAt.clear();
+        fireConfigChanged();
         LOG.info("MBTiles source " + (path != null ? "set: " + path : "cleared"));
     }
 
@@ -330,6 +350,34 @@ public class TileCache {
     public boolean isMbTilesLoaded() {
         synchronized (mbLock) {
             return mbTilesPath != null && mbInfo.status == MbStatus.OK;
+        }
+    }
+
+    /**
+     * Allows or forbids loading tiles from OpenStreetMap.  Clears the RAM
+     * cache so the map is redrawn with the new setting.
+     */
+    public void setOnlineEnabled(boolean enabled) {
+        if (onlineEnabled == enabled) return;
+        onlineEnabled = enabled;
+        synchronized (this) { ramCache.clear(); }
+        failedAt.clear();
+        fireConfigChanged();
+        LOG.info("Online tiles " + (enabled ? "enabled" : "disabled"));
+    }
+
+    /** {@code true} if missing tiles may be loaded from OpenStreetMap. */
+    public boolean isOnlineEnabled() { return onlineEnabled; }
+
+    /** Registers a listener for changes of the tile source (map file, online switch). */
+    public void addConfigListener(Runnable r) { configListeners.add(r); }
+
+    /** Removes a listener registered with {@link #addConfigListener}. */
+    public void removeConfigListener(Runnable r) { configListeners.remove(r); }
+
+    private void fireConfigChanged() {
+        for (Runnable r : configListeners) {
+            try { r.run(); } catch (Exception ex) { LOG.log(Level.FINE, "config listener failed", ex); }
         }
     }
 
@@ -461,6 +509,19 @@ public class TileCache {
      * @return decoded {@link Image} or {@code null} on miss / error / no source
      */
     private Image loadFromMbTiles(int zoom, int tileX, int tileY) {
+        // Mapsforge .map file: render the tile (outside the lock, the
+        // renderer is thread-safe and rendering takes tens of milliseconds)
+        MapsforgeRenderer mf;
+        synchronized (mbLock) { mf = mapsforge; }
+        if (mf != null) {
+            try {
+                return mf.render(zoom, tileX, tileY);
+            } catch (Throwable t) {
+                LOG.log(Level.WARNING, "Mapsforge render error " + zoom + "/" + tileX + "/" + tileY, t);
+                return null;
+            }
+        }
+
         synchronized (mbLock) {
             if (mbTilesPath == null || mbInfo.status != MbStatus.OK) return null;
             try {
@@ -592,6 +653,32 @@ public class TileCache {
 
     private static int parseIntOr(String s, int def) {
         try { return Integer.parseInt(s.trim()); } catch (Exception e) { return def; }
+    }
+
+    /**
+     * Opens a Mapsforge map file as offline source.  Must be called with
+     * {@link #mbLock} held.  The map date is reported in {@code detail}.
+     */
+    private MbTilesInfo openMapsforge(Path path) {
+        try {
+            MapsforgeRenderer r = new MapsforgeRenderer(path);
+            long mapDate = r.info().mapDate;
+            mapsforge = r;
+            String date = java.time.LocalDate.ofInstant(
+                    Instant.ofEpochMilli(mapDate), java.time.ZoneOffset.UTC).toString();
+            return new MbTilesInfo(MbStatus.OK, "mapsforge", -1, -1, date);
+        } catch (Throwable t) {   // also NoClassDefFoundError if the library is missing
+            LOG.log(Level.WARNING, "Cannot open Mapsforge map: " + path, t);
+            return MbTilesInfo.of(MbStatus.UNREADABLE, t.toString());
+        }
+    }
+
+    /** Closes the Mapsforge renderer if open. Must be called with {@link #mbLock} held. */
+    private void closeMapsforge() {
+        if (mapsforge != null) {
+            mapsforge.close();
+            mapsforge = null;
+        }
     }
 
     /** Closes the JDBC connection if open. Must be called with {@link #mbLock} held. */

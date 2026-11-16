@@ -212,18 +212,18 @@ public class MapViewPane extends BorderPane {
         mbTilesButton.setFont(Font.font("Monospace", 14));
         mbTilesButton.setOnAction(e -> onMbTilesButtonClicked());
         Tooltip mbTilesTooltip = new Tooltip(Lang.t(
-                "MBTiles-Datei als Offline-Kartenquelle laden.\n" +
+                "MBTiles- oder Mapsforge-Datei (.map) als Offline-Kartenquelle laden.\n" +
                 "Tiles werden zuerst aus dieser Datei bezogen;\n" +
                 "fehlende Tiles werden weiterhin online geladen.",
-                "Load an MBTiles file as an offline map source.\n" +
+                "Load an MBTiles or Mapsforge (.map) file as an offline map source.\n" +
                 "Tiles are fetched from this file first;\n" +
                 "missing tiles are still loaded online."));
         Tooltip.install(mbTilesButton, mbTilesTooltip);
         Lang.addListener(() -> mbTilesTooltip.setText(Lang.t(
-                "MBTiles-Datei als Offline-Kartenquelle laden.\n" +
+                "MBTiles- oder Mapsforge-Datei (.map) als Offline-Kartenquelle laden.\n" +
                 "Tiles werden zuerst aus dieser Datei bezogen;\n" +
                 "fehlende Tiles werden weiterhin online geladen.",
-                "Load an MBTiles file as an offline map source.\n" +
+                "Load an MBTiles or Mapsforge (.map) file as an offline map source.\n" +
                 "Tiles are fetched from this file first;\n" +
                 "missing tiles are still loaded online.")));
 
@@ -231,6 +231,11 @@ public class MapViewPane extends BorderPane {
         mbTilesStatus.setFont(Font.font("Monospace", 13));
         updateMbTilesStatus();
         Lang.addListener(this::updateMbTilesStatus);
+        // Settings dialog may change map file / online switch while the map is open
+        TileCache.getInstance().addConfigListener(() -> Platform.runLater(() -> {
+            updateMbTilesStatus();
+            mapView.applyTheme(theme);   // forces a redraw with the new tile source
+        }));
 
         Region spacer = new Region();
         HBox.setHgrow(spacer, Priority.ALWAYS);
@@ -3477,17 +3482,16 @@ public class MapViewPane extends BorderPane {
 
     private void onMbTilesButtonClicked() {
         FileChooser fc = new FileChooser();
-        fc.setTitle(Lang.t("MBTiles-Offline-Karte öffnen", "Open MBTiles offline map"));
+        fc.setTitle(Lang.t("Offline-Karte öffnen", "Open offline map"));
         fc.getExtensionFilters().addAll(
-                new ExtensionFilter(Lang.t("MBTiles-Dateien", "MBTiles files"), "*.mbtiles"),
+                new ExtensionFilter(Lang.t("Offline-Karten (MBTiles, Mapsforge)", "Offline maps (MBTiles, Mapsforge)"),
+                        "*.mbtiles", "*.map"),
                 new ExtensionFilter(Lang.t("Alle Dateien", "All files"),    "*.*"));
         File initial = lastMbTilesDir();
         if (initial != null) fc.setInitialDirectory(initial);
         File chosen = fc.showOpenDialog(getScene() != null ? getScene().getWindow() : null);
         if (chosen == null) return;
-        TileCache.getInstance().setMbTilesPath(chosen.toPath());
-        updateMbTilesStatus();
-        mapView.applyTheme(theme);
+        TileCache.getInstance().setMbTilesPath(chosen.toPath());   // listener updates status + redraws
     }
 
     private void updateMbTilesStatus() {
@@ -3499,9 +3503,14 @@ public class MapViewPane extends BorderPane {
 
         switch (info.status()) {
             case OK -> {
-                String zoom = (info.minZoom() >= 0 && info.maxZoom() >= 0)
-                        ? " z" + info.minZoom() + "\u2013" + info.maxZoom() : "";
-                mbTilesStatus.setText("\u2705 " + name + " (" + info.format().toUpperCase() + zoom + ")");
+                if ("mapsforge".equals(info.format())) {
+                    mbTilesStatus.setText("\u2705 " + name + " (Mapsforge, "
+                            + Lang.t("Stand ", "as of ") + info.detail() + ")");
+                } else {
+                    String zoom = (info.minZoom() >= 0 && info.maxZoom() >= 0)
+                            ? " z" + info.minZoom() + "\u2013" + info.maxZoom() : "";
+                    mbTilesStatus.setText("\u2705 " + name + " (" + info.format().toUpperCase() + zoom + ")");
+                }
                 mbTilesStatus.setTextFill(theme.accent2);
                 tip = Lang.t("Offline-Karte aktiv. Fehlende Kacheln werden online nachgeladen.",
                              "Offline map active. Missing tiles are loaded online.");
@@ -3535,11 +3544,30 @@ public class MapViewPane extends BorderPane {
                 tip = Lang.t("Die Tabelle 'tiles' ist leer.", "The 'tiles' table is empty.");
             }
             default -> {
-                mbTilesStatus.setText("\u26AA online");
-                mbTilesStatus.setTextFill(theme.detailMuted);
-                tip = Lang.t("Keine Offline-Karte gesetzt, Kacheln werden von OpenStreetMap geladen.",
-                             "No offline map set; tiles are loaded from OpenStreetMap.");
+                if (tc.isOnlineEnabled()) {
+                    mbTilesStatus.setText("\u26AA online");
+                    mbTilesStatus.setTextFill(theme.detailMuted);
+                    tip = Lang.t("Keine Offline-Karte gesetzt, Kacheln werden von OpenStreetMap geladen.",
+                                 "No offline map set; tiles are loaded from OpenStreetMap.");
+                } else {
+                    mbTilesStatus.setText("\uD83D\uDD12 " + Lang.t("nur offline, keine Karte", "offline only, no map"));
+                    mbTilesStatus.setTextFill(Color.web("#e0703a"));
+                    tip = Lang.t("Online-Kacheln sind deaktiviert und keine Offline-Karte ist gesetzt.\n"
+                               + "Angezeigt werden nur Kacheln aus dem Disk-Cache.",
+                                 "Online tiles are disabled and no offline map is set.\n"
+                               + "Only tiles from the disk cache are shown.");
+                }
             }
+        }
+        if (!tc.isOnlineEnabled() && info.status() != TileCache.MbStatus.NONE) {
+            mbTilesStatus.setText(mbTilesStatus.getText() + "  \uD83D\uDD12");
+            tip = tip.replace(Lang.t("Fehlende Kacheln werden online nachgeladen.",
+                                     "Missing tiles are loaded online."), "")
+                     .replace(Lang.t("Die Datei wird ignoriert, Kacheln werden online geladen.",
+                                     "The file is ignored; tiles are loaded online."), "")
+                     .strip()
+                + "\n" + Lang.t("\uD83D\uDD12 Online-Kacheln deaktiviert: Fehlende Kacheln bleiben grau.",
+                                "\uD83D\uDD12 Online tiles disabled: missing tiles stay grey.");
         }
         mbTilesStatus.setTooltip(new Tooltip(tip));
         mbTilesButton.setText(info.status() == TileCache.MbStatus.NONE

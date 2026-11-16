@@ -202,7 +202,7 @@ public class SettingsDialog extends Application {
         locationContent.setPadding(new Insets(10, 8, 10, 8));
 
         // ── Offline-Karten (MBTiles) ──────────────────────────────────────────
-        Label headingMBT = new Label("Offline maps (MBTiles)");
+        Label headingMBT = new Label("Offline maps (MBTiles / Mapsforge)");
         headingMBT.setFont(Font.font("Verdana", FontWeight.BOLD, 12));
 
         VBox mbtBox = new VBox();
@@ -219,18 +219,19 @@ public class SettingsDialog extends Application {
 
         TextField mbtField = new TextField(currentMbPath);
         mbtField.setPrefWidth(210);
-        mbtField.setPromptText("Path to the .mbtiles file");
+        mbtField.setPromptText("Path to the .mbtiles or .map file");
         mbtField.setTooltip(new Tooltip(
-                "Offline map data in MBTiles format.\n" +
-                "Download e.g. from maptiler.com or openfreemap.org.\n" +
+                "Offline map data: Mapsforge .map file (recommended)\n" +
+                "or MBTiles with raster tiles (PNG/JPEG).\n" +
+                "Mapsforge maps: download.mapsforge.org\n" +
                 "If set, map tiles are loaded from this file first\n" +
                 "(no internet access required)."));
         Button mbtBrowseBtn = new Button("Browse…");
         mbtBrowseBtn.setOnAction(e -> {
             javafx.stage.FileChooser fc = new javafx.stage.FileChooser();
-            fc.setTitle("Open MBTiles file");
+            fc.setTitle("Open offline map");
             fc.getExtensionFilters().addAll(
-                    new javafx.stage.FileChooser.ExtensionFilter("MBTiles", "*.mbtiles"),
+                    new javafx.stage.FileChooser.ExtensionFilter("Offline maps (MBTiles, Mapsforge)", "*.mbtiles", "*.map"),
                     new javafx.stage.FileChooser.ExtensionFilter("All files", "*.*"));
             if (!mbtField.getText().isBlank()) {
                 java.io.File cur = new java.io.File(mbtField.getText()).getParentFile();
@@ -249,10 +250,19 @@ public class SettingsDialog extends Application {
         mbtButtonRow.setAlignment(Pos.CENTER_LEFT);
 
         Label mbtInfoLabel = new Label(
-                "Download: maptiler.com  ·  openfreemap.org  ·  openmaptiles.org");
+                "Download: download.mapsforge.org (e.g. europe/germany.map)");
         mbtInfoLabel.setStyle("-fx-font-size: 10; -fx-text-fill: #0078d4;");
 
-        mbtBox.getChildren().addAll(mbtPathRow, mbtButtonRow, mbtInfoLabel);
+        CheckBox onlineTilesBox = new CheckBox("Load missing map tiles online (OpenStreetMap)");
+        onlineTilesBox.setSelected(fqlite.timemap.TileCache.getInstance().isOnlineEnabled());
+        onlineTilesBox.setTooltip(new Tooltip(
+                "If enabled, tiles not covered by the offline map are loaded\n" +
+                "from tile.openstreetmap.org.\n" +
+                "Note: every request reveals the map area being viewed\n" +
+                "and the IP address of this computer to the tile server.\n" +
+                "Disable for investigations that must not leave traces online."));
+
+        mbtBox.getChildren().addAll(mbtPathRow, mbtButtonRow, mbtInfoLabel, onlineTilesBox);
 
         // ── OpenCelliD ───────────────────────────────────────────────────────
         Label headingOCI = new Label("OpenCelliD");
@@ -671,6 +681,10 @@ public class SettingsDialog extends Application {
                         fqlite.timemap.TileCache.getInstance().setMbTilesPath(null);
                         appProps.remove("MBTILES_PATH");
                     }
+
+                    // Online map tiles (OpenStreetMap)
+                    fqlite.timemap.TileCache.getInstance().setOnlineEnabled(onlineTilesBox.isSelected());
+                    appProps.setProperty("ONLINE_TILES_ENABLED", onlineTilesBox.isSelected() ? "true" : "false");
 
                     // OpenCelliD CSV
                     String csvPathStr = cellCsvField.getText().trim();

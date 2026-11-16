@@ -1619,6 +1619,12 @@ public class GUI extends Application {
 				}
 			}
 
+			// Online-Kartenkacheln (OpenStreetMap), Standard: erlaubt
+			if ("false".equals(appProps.getProperty("ONLINE_TILES_ENABLED"))) {
+				fqlite.timemap.TileCache.getInstance().setOnlineEnabled(false);
+				System.out.println("[Config] Online-Kartenkacheln deaktiviert (nur offline).");
+			}
+
 			// beaconDB Online-Fallback
 			if ("true".equals(appProps.getProperty("BEACONDB_ENABLED"))) {
 				fqlite.timemap.BeaconDbClient.getInstance().setEnabled(true);
