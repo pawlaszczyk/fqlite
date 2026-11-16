@@ -694,7 +694,8 @@ public class PoliceAnalysisPane extends BorderPane {
                     case "IMEI", "Begleiter_IMEI", "Companion_IMEI", "Gegenpart_IMEI", "Counterpart_IMEI" -> r.target[i] = r.imei;
                     case "Rufnummer", "Phone_Number", "Rufnummer_A", "Rufnummer_B", "Phone_Number_A", "Phone_Number_B",
                          "Begleiter_Rufnummer", "Companion_Phone_Number", "Gegenpart_Rufnummer", "Counterpart_Phone_Number" -> r.target[i] = r.msisdn;
-                    case "Rufnummern", "Phone_Numbers" -> { r.target[i] = r.msisdn; r.list[i] = true; }
+                    case "Rufnummern", "Phone_Numbers", "Anrufer", "Callers" -> { r.target[i] = r.msisdn; r.list[i] = true; }
+                    case "Angerufener", "Called_Party" -> r.target[i] = r.msisdn;
                     case "Kennung", "Identifier" -> r.idCol = i;
                     case "Kennungstyp", "Identifier_Type", "Wechseltyp", "Swap_Type" -> r.typeCol = i;
                     default -> { }

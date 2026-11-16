@@ -1175,7 +1175,7 @@ public class GUI extends Application {
 		Alert alert = new Alert(AlertType.INFORMATION);
 		alert.setTitle("Warning Dialog");
 		alert.setHeaderText("Couldn't find LLM");
-		alert.setContentText("To use this feature, you must first download an LLM model. \n Please check your configuration.");
+		alert.setContentText("To use this feature, you must first download or select an LLM model.\nThe LLM settings are also available under File › Settings… › LLM.");
 		alert.showAndWait();
 		showConfigDialog();
 

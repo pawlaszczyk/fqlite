@@ -3890,7 +3890,12 @@ public class Job {
 				}
 		long a = actual.values().stream().mapToLong(Long::longValue).sum();
 		long e = expected.values().stream().mapToLong(Long::longValue).sum();
-		boolean ok = !expected.isEmpty() && actual.equals(expected);
+		// a file without records (e.g. an empty provider response) has no rows in
+		// response_records and 0 in the import log: no difference
+		Set<String> allFiles = new java.util.TreeSet<>(expected.keySet());
+		allFiles.addAll(actual.keySet());
+		boolean ok = !expected.isEmpty()
+				&& allFiles.stream().allMatch(f -> actual.getOrDefault(f, 0L).equals(expected.getOrDefault(f, 0L)));
 		StringBuilder sb = new StringBuilder();
 		sb.append("Lighthouse (ETSI) database written by FQLite's importer. The search for deleted records was skipped: "
 				+ "the evidence is the imported ETSI XML file (its SHA-256 is in import_log).\n\n");
@@ -3902,10 +3907,8 @@ public class Job {
 		} else {
 			sb.append(String.format("WARNING - the records differ from the import log: %,d records in the database, %,d written by the importer.%n",
 					a, e));
-			Set<String> files = new java.util.TreeSet<>(expected.keySet());
-			files.addAll(actual.keySet());
-			for (String f : files)
-				if (!java.util.Objects.equals(actual.get(f), expected.get(f)))
+			for (String f : allFiles)
+				if (!actual.getOrDefault(f, 0L).equals(expected.getOrDefault(f, 0L)))
 					sb.append(String.format("  %s: %,d in the database, %s in the import log%n", f, actual.getOrDefault(f, 0L),
 							expected.containsKey(f) ? String.format("%,d", expected.get(f)) : "none"));
 			sb.append("\nThe database may have been modified after the import. To search it for deleted records, set "

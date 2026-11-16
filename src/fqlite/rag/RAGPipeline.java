@@ -53,6 +53,26 @@ public class RAGPipeline {
         return SQLGenerator.isUsingGpu();
     }
 
+    /**
+     * The loaded model and its compute mode for display, e.g.
+     * "forensic-sqlite-llama-3.2-3b-Q5_K_M.gguf (GPU)", or {@code null} if no
+     * model has been loaded yet.
+     */
+    public static String loadedModelInfo() {
+        String name = SQLGenerator.loadedModelName();
+        return name == null ? null : name + (SQLGenerator.isUsingGpu() ? " (GPU)" : " (CPU)");
+    }
+
+    /** What the automatic GPU setting chooses on this machine, as text. */
+    public static String autoGpuDescription() {
+        return SQLGenerator.autoGpuDescription();
+    }
+
+    /** true if {@code -Dfqlite.llm.gpuLayers} overrides the GPU setting of the dialog */
+    public static boolean gpuOverriddenBySystemProperty() {
+        return SQLGenerator.gpuOverriddenBySystemProperty();
+    }
+
     /** Short German label for the currently active compute mode, e.g. for a status bar. */
     public String getComputeModeLabel() {
         return isUsingGpu() ? "GPU" : "CPU";
@@ -1669,35 +1689,150 @@ public class RAGPipeline {
          *  requested, if GPU init failed and it fell back to CPU). */
         private static volatile boolean activeGpu = false;
 
-        SQLGenerator(String modelPath) {
-            if (null == model) {
-                // llama.cpp defaults --threads to -1 ("use all logical cores") and
-                // by default also runs a warm-up inference pass while the model
-                // is being constructed (see java-llama.cpp's ModelParameters#skipWarmup).
-                // Both together can peg every CPU core for the whole duration of
-                // model loading. Even though this load already runs on a background
-                // Thread (never the FX Application Thread directly), saturating all
-                // cores still starves the FX thread of CPU time, so it can't pump
-                // its event loop quickly enough — which is exactly what the OS
-                // reports as "Application Not Responding" (hourglass), even though
-                // no thread is actually deadlocked.
-                //
-                // Reserve a couple of cores for the FX thread / GC / everything else
-                // and skip the warm-up pass, which isn't needed before the first
-                // real generateSQL() call anyway.
-                int reservedThreads = Math.max(1, Runtime.getRuntime().availableProcessors() - 2);
-                // 4096-token context: the classifyIntent prompt is ~3350 tokens
-                // (instructions + 20 examples + request) — at 2048 the model
-                // only sees the last ~1300 tokens, cutting off all intent
-                // definitions and early examples.  4096 fits the full prompt
-                // and eliminates intent misclassifications caused by truncation.
-                int gpuLayers = detectGpuLayers();
-                model = loadModelWithFallback(modelPath, reservedThreads, gpuLayers);
-                System.out.println("✅ Modell has been loaded");
-            }
-            else
-                System.out.println("✅ Modell is already loaded. ");
+        /** model file and requested GPU layers of the loaded {@link #model} */
+        private static String loadedPath;
+        private static int loadedGpuRequest;
 
+        SQLGenerator(String modelPath) {
+            synchronized (SQLGenerator.class) {
+                ensureModel(modelPath);
+            }
+        }
+
+        /**
+         * Loads the model, or loads it again when the model file or the GPU
+         * setting in {@link LlmSettings} has changed since it was loaded.
+         * Must be called holding the class lock: generations run under the
+         * same lock, so a model is never closed while it is generating.
+         *
+         * @param requestedPath model file to use when no (existing) file is
+         *                      configured in the settings
+         */
+        private static void ensureModel(String requestedPath) {
+            LlmSettings cfg = LlmSettings.get();
+            String path = cfg.hasModel() ? cfg.modelPath : requestedPath;
+            if (path == null || path.isBlank()) path = loadedPath;
+            if (path == null) throw new IllegalStateException("No LLM model file configured");
+            int gpuRequest = requestedGpuLayers(cfg);
+            if (model != null && path.equals(loadedPath) && gpuRequest == loadedGpuRequest) {
+                return;
+            }
+            if (model != null) {
+                System.out.println("ℹ️ LLM-Einstellungen geändert, lade Modell neu: " + path);
+                try {
+                    model.close();
+                } catch (Throwable t) {
+                    System.out.println("⚠️ Altes Modell konnte nicht geschlossen werden: " + t.getMessage());
+                }
+                model = null;
+                loadedPath = null;
+            }
+            // llama.cpp defaults --threads to -1 ("use all logical cores") and
+            // by default also runs a warm-up inference pass while the model
+            // is being constructed (see java-llama.cpp's ModelParameters#skipWarmup).
+            // Both together can peg every CPU core for the whole duration of
+            // model loading. Even though this load already runs on a background
+            // Thread (never the FX Application Thread directly), saturating all
+            // cores still starves the FX thread of CPU time, so it can't pump
+            // its event loop quickly enough — which is exactly what the OS
+            // reports as "Application Not Responding" (hourglass), even though
+            // no thread is actually deadlocked.
+            //
+            // Reserve a couple of cores for the FX thread / GC / everything else
+            // and skip the warm-up pass, which isn't needed before the first
+            // real generateSQL() call anyway.
+            int reservedThreads = Math.max(1, Runtime.getRuntime().availableProcessors() - 2);
+            // 4096-token context: the classifyIntent prompt is ~3350 tokens
+            // (instructions + 20 examples + request) — at 2048 the model
+            // only sees the last ~1300 tokens, cutting off all intent
+            // definitions and early examples.  4096 fits the full prompt
+            // and eliminates intent misclassifications caused by truncation.
+            model = loadModelWithFallback(path, reservedThreads, gpuRequest);
+            loadedPath = path;
+            loadedGpuRequest = gpuRequest;
+            System.out.println("✅ Modell has been loaded");
+        }
+
+        /** file name of the loaded model, {@code null} if none is loaded */
+        static String loadedModelName() {
+            String p = loadedPath;
+            return p == null ? null : java.nio.file.Path.of(p).getFileName().toString();
+        }
+
+        /**
+         * GPU layers to request: the system property {@code fqlite.llm.gpuLayers}
+         * wins, then the mode in the settings; {@link LlmSettings.GpuMode#AUTO}
+         * detects the hardware ({@link #detectGpuLayers}).
+         */
+        private static int requestedGpuLayers(LlmSettings cfg) {
+            String override = System.getProperty("fqlite.llm.gpuLayers");
+            if (override != null && !override.isBlank()) return detectGpuLayers();
+            return switch (cfg.gpuMode) {
+                case CPU -> 0;
+                case ALL -> -1;
+                case CUSTOM -> cfg.gpuLayers;
+                default -> detectGpuLayers();
+            };
+        }
+
+        /** true if the system property {@code fqlite.llm.gpuLayers} overrides the GPU setting */
+        static boolean gpuOverriddenBySystemProperty() {
+            String override = System.getProperty("fqlite.llm.gpuLayers");
+            return override != null && !override.isBlank();
+        }
+
+        private static int detectGpuLayersNoOverride() {
+            Integer cached = detectedGpuLayers;
+            if (cached != null) return cached;
+            String prop = System.getProperty("fqlite.llm.gpuLayers");
+            if (prop == null || prop.isBlank()) return detectGpuLayers();
+            return hasNvidiaGpu() ? -1 : 0;
+        }
+
+        /** What {@link LlmSettings.GpuMode#AUTO} chooses on this machine, as text. */
+        static String autoGpuDescription() {
+            String osName = System.getProperty("os.name", "").toLowerCase();
+            String osArch = System.getProperty("os.arch", "").toLowerCase();
+            if (osName.contains("mac") && (osArch.contains("aarch64") || osArch.contains("arm")))
+                return "Apple Silicon: GPU via Metal";
+            if (detectGpuLayersNoOverride() != 0) return "NVIDIA GPU found (nvidia-smi): GPU via CUDA";
+            return "no supported GPU found: CPU";
+        }
+
+        /**
+         * Inference parameters from the settings for an SQL generation.
+         * Max. tokens is limited to what is left of the context window
+         * after the prompt.
+         */
+        private static InferenceParameters samplingFor(String prompt, String... stops) {
+            LlmSettings cfg = LlmSettings.get();
+            int nPredict = cfg.maxTokens;
+            try {
+                int promptTokens = model.encode(prompt).length;
+                nPredict = Math.max(16, Math.min(nPredict, LlmSettings.CONTEXT_SIZE - promptTokens - 8));
+            } catch (Throwable t) {
+                // encode is only a safeguard; generate with the configured value
+            }
+            return new InferenceParameters(prompt)
+                    .setTemperature((float) cfg.temperature)
+                    .setTopP((float) cfg.topP)
+                    .setTopK(cfg.topK)
+                    .setFrequencyPenalty((float) cfg.frequencyPenalty)
+                    .setPresencePenalty((float) cfg.presencePenalty)
+                    .setNPredict(nPredict)
+                    .setStopStrings(stops);
+        }
+
+        /** Runs one generation under the class lock, reloading the model first if the settings changed. */
+        private static String run(java.util.function.Function<LlamaModel, InferenceParameters> params) {
+            synchronized (SQLGenerator.class) {
+                ensureModel(loadedPath);
+                StringBuilder out = new StringBuilder();
+                for (LlamaOutput output : model.generate(params.apply(model))) {
+                    out.append(output.text);
+                }
+                return out.toString();
+            }
         }
 
         /**
@@ -1733,22 +1868,31 @@ public class RAGPipeline {
                 }
             }
 
+            // the hardware does not change while FQLite runs: ask nvidia-smi
+            // once, not before every generation (ensureModel checks each time)
+            Integer cached = detectedGpuLayers;
+            if (cached != null) return cached;
+
             String osName = System.getProperty("os.name", "").toLowerCase();
             String osArch = System.getProperty("os.arch", "").toLowerCase();
 
+            int layers;
             if (osName.contains("mac") && (osArch.contains("aarch64") || osArch.contains("arm"))) {
                 // Apple Silicon: llama.cpp's Metal backend is compiled in by
                 // default and works without any extra driver setup.
-                return -1;
+                layers = -1;
+            } else if (hasNvidiaGpu()) {
+                layers = -1;
+            } else {
+                // No GPU we can rely on -> stay on CPU, as before.
+                layers = 0;
             }
-
-            if (hasNvidiaGpu()) {
-                return -1;
-            }
-
-            // No GPU we can rely on -> stay on CPU, as before.
-            return 0;
+            detectedGpuLayers = layers;
+            return layers;
         }
+
+        /** result of the hardware detection in {@link #detectGpuLayers} */
+        private static volatile Integer detectedGpuLayers;
 
         /**
          * Best-effort check for a usable NVIDIA GPU on Linux/Windows by asking
@@ -1827,21 +1971,8 @@ public class RAGPipeline {
                     schema, request
             );
 
-            InferenceParameters inferParams = new InferenceParameters(prompt)
-                    .setTemperature(0.0f)
-                    .setTopP(0.9f)
-                    .setTopK(40)
-                    .setPresencePenalty(1.1f)
-                    .setNPredict(1024)
-                    .setStopStrings("\n", ";");
-
-            LlamaIterable outputs = model.generate(inferParams);
-            StringBuilder sql = new StringBuilder();
-            for (LlamaOutput output : outputs) {
-                sql.append(output.text);
-            }
-
-            return cleanSQL(sql.toString());
+            String sql = run(m -> samplingFor(prompt, "\n", ";"));
+            return cleanSQL(sql);
         }
 
         /**
@@ -1858,17 +1989,7 @@ public class RAGPipeline {
                     + "Request: " + request + "\n\n"
                     + "SQLite Query:\n";
 
-            InferenceParameters inferParams = new InferenceParameters(prompt)
-                    .setTemperature(0.0f)
-                    .setTopK(1)
-                    .setNPredict(384)
-                    .setStopStrings(";");
-
-            StringBuilder raw = new StringBuilder();
-            for (LlamaOutput output : model.generate(inferParams)) {
-                raw.append(output.text);
-            }
-            return extractSQL(raw.toString());
+            return extractSQL(run(m -> samplingFor(prompt, ";")));
         }
 
         /** Zweiter Versuch mit Fehlermeldung (identisch zu build_retry_prompt der Evaluation). */
@@ -1880,14 +2001,7 @@ public class RAGPipeline {
                     + "Previous attempt:\n" + failedSql + "\n"
                     + "SQLite error: " + err + "\n\n"
                     + "Corrected SQLite Query:\n";
-            InferenceParameters inferParams = new InferenceParameters(prompt)
-                    .setTemperature(0.0f)
-                    .setTopK(1)
-                    .setNPredict(384)
-                    .setStopStrings(";");
-            StringBuilder raw = new StringBuilder();
-            for (LlamaOutput output : model.generate(inferParams)) raw.append(output.text);
-            return extractSQL(raw.toString());
+            return extractSQL(run(m -> samplingFor(prompt, ";")));
         }
 
         /**
@@ -2147,19 +2261,14 @@ public class RAGPipeline {
                     dateHint, request
             );
 
-            InferenceParameters inferParams = new InferenceParameters(prompt)
+            // always greedy: the JSON answer of the classification has to be
+            // stable, whatever sampling the SQL generation uses
+            return run(m -> new InferenceParameters(prompt)
                     .setTemperature(0.0f)
                     .setTopP(0.9f)
                     .setTopK(40)
                     .setNPredict(150)
-                    .setStopStrings("\n\n");
-
-            LlamaIterable outputs = model.generate(inferParams);
-            StringBuilder out = new StringBuilder();
-            for (LlamaOutput output : outputs) {
-                out.append(output.text);
-            }
-            return out.toString();
+                    .setStopStrings("\n\n"));
         }
 
 

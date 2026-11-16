@@ -52,6 +52,17 @@ public class HuggingFaceDownloadDialog {
     private Spinner<Integer> threadSpinner;
     private String downloadPath;
 
+    /** called on the FX thread with the downloaded file */
+    private java.util.function.Consumer<Path> onDownloaded;
+
+    /**
+     * Sets a callback that receives the downloaded {@code .gguf} file when a
+     * download has finished successfully (called on the FX thread).
+     */
+    public void setOnDownloaded(java.util.function.Consumer<Path> callback) {
+        this.onDownloaded = callback;
+    }
+
     private final AtomicBoolean isPaused = new AtomicBoolean(false);
     private final AtomicBoolean isCancelled = new AtomicBoolean(false);
     private Task<Void> currentDownloadTask;
@@ -372,11 +383,23 @@ public class HuggingFaceDownloadDialog {
         };
 
 
+        final Path targetFile = Paths.get(downloadPath, modelId.replace("/", "_"), fileName);
         currentDownloadTask.setOnSucceeded(e -> {
+            resetButtons();
+            if (isCancelled.get()) return;
             statusLabel.setText("✓ Download finished!");
             statusLabel.setStyle("-fx-text-fill: green; -fx-font-weight: bold;");
-            resetButtons();
-            showSuccess("Model was successfully downloaded!");
+            boolean usable = false;
+            try {
+                usable = Files.isRegularFile(targetFile) && Files.size(targetFile) > 0;
+            } catch (IOException ignored) { }
+            if (usable && onDownloaded != null) {
+                onDownloaded.accept(targetFile);
+                showSuccess("Model was successfully downloaded:\n" + targetFile
+                        + "\n\nIt has been set as the model in the LLM settings.");
+            } else {
+                showSuccess("Model was successfully downloaded:\n" + targetFile);
+            }
         });
 
         currentDownloadTask.setOnFailed(e -> {
@@ -799,6 +822,7 @@ public class HuggingFaceDownloadDialog {
         alert.setTitle("Error");
         alert.setHeaderText(null);
         alert.setContentText(message);
+        if (dialog != null && dialog.isShowing()) alert.initOwner(dialog);
         alert.showAndWait();
     }
 
@@ -807,6 +831,7 @@ public class HuggingFaceDownloadDialog {
         alert.setTitle("Success");
         alert.setHeaderText(null);
         alert.setContentText(message);
+        if (dialog != null && dialog.isShowing()) alert.initOwner(dialog);
         alert.showAndWait();
     }
 }

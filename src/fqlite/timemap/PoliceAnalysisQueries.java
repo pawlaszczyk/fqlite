@@ -66,6 +66,185 @@ public final class PoliceAnalysisQueries {
                 && (columnName.startsWith("Funkzelle") || columnName.startsWith("Cell_Site"));
     }
 
+    /** duration of a record in seconds (durationTime, else end minus start) */
+    private static final String DUR =
+            "COALESCE(CAST(NULLIF(duration_seconds, '') AS INTEGER), CAST(strftime('%s', end_time) AS INTEGER) - CAST(strftime('%s', start_time) AS INTEGER))";
+
+    /**
+     * {@code col} with "no value" as NULL: databases analysed by FQLite (copied
+     * into an in-memory database) hold '' or the text 'null' instead of NULL.
+     */
+    private static String clean(String col) {
+        return "NULLIF(NULLIF(NULLIF(TRIM(" + col + "), ''), 'null'), 'NULL')";
+    }
+
+    /** latitude/longitude column {@code col} if both coordinates are numbers and not 0/0, else NULL */
+    private static String coord(String col) {
+        return "(CASE WHEN typeof(latitude_dec) IN ('real', 'integer') AND typeof(longitude_dec) IN ('real', 'integer') "
+                + "AND NOT (latitude_dec = 0 AND longitude_dec = 0) THEN " + col + " END)";
+    }
+
+    /** {@code col} is a foreign phone number (country code other than 49) */
+    private static String foreignNumber(String col) {
+        return "(" + col + " GLOB '[1-9]*' AND " + col + " NOT LIKE '49%' AND " + col + " NOT GLOB '*[^0-9]*' AND length(" + col + ") >= 9)";
+    }
+
+    /** MCC of an IMSI, stored as TBCD (16 hex characters) or as digits */
+    private static String imsiMcc(String col) {
+        return "(CASE WHEN " + col + " IS NULL OR " + col + " = '' THEN NULL WHEN length(" + col + ") = 16 "
+                + "THEN substr(" + col + ",2,1) || substr(" + col + ",1,1) || substr(" + col + ",4,1) ELSE substr(" + col + ",1,3) END)";
+    }
+
+    /**
+     * Shock call, caller side (see {@link AnalysisType#SHOCK_CALL_CALLER}):
+     * chains of incoming calls to one line with short pauses. The chain is
+     * formed per called line, not per caller: callers change the displayed
+     * number between calls (spoofed numbers), the victim stays the same.
+     */
+    private static String shockCallCallerSql(String t) {
+        String trunk = "'\"incomingTrunkCountry\"=\"'";
+        String known = "(lower(dom) LIKE '%tmobile%' OR lower(dom) LIKE '%t-mobile%' OR lower(dom) LIKE '%telekom%' "
+                + "OR lower(dom) LIKE '%vodafone%' OR lower(dom) LIKE '%o2%' OR lower(dom) LIKE '%telefonica%' "
+                + "OR lower(dom) LIKE '%eplus%' OR lower(dom) LIKE '%e-plus%' OR lower(dom) LIKE '%1und1%' "
+                + "OR lower(dom) LIKE '%1u1%' OR lower(dom) LIKE '%drillisch%' OR lower(dom) LIKE '%congstar%' "
+                + "OR lower(dom) LIKE '%mcc262%')";
+        return "WITH legs AS MATERIALIZED ("
+                + "  SELECT source_file, record_number, party_role, msisdn, apn, CAST(strftime('%s', start_time) AS INTEGER) AS s, "
+                + DUR + " AS d, other_information AS info "
+                + "  FROM response_records WHERE nw_access_type = 'voiceCall' AND party_role IN ('originating-Party', 'terminating-Party') " + t
+                + "), calls AS ("
+                // the same call can be reported twice (e.g. IMS and switch): overlaps merge below
+                + "  SELECT a.msisdn AS x, b.msisdn AS y, a.s AS s, a.s + a.d AS e, "
+                + "    CASE WHEN instr(a.info, " + trunk + ") > 0 THEN substr(a.info, instr(a.info, " + trunk + ") + 24) END AS tr, "
+                // operator domain the call came from ("A_DOMAIN_SPV_APN", e.g. ims.colt.net)
+                + "    CASE WHEN instr(a.apn, ',') > 0 THEN substr(a.apn, 1, instr(a.apn, ',') - 1) ELSE a.apn END AS dom "
+                + "  FROM legs a JOIN legs b ON b.source_file = a.source_file AND b.record_number = a.record_number "
+                + "    AND b.party_role = 'terminating-Party' "
+                + "  WHERE a.party_role = 'originating-Party' AND a.s IS NOT NULL AND a.d > 0 AND b.msisdn IS NOT NULL AND b.msisdn <> ''"
+                + "), c2 AS ("
+                + "  SELECT x, y, s, e, CASE WHEN tr IS NOT NULL THEN substr(tr, 1, instr(tr, '\"') - 1) END AS trunk, "
+                + "    " + foreignNumber("x") + " AS fo, "
+                + "    (x IS NULL OR x = '' OR x GLOB '*[^0-9]*') AS wh, "
+                + "    (x GLOB '[0-9]*' AND x NOT GLOB '*[^0-9]*' AND length(x) BETWEEN 1 AND 6) AS off, "
+                // a German mobile number delivered by a carrier that is no mobile operator: displayed number probably spoofed
+                + "    (x GLOB '491[567]*' AND COALESCE(dom, '') <> '' AND NOT " + known + ") AS sp, "
+                + "    COALESCE(dom, '') AS dom "
+                + "  FROM calls"
+                + "), g AS ("
+                + "  SELECT *, CASE WHEN s - MAX(e) OVER (PARTITION BY y ORDER BY s ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING) <= 120 "
+                + "      THEN 0 ELSE 1 END AS nw "
+                + "  FROM c2"
+                + "), k AS ("
+                + "  SELECT *, SUM(nw) OVER (PARTITION BY y ORDER BY s ROWS UNBOUNDED PRECEDING) AS sess FROM g"
+                + "), ses AS ("
+                + "  SELECT y, GROUP_CONCAT(DISTINCT x) AS callers, COUNT(DISTINCT x) AS nx, "
+                // calls: one per caller and 10-second start, so that the same call reported twice counts once
+                + "    COUNT(DISTINCT COALESCE(x, '') || '@' || (s / 10)) AS n, MIN(s) AS s0, MAX(e) AS e0, "
+                + "    MAX(trunk) AS trunk, MAX(fo) AS fo, MAX(wh) AS wh, MAX(off) AS off, MAX(sp) AS sp, "
+                + "    GROUP_CONCAT(DISTINCT NULLIF(dom, '')) AS doms "
+                + "  FROM k GROUP BY y, sess"
+                + "), f AS ("
+                + "  SELECT *, e0 - s0 AS span, "
+                + "    (y LIKE '49%' AND y NOT LIKE '4915%' AND y NOT LIKE '4916%' AND y NOT LIKE '4917%') AS land, "
+                + "    (trunk IS NOT NULL AND trunk <> '' AND trunk NOT IN ('Germany', 'Deutschland')) AS tf, "
+                // changing numbers count for a landline (on a mobile line, several people calling one after another is common)
+                + "    (nx >= 2 AND y LIKE '49%' AND y NOT LIKE '4915%' AND y NOT LIKE '4916%' AND y NOT LIKE '4917%') AS chg "
+                + "  FROM ses"
+                + "), r AS ("
+                + "  SELECT *, 2 * fo + 2 * wh + 2 * off + 2 * sp + 2 * chg + land + (n >= 2) + (span >= 3600) + tf AS pts FROM f"
+                + ") "
+                + "SELECT callers AS " + c("Anrufer", "Callers") + ", y AS " + c("Angerufener", "Called_Party") + ", "
+                + "pts AS " + c("Punkte", "Points") + ", "
+                + "n AS " + c("Anzahl_Anrufe", "Call_Count") + ", "
+                + "datetime(s0, 'unixepoch') AS " + c("Beginn", "Start") + ", datetime(e0, 'unixepoch') AS " + c("Ende", "End") + ", "
+                + "span / 60 AS " + c("Dauer_Minuten", "Duration_Minutes") + ", "
+                + "COALESCE(trunk, '') AS " + c("Transit", "Transit") + ", COALESCE(doms, '') AS " + c("Zufuehrung", "Delivered_By") + ", "
+                + "trim("
+                + "  CASE WHEN fo THEN '" + c("Anrufer aus dem Ausland; ", "caller abroad; ") + "' ELSE '' END"
+                + "  || CASE WHEN wh THEN '" + c("Nummer unterdrückt; ", "number withheld; ") + "' ELSE '' END"
+                + "  || CASE WHEN off THEN '" + c("Kurz-/Amtsnummer; ", "short/official number; ") + "' ELSE '' END"
+                + "  || CASE WHEN chg THEN '" + c("wechselnde Anrufernummern; ", "changing caller numbers; ") + "' ELSE '' END"
+                + "  || CASE WHEN sp THEN '" + c("Mobilnummer über Fremdnetz zugeführt (Nummer gefälscht?); ", "mobile number delivered by a third-party carrier (spoofed?); ") + "' ELSE '' END"
+                + "  || CASE WHEN land THEN '" + c("Festnetz angerufen; ", "landline called; ") + "' ELSE '' END"
+                + "  || CASE WHEN n >= 2 THEN '" + c("Wiederanrufe; ", "redials; ") + "' ELSE '' END"
+                + "  || CASE WHEN span >= 3600 THEN '" + c("über 60 Min.; ", "over 60 min.; ") + "' ELSE '' END"
+                + "  || CASE WHEN tf THEN '" + c("ausländischer Transit; ", "foreign transit; ") + "' ELSE '' END"
+                + ", '; ') AS " + c("Hinweise", "Indications") + " "
+                // long chains, or a shorter call (from 5 min.) to a landline from a suspicious number
+                + "FROM r WHERE (span >= 1200 AND pts >= 4) OR (span >= 300 AND land AND (fo OR wh OR off OR sp)) "
+                + "ORDER BY 3 DESC, span DESC;";
+    }
+
+    /** Shock call, collector side: subscribers of a cell dump (see {@link AnalysisType#SHOCK_CALL_RUNNER}). */
+    private static String shockCallRunnerSql(String t) {
+        return "WITH w AS MATERIALIZED ("
+                + "  SELECT " + clean("msisdn") + " AS msisdn, " + clean("imsi") + " AS imsi, " + clean("na_device_id") + " AS na_device_id, "
+                + "    source_file, record_number, nw_access_type, party_role, "
+                + "    " + coord("latitude_dec") + " AS lat, " + coord("longitude_dec") + " AS lon, "
+                + "    CAST(strftime('%s', start_time) AS INTEGER) AS s, " + DUR + " AS d "
+                + "  FROM response_records WHERE start_time IS NOT NULL " + t
+                + "), loc AS ("
+                // subscribers with a position; sender names (e.g. "Yettel" for an operator SMS) are no subscribers
+                + "  SELECT * FROM w WHERE lat IS NOT NULL AND lon IS NOT NULL AND msisdn IS NOT NULL AND msisdn NOT GLOB '*[^0-9]*'"
+                + "), s0 AS (SELECT MIN(s) AS s0 FROM loc"
+                // numbers abroad that called a German landline for 5 min. or more (the
+                // shock call, if the victim's records are in the database; whole period)
+                + "), kl AS MATERIALIZED ("
+                + "  SELECT source_file, record_number, party_role, msisdn, " + DUR + " AS d FROM response_records "
+                + "  WHERE nw_access_type = 'voiceCall' AND party_role IN ('originating-Party', 'terminating-Party')"
+                + "), kc AS MATERIALIZED ("
+                + "  SELECT DISTINCT a.msisdn AS k FROM kl a JOIN kl b ON b.source_file = a.source_file "
+                + "    AND b.record_number = a.record_number AND b.party_role = 'terminating-Party' "
+                + "  WHERE a.party_role = 'originating-Party' AND a.d >= 300 AND " + foreignNumber("a.msisdn") + " "
+                + "    AND b.msisdn LIKE '49%' AND b.msisdn NOT LIKE '4915%' AND b.msisdn NOT LIKE '4916%' AND b.msisdn NOT LIKE '4917%'"
+                + "), fp AS MATERIALIZED ("
+                // calls/SMS of a located subscriber with a foreign number
+                + "  SELECT a.msisdn AS me, b.msisdn AS other, a.d AS d, (a.nw_access_type = 'voiceCall') AS voice "
+                + "  FROM loc a JOIN w b ON b.source_file = a.source_file AND b.record_number = a.record_number "
+                + "    AND b.party_role IS NOT NULL AND b.party_role <> a.party_role "
+                + "  WHERE a.nw_access_type IN ('voiceCall', 'sms') AND a.party_role IS NOT NULL AND " + foreignNumber("b.msisdn")
+                + "), fpa AS ("
+                // signal call: voice only (an SMS has duration 0 as well)
+                + "  SELECT me, COUNT(*) AS nf, MAX(CASE WHEN voice THEN d END) AS maxd, MIN(CASE WHEN voice THEN d END) AS mind, "
+                + "    GROUP_CONCAT(DISTINCT other) AS others FROM fp GROUP BY me"
+                + "), sub AS ("
+                + "  SELECT msisdn, MAX(imsi) AS imsi, MAX(na_device_id) AS dev, MIN(s) AS first, MAX(s) AS last, "
+                + "    MAX(s + COALESCE(d, 0)) AS lastend, COUNT(*) AS n, "
+                + "    MAX(" + imsiMcc("imsi") + ") AS mcc, MIN(printf('%.5f, %.5f', lat, lon)) AS cell "
+                + "  FROM loc GROUP BY msisdn"
+                + "), f AS ("
+                + "  SELECT sub.*, COALESCE(fpa.nf, 0) AS nf, fpa.maxd, fpa.mind, fpa.others, "
+                + "    ((mcc IS NOT NULL AND mcc <> '262') OR " + foreignNumber("msisdn") + ") AS fs, "
+                + "    COALESCE(fpa.maxd >= 900, 0) AS ol, COALESCE(fpa.mind <= 5, 0) AS sig, "
+                + "    (first - (SELECT s0 FROM s0) >= 1800) AS late, (n <= 3) AS brief, "
+                // same country and network prefix as a shock caller (e.g. 306... = Greek mobile)
+                + "    (" + foreignNumber("msisdn") + " AND substr(msisdn, 1, 3) IN (SELECT substr(k, 1, 3) FROM kc)) AS kpre, "
+                + "    (msisdn IN (SELECT k FROM kc) OR EXISTS (SELECT 1 FROM fp WHERE fp.me = sub.msisdn AND fp.other IN (SELECT k FROM kc))) AS kcon "
+                + "  FROM sub LEFT JOIN fpa ON fpa.me = sub.msisdn "
+                // IoT/M2M cards (international numbers 88x, MCC 901) are not people
+                + "  WHERE msisdn NOT LIKE '88%' AND COALESCE(mcc, '') <> '901'"
+                + "), r AS ("
+                + "  SELECT *, 2 * fs + (nf > 0) + 3 * ol + sig + late + brief + 3 * kpre + 4 * kcon AS pts FROM f WHERE fs OR nf > 0"
+                + ") "
+                + "SELECT msisdn AS " + c("Rufnummer", "Phone_Number") + ", imsi AS IMSI, dev AS IMEI, "
+                + "pts AS " + c("Punkte", "Points") + ", COALESCE(mcc, '') AS " + c("SIM_MCC", "SIM_MCC") + ", "
+                + "datetime(first, 'unixepoch') AS " + c("Erstmals", "First_Seen") + ", datetime(last, 'unixepoch') AS " + c("Zuletzt", "Last_Seen") + ", "
+                + "n AS " + c("Datensaetze", "Records") + ", (lastend - first) / 60 AS " + c("Zeitspanne_Minuten", "Time_Span_Minutes") + ", "
+                + "cell AS " + c("Funkzelle", "Cell_Site") + ", "
+                + "COALESCE(others, '') AS " + c("Auslandskontakte", "Foreign_Contacts") + ", COALESCE(maxd, '') AS " + c("Laengste_Auslandsverbindung_s", "Longest_Foreign_Call_s") + ", "
+                + "trim("
+                + "  CASE WHEN fs THEN '" + c("ausländische SIM/Nummer; ", "foreign SIM/number; ") + "' ELSE '' END"
+                + "  || CASE WHEN nf > 0 THEN '" + c("Auslandskontakte; ", "contacts abroad; ") + "' ELSE '' END"
+                + "  || CASE WHEN ol THEN '" + c("offene Leitung ins Ausland; ", "open line abroad; ") + "' ELSE '' END"
+                + "  || CASE WHEN sig THEN '" + c("Signalanruf ins Ausland; ", "signal call abroad; ") + "' ELSE '' END"
+                + "  || CASE WHEN late THEN '" + c("spät im Gebiet; ", "late in the area; ") + "' ELSE '' END"
+                + "  || CASE WHEN brief THEN '" + c("nur bis zu 3 Datensätze (evtl. kurz im Gebiet); ", "at most 3 records (possibly briefly in the area); ") + "' ELSE '' END"
+                + "  || CASE WHEN kpre THEN '" + c("gleiche Ländervorwahl wie ein Schockanrufer; ", "same country prefix as a shock caller; ") + "' ELSE '' END"
+                + "  || CASE WHEN kcon THEN '" + c("Kontakt zum Schockanrufer; ", "contact with the shock caller; ") + "' ELSE '' END"
+                + ", '; ') AS " + c("Hinweise", "Indications") + " "
+                + "FROM r WHERE pts >= 5 OR (nf > 0 AND pts >= 4) OR kpre OR kcon ORDER BY pts DESC, first;";
+    }
+
     /** The "Untersuchungsschwerpunkte" an analyst can pick from in {@link PoliceAnalysisPane}. */
     public enum AnalysisType {
 
@@ -322,7 +501,58 @@ public final class PoliceAnalysisQueries {
                         + "derselben Funkzelle eingeloggt waren.",
                 "Finds pairs of phone numbers linked as call/SMS partners via "
                         + "the same session_id AND registered in the same cell "
-                        + "site at the time.");
+                        + "site at the time."),
+
+        SHOCK_CALL_CALLER(
+                "Schockanruf-Verdacht: Dauerverbindungen (Keiler)", "Shock-call suspicion: continuous calls (caller)",
+                "Sucht Gespräche, in denen ein Anrufer ein Opfer lange in der Leitung hält: "
+                        + "eingehende Anrufe an denselben Anschluss, die mit höchstens 2 Min. Pause "
+                        + "aufeinander folgen (auch von wechselnden Nummern), zusammen mindestens 20 Min. "
+                        + "Punkte für: Anrufer aus dem Ausland (+2), unterdrückte Nummer (+2), Kurz-/"
+                        + "Amtsnummer wie 110 (+2), wechselnde Anrufernummern bei einem Festnetzanschluss (+2), deutsche Mobilnummer "
+                        + "über einen Fremdnetzbetreiber zugeführt, z. B. ims.colt.net (+2, Nummer "
+                        + "vermutlich gefälscht), Festnetz angerufen (+1), Wiederanrufe (+1), über 60 Min. "
+                        + "(+1), ausländischer Transit (+1). Liste ab 4 Punkten; kürzere Anrufe ab 5 Min. "
+                        + "an einen Festnetzanschluss, wenn die Nummer aus dem Ausland kommt, unterdrückt, "
+                        + "eine Kurznummer oder vermutlich gefälscht ist. Heuristik - Treffer sind "
+                        + "Ansatzpunkte, keine Beweise.",
+                "Looks for calls in which a caller keeps a victim on the line: incoming calls "
+                        + "to the same line following each other with at most 2 min. pause (also from "
+                        + "changing numbers), at least 20 min. together. Points for: caller abroad (+2), "
+                        + "withheld number (+2), short/official number such as 110 (+2), changing caller "
+                        + "numbers to a landline (+2), German mobile number delivered by a third-party carrier, e.g. "
+                        + "ims.colt.net (+2, number probably spoofed), landline called (+1), redials (+1), "
+                        + "over 60 min. (+1), foreign transit (+1). List from 4 points; shorter calls from "
+                        + "5 min. to a landline if the number is foreign, withheld, a short number or "
+                        + "probably spoofed. Heuristic - hits are leads, not evidence."),
+
+        SHOCK_CALL_RUNNER(
+                "Schockanruf-Verdacht: mögliche Abholer (Funkzelle)", "Shock-call suspicion: possible collectors (cell dump)",
+                "Für Funkzellenabfragen am Wohnort eines Opfers (Zeitraum am besten auf die Dauer "
+                        + "des Schockanrufs setzen): bewertet jeden Anschluss in den Zellen. Punkte für: "
+                        + "ausländische SIM oder Rufnummer (+2), Kontakt zu ausländischen Nummern (+1), "
+                        + "offene Leitung ab 15 Min. ins Ausland (+3, Führung durch Logistiker), "
+                        + "Signalanruf bis 5 s ins Ausland (+1), erst ab 30 Min. nach Beginn des "
+                        + "Zeitraums im Gebiet (+1), höchstens 3 Datensätze im Zeitraum (+1, Hinweis auf einen kurzen Aufenthalt - die Spalte Zeitspanne zeigt erstes bis letztes Auftreten), "
+                        + "gleiche Ländervorwahl wie ein Schockanrufer in der Datenbank (+3, ausländische "
+                        + "Nummer ab 5 Min. an einen Festnetzanschluss, z. B. aus der Abfrage des Opfer-"
+                        + "anschlusses), Kontakt zu diesem Anrufer (+4). "
+                        + "IoT-/M2M-Karten werden ausgelassen. Liste ab 5 Punkten (mit Auslandskontakt ab 4) "
+                        + "und alle mit Bezug zu einem Schockanrufer - auch Anwohner mit Auslandskontakten "
+                        + "erscheinen, die Treffer sind Ansatzpunkte. Der Zeitraum gilt für die "
+                        + "Funkzellendaten; Schockanrufer werden im ganzen Datenbestand gesucht.",
+                "For cell dumps at a victim's home (best set the time range to the duration of "
+                        + "the shock call): rates every subscriber in the cells. Points for: foreign "
+                        + "SIM or number (+2), contact with foreign numbers (+1), open line of 15 min. "
+                        + "or more abroad (+3, guidance by a logistician), signal call of up to 5 s "
+                        + "abroad (+1), in the area only from 30 min. after the start of the time range "
+                        + "(+1), at most 3 records in the time range (+1, hint at a short stay - the column time span shows first to last appearance), same country prefix as a shock caller "
+                        + "in the database (+3, foreign number calling a landline for 5 min. or more, "
+                        + "e.g. from the request for the victim's line), contact with that caller (+4). "
+                        + "IoT/M2M cards are left out. List from 5 points (with contacts abroad from 4) "
+                        + "and all related to a shock caller - residents with contacts abroad appear too, "
+                        + "hits are leads. The time range applies to the cell dump; shock callers are "
+                        + "looked for in the whole database.");
 
         private final String labelDe;
         private final String labelEn;
@@ -1033,6 +1263,12 @@ public final class PoliceAnalysisQueries {
                         + "  AND a.latitude_dec = b.latitude_dec AND a.longitude_dec = b.longitude_dec "
                         + "ORDER BY a.start_time DESC;";
             }
+
+            case SHOCK_CALL_CALLER:
+                return shockCallCallerSql(t);
+
+            case SHOCK_CALL_RUNNER:
+                return shockCallRunnerSql(t);
 
             default:
                 throw new IllegalArgumentException(Lang.t("Unbekannter Auswertungstyp: ", "Unknown analysis type: ") + type);

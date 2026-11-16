@@ -108,6 +108,12 @@ public final class UliDecoder {
         int glt    = b[3] & 0xFF;
         int subTyp = b[4] & 0xFF;
 
+        if (subTyp == (F_TAI | F_ECGI)) {
+            // TAI (5 bytes) followed by ECGI (7 bytes), e.g. 1&1:
+            // 56 000D 01 18 | 62F232 1069 | 62F232 0B2A6206 -> the ECGI identifies the cell
+            if (b.length < 5 + 5 + 7) return null;
+            return parseEcgi(b, 10, "ECGI/LTE");
+        }
         if (subTyp == SUBTYPE_ECGI) {
             // Extended ECGI encoding: MCC/MNC at offset 5, ECI (4 bytes) at offset 8
             if (b.length < 12) return null;

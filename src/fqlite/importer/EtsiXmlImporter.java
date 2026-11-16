@@ -611,6 +611,14 @@ public class EtsiXmlImporter {
         String typeOfData = firstChildLocalName(todElem);
 
         Element ntsuElem = findElement(rec, tsuPath + "/nationalTelephonyServiceUsage");
+        // A call with both parties (partyRole) that additionally carries a
+        // nationalTelephonyServiceUsage (e.g. Telekom VoLTE: internetAccess with
+        // IMEI/IMSI/APN only) is a call, not a data session: import one row per
+        // party as for the voice/SMS shape, otherwise the partner and the roles
+        // are lost.
+        if (ntsuElem != null && partiesWithRole(findElement(rec, tsuPath + "/partyInformation")) >= 2) {
+            ntsuElem = null;
+        }
         if (ntsuElem != null) {
             bindNationalUsageRow(ps, requestId, rec, tsuPath, ntsuElem, recordNumber, otherInfo,
                     callIndicator, callActionCode, callSubtype, sessionId, typeOfDataExtra,
@@ -655,6 +663,28 @@ public class EtsiXmlImporter {
             rows = 1;
         }
         return rows;
+    }
+
+    /** {@code start} ("yyyy-MM-dd HH:mm:ss") plus {@code seconds}, or null if it cannot be parsed */
+    private static String plusSeconds(String start, int seconds) {
+        try {
+            java.time.format.DateTimeFormatter f = java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
+            return java.time.LocalDateTime.parse(start, f).plusSeconds(seconds).format(f);
+        } catch (RuntimeException e) {
+            return null;
+        }
+    }
+
+    /** number of TelephonyPartyInformation children of {@code partyInfo} with a partyRole */
+    private static int partiesWithRole(Element partyInfo) {
+        if (partyInfo == null) return 0;
+        int n = 0;
+        NodeList children = partyInfo.getChildNodes();
+        for (int i = 0; i < children.getLength(); i++) {
+            if (children.item(i) instanceof Element party && "TelephonyPartyInformation".equals(party.getLocalName())
+                    && findElement(party, "partyRole") != null) n++;
+        }
+        return n;
     }
 
     /** GPRS / data-session shape: one row, sourced from {@code nationalTelephonyServiceUsage}. */
@@ -810,9 +840,19 @@ public class EtsiXmlImporter {
         String imsi = findText(party, "iMSI");
         String deviceId = findText(party, "iMEI");
 
-        String start = parseEtsiTimestamp(findText(party, "communicationTime/startTime"));
-        String end = parseEtsiTimestamp(findText(party, "communicationTime/endTime"));
-        Integer duration = parseIntOrNull(findText(party, "communicationTime/durationTime"));
+        // communicationTime per party, or once for the whole record next to
+        // partyInformation (e.g. 1&1: telephonyServiceUsage/communicationTime)
+        Element timeHolder = party;
+        if (findElement(party, "communicationTime") == null
+                && party.getParentNode() instanceof Element info
+                && info.getParentNode() instanceof Element usage
+                && findElement(usage, "communicationTime") != null) {
+            timeHolder = usage;
+        }
+        String start = parseEtsiTimestamp(findText(timeHolder, "communicationTime/startTime"));
+        String end = parseEtsiTimestamp(findText(timeHolder, "communicationTime/endTime"));
+        Integer duration = parseIntOrNull(findText(timeHolder, "communicationTime/durationTime"));
+        if (end == null && start != null && duration != null) end = plusSeconds(start, duration);
 
         final String loc = "detailedLocation/cellInformation";
         String latRaw = findText(party, loc + "/extendedLocation/spot/gsmLocation/geoCoordinates/latitude");

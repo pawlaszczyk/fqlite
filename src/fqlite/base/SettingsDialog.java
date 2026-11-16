@@ -566,7 +566,16 @@ public class SettingsDialog extends Application {
         Tab limitTab = new Tab("Display & limits", limitScroll);
         limitTab.setClosable(false);
 
-        TabPane tabPane = new TabPane(commonTab, locationTab, limitTab);
+        // =====================================================================
+        // TAB 4 – LLM (same controls as the LLM Configuration dialog)
+        // =====================================================================
+        fqlite.rag.LlmSettingsPane llmPane = new fqlite.rag.LlmSettingsPane();
+        ScrollPane llmScroll = new ScrollPane(llmPane);
+        llmScroll.setFitToWidth(true);
+        Tab llmTab = new Tab("LLM", llmScroll);
+        llmTab.setClosable(false);
+
+        TabPane tabPane = new TabPane(commonTab, locationTab, limitTab, llmTab);
         tabPane.setTabMinWidth(80);
 
         ButtonBar buttonBar = new ButtonBar();
@@ -708,6 +717,9 @@ public class SettingsDialog extends Application {
                     AppLog.error(err.getMessage());
                 }
 
+                // LLM settings (own file: fqlitellm-config.properties)
+                if (!llmPane.save()) return;   // error shown, keep the dialog open
+
                 Stage s = (Stage) applyButton.getScene().getWindow();
                 s.close();
             }
@@ -721,7 +733,7 @@ public class SettingsDialog extends Application {
         VBox root = new VBox(tabPane, buttonBar);
         root.setSpacing(0);
 
-        Scene settingsScene = new Scene(root, 520, 600);
+        Scene settingsScene = new Scene(root, 600, 640);
         ThemeManager.register(settingsScene);
         stage.setScene(settingsScene);
         stage.setAlwaysOnTop(true);
