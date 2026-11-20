@@ -145,6 +145,10 @@ public class Job {
 
 	/* the next fields hold information for the GUI */
 	public GUI gui = null;
+
+	/** start and end of the analysis in processDB() - recorded in the CASE export */
+	public volatile java.time.OffsetDateTime analysisStart = null;
+	public volatile java.time.OffsetDateTime analysisEnd = null;
 	public TreeItem<NodeObject> dbNode = null;
 	public TreeItem<NodeObject> walNode = null;
 	public TreeItem<NodeObject> rjNode = null;
@@ -677,6 +681,7 @@ public class Job {
 	@SuppressWarnings("unchecked")
 	protected int processDB() throws InterruptedException, ExecutionException, IOException {
 
+		analysisStart = java.time.OffsetDateTime.now();
 		bincache = new BLOBCache(this);
 
 		allreadyvisit = ConcurrentHashMap.newKeySet();
@@ -1722,6 +1727,7 @@ public class Job {
 		// drop stale copies of live records found on freed pages (b-tree rebalancing),
 		// truncated duplicates, and flag older versions of live records
 		postProcessRecords();
+		analysisEnd = java.time.OffsetDateTime.now();
 		if (skipCarving)
 			reportLighthouseDatabase();
 

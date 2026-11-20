@@ -44,7 +44,7 @@ FQLite allows you to:
 * Export recovered data into a new SQLite database 
 * Text-to-SQL generation with AI-based Assistant (since 4.0)
 * Graphic SQL-Schema analyzer (based on Mermaid.js)
-* Export recovered data to CASE/UCO JSON-LD format
+* Export recovered data to CASE/UCO JSON-LD format (CASE 1.5 / UCO 1.4, validates with case_validate): live, deleted and older record versions with recovery state, file offset, source file hashes and provenance
 * white and black theme support
 * support of sqlcipher encrypted databases
 * Apple DMG Installer is signed (since 4.22)

@@ -77,6 +77,19 @@ tasks.register('nodeQlSmokeTest', JavaExec) {
     systemProperty 'nodeql.screenshot', layout.buildDirectory.file('reports/nodeql/editor.png').get().asFile.absolutePath
 }
 
+// Writes a CASE/UCO JSON-LD sample with the writer of the CASE export (no GUI, no database).
+// Check it with case_validate from case-utils (pip install case-utils).
+tasks.register('caseExportSample', JavaExec) {
+    group = 'verification'
+    description = 'Write a CASE/UCO JSON-LD sample to build/reports/case/sample.jsonld.'
+    dependsOn tasks.named('testClasses')
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'CaseExportSample'
+    def out = layout.buildDirectory.file('reports/case/sample.jsonld').get().asFile
+    doFirst { out.parentFile.mkdirs() }
+    args out.absolutePath
+}
+
 dependencies {
     implementation(group: 'dev.langchain4j', name: 'langchain4j', version: '1.9.1')
     implementation(group: 'dev.langchain4j', name: 'langchain4j-embeddings', version: '1.9.1-beta17')
