@@ -67,6 +67,23 @@ Some features:
 </p>
 
 
+### Headless library / command line (no GUI)
+
+FQLite's recovery engine can be used without the user interface - as a Java library in other
+applications or as a command-line tool (JSON / CSV output). `./gradlew headlessJar` builds
+`build/headless/fqlite-headless-5.21.jar`:
+
+```bash
+java -jar build/headless/fqlite-headless-5.21.jar --json result.json evidence.db
+```
+
+```java
+RecoveryResult r = fqlite.headless.FQLiteHeadless.analyze(Path.of("evidence.db"));
+r.getRecords(Status.DELETED).forEach(rec -> System.out.println(rec.getValues()));
+```
+
+See [docs/HEADLESS.md](docs/HEADLESS.md).
+
 ### Official Project Webpage
 
 Check out the official project homepage
@@ -86,7 +103,6 @@ D. Pawlaszczyk, C. Hummert: (2021).
 Making the Invisible Visible – Techniques for Recovering Deleted SQLite Data Records. 
 International Journal of Cyber Forensics and Advanced Threat Investigations,
 https://conceptechint.net/index.php/CFATI/article/view/17/6
-
 
 An overview article highlighting the new AI-Assistant of FQLite can be retrieved from
 

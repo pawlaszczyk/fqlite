@@ -1424,7 +1424,7 @@ public class GUI extends Application {
 	}
 
 	private void showLog() {
-		AppLog logwindow = new AppLog();
+		fqlite.log.AppLogWindow logwindow = new fqlite.log.AppLogWindow();
 
 		Stage stage = new Stage();
 		try {

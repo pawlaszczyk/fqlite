@@ -2,6 +2,7 @@ plugins {
     id 'java'
     id 'java-library'
     id 'application'
+    id 'maven-publish'
     id 'org.openjfx.javafxplugin' version '0.1.0'
     id 'org.beryx.runtime' version '1.13.1'
     id "de.undercouch.download" version "5.6.0"
@@ -9,7 +10,7 @@ plugins {
 
 
 group 'hswm.fqlite'
-version '5.21'
+version '5.3'
 
 def currentOs = org.gradle.internal.os.OperatingSystem.current()
 
@@ -252,6 +253,100 @@ runtime {
         } else if (currentOs.isMacOsX()) {
             imageOptions += ['--mac-package-name', 'fqlite']
             skipInstaller = true
+        }
+    }
+}
+
+
+// ---------------------------------------------------------------------------
+// Headless library (no GUI): fqlite-headless-<version>.jar
+//
+// Package fqlite.headless: FQLiteHeadless.analyze(Path) runs the recovery engine
+// without JavaFX toolkit/display and returns the recovered records (Java API,
+// JSON, CSV); fqlite.headless.Main is the command line of the JAR.
+// Runtime dependencies: only javafx-base (collections) and antlr4-runtime.
+//
+//   ./gradlew headlessJar           build/headless/fqlite-headless-<v>.jar (+ lib/)
+//   ./gradlew headlessDist          build/distributions/fqlite-headless-<v>.zip
+//   ./gradlew publishToMavenLocal   org.fqlite:fqlite-headless:<v> into ~/.m2
+// ---------------------------------------------------------------------------
+def headlessDeps = { configurations.runtimeClasspath.filter {
+    it.name.startsWith('javafx-base-') || it.name.startsWith('antlr4-runtime-') } }
+
+tasks.register('headlessLibs', Copy) {
+    group = 'build'
+    description = 'Copies the runtime dependencies of the headless JAR to build/headless/lib.'
+    from headlessDeps()
+    into layout.buildDirectory.dir('headless/lib')
+}
+
+tasks.register('headlessJar', Jar) {
+    group = 'build'
+    description = 'Builds the headless FQLite library/CLI JAR (no GUI) in build/headless.'
+    dependsOn tasks.named('headlessLibs')
+    archiveBaseName = 'fqlite-headless'
+    archiveVersion = project.version.toString()
+    destinationDirectory = layout.buildDirectory.dir('headless')
+    // classes only: the engine needs none of the GUI resources (icons, maps, models)
+    from sourceSets.main.output.classesDirs
+    manifest {
+        attributes(
+                'Main-Class': 'fqlite.headless.Main',
+                'Implementation-Title': 'FQLite headless',
+                'Implementation-Version': project.version.toString(),
+                // only honoured by "java -jar": lets BigByteBuffer unmap windows (see jvmArgs above)
+                'Add-Opens': 'java.base/java.nio java.base/jdk.internal.ref java.base/sun.nio.ch'
+        )
+    }
+    doFirst {
+        manifest.attributes('Class-Path': headlessDeps().files.collect { 'lib/' + it.name }.join(' '))
+    }
+}
+
+tasks.register('headlessDist', Zip) {
+    group = 'distribution'
+    description = 'Zips the headless JAR with its lib/ folder.'
+    dependsOn tasks.named('headlessJar')
+    archiveBaseName = 'fqlite-headless'
+    archiveVersion = project.version.toString()
+    from(layout.buildDirectory.dir('headless')) { include '*.jar'; include 'lib/**' }
+    from('docs/HEADLESS.md')
+}
+
+tasks.register('headlessSourcesJar', Jar) {
+    archiveBaseName = 'fqlite-headless'
+    archiveClassifier = 'sources'
+    destinationDirectory = layout.buildDirectory.dir('libs')
+    from sourceSets.main.allJava
+}
+
+publishing {
+    publications {
+        headless(MavenPublication) {
+            groupId = 'org.fqlite'
+            artifactId = 'fqlite-headless'
+            version = project.version.toString()
+            artifact tasks.named('headlessJar')
+            artifact tasks.named('headlessSourcesJar')
+            pom {
+                name = 'FQLite headless'
+                description = 'Forensic SQLite recovery engine of FQLite without GUI'
+                url = 'https://github.com/pawlaszczyk/fqlite'
+                licenses { license { name = 'Apache License 2.0'; url = 'https://www.apache.org/licenses/LICENSE-2.0' } }
+                withXml {
+                    def deps = asNode().appendNode('dependencies')
+                    // Maven picks the platform classifier of javafx-base through the
+                    // profiles of the openjfx parent POM
+                    [['org.openjfx', 'javafx-base', javafx.version],
+                     ['org.antlr', 'antlr4-runtime', '4.8']].each { g, a, v ->
+                        def d = deps.appendNode('dependency')
+                        d.appendNode('groupId', g)
+                        d.appendNode('artifactId', a)
+                        d.appendNode('version', v)
+                        d.appendNode('scope', 'runtime')
+                    }
+                }
+            }
         }
     }
 }

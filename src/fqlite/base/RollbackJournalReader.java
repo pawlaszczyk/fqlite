@@ -156,7 +156,7 @@ public class RollbackJournalReader {
 
         try {
             if (file.size() <= 512) {
-                System.out.println("RollbackJournal-File is empty. Skip analyzing.");
+                AppLog.info("RollbackJournal-File is empty. Skip analyzing.");
                 return;
             }
         } catch (IOException e) {

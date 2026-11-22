@@ -25,8 +25,18 @@ import java.util.*;
  *   java WalAnalyzer <database.db> <database.db-wal>
  *
  * No external dependencies — pure Java 17+.
+ *
+ * @author pawlaszc
  */
 public class WALAnalyzer {
+
+    private static final PrintStream NULL_OUT = new PrintStream(OutputStream.nullOutputStream());
+
+    /** report stream: stdout, but no output in the headless library mode (see fqlite.log.AppLog) */
+    private static PrintStream out() {
+        return fqlite.log.AppLog.isHeadless() ? NULL_OUT : System.out;
+    }
+
 
     static final int WAL_HEADER_SIZE   = 32;
     static final int FRAME_HEADER_SIZE = 24;
@@ -66,13 +76,13 @@ public class WALAnalyzer {
         if (!Files.exists(dbPath))  throw new IOException("Database file not found: " + dbPath);
         if (!Files.exists(walPath)) throw new IOException("WAL file not found: " + walPath);
 
-        sep(); System.out.println("  DB : " + dbPath.toAbsolutePath());
-        System.out.println("  WAL: " + walPath.toAbsolutePath()); sep();
+        sep(); out().println("  DB : " + dbPath.toAbsolutePath());
+        out().println("  WAL: " + walPath.toAbsolutePath()); sep();
 
         // 1. Read page size from DB header (bytes 16-17)
         byte[] dbHeader = readBytesFromFile(dbPath, 0, 100);
         int pageSize = readPageSize(dbHeader);
-        System.out.printf("  Page size: %d bytes%n%n", pageSize);
+        out().printf("  Page size: %d bytes%n%n", pageSize);
 
         // 2. Read WAL file
         byte[] wal = Files.readAllBytes(walPath);
@@ -81,12 +91,12 @@ public class WALAnalyzer {
 
         int frameSize  = FRAME_HEADER_SIZE + pageSize;
         int frameCount = (wal.length - WAL_HEADER_SIZE) / frameSize;
-        System.out.printf("  Frames in WAL: %d%n%n", frameCount);
+        out().printf("  Frames in WAL: %d%n%n", frameCount);
 
         // 3. Extract the latest version of each page from the WAL
         //    (later frames override earlier ones for the same page number)
         Map<Long, byte[]> walPages = extractLatestWalPages(wal, pageSize, frameCount);
-        System.out.printf("  Distinct pages in WAL: %s%n%n",
+        out().printf("  Distinct pages in WAL: %s%n%n",
                 walPages.keySet().stream().sorted()
                         .map(Object::toString)
                         .reduce((a, b) -> a + ", " + b).orElse("—"));
@@ -101,12 +111,12 @@ public class WALAnalyzer {
         Map<Long, SchemaEntry> schema = readSchemaMerged(src, pageSize);
 
         if (schema.isEmpty()) {
-            System.out.println("    (none found — sqlite_schema may not be committed yet)");
+            out().println("    (none found — sqlite_schema may not be committed yet)");
         } else {
             schema.forEach((root, e) ->
-                    System.out.printf("    Root page %4d  %-8s  %s%n", root, e.type(), e.name()));
+                    out().printf("    Root page %4d  %-8s  %s%n", root, e.type(), e.name()));
         }
-        System.out.println();
+        out().println();
 
         // 5. Build a complete page-to-owner map by traversing all B-Trees
         //    pageOwner: pageNumber -> SchemaEntry
@@ -141,14 +151,14 @@ public class WALAnalyzer {
         if (!Files.exists(dbPath))  { System.err.println("Database file not found: " + dbPath);  System.exit(1); }
         if (!Files.exists(walPath)) { System.err.println("WAL file not found:      " + walPath); System.exit(1); }
 
-        sep(); System.out.println("  SQLite WAL Analyzer  (JDBC-free, pure binary)");
-        sep(); System.out.println("  DB : " + dbPath.toAbsolutePath());
-        System.out.println("  WAL: " + walPath.toAbsolutePath()); sep();
+        sep(); out().println("  SQLite WAL Analyzer  (JDBC-free, pure binary)");
+        sep(); out().println("  DB : " + dbPath.toAbsolutePath());
+        out().println("  WAL: " + walPath.toAbsolutePath()); sep();
 
         // 1. Read page size from DB header (bytes 16-17)
         byte[] dbHeader = readBytesFromFile(dbPath, 0, 100);
         int pageSize = readPageSize(dbHeader);
-        System.out.printf("  Page size: %d bytes%n%n", pageSize);
+        out().printf("  Page size: %d bytes%n%n", pageSize);
 
         // 2. Read WAL file
         byte[] wal = Files.readAllBytes(walPath);
@@ -157,12 +167,12 @@ public class WALAnalyzer {
 
         int frameSize  = FRAME_HEADER_SIZE + pageSize;
         int frameCount = (wal.length - WAL_HEADER_SIZE) / frameSize;
-        System.out.printf("  Frames in WAL: %d%n%n", frameCount);
+        out().printf("  Frames in WAL: %d%n%n", frameCount);
 
         // 3. Extract the latest version of each page from the WAL
         //    (later frames override earlier ones for the same page number)
         Map<Long, byte[]> walPages = extractLatestWalPages(wal, pageSize, frameCount);
-        System.out.printf("  Distinct pages in WAL: %s%n%n",
+        out().printf("  Distinct pages in WAL: %s%n%n",
                 walPages.keySet().stream().sorted()
                         .map(Object::toString)
                         .reduce((a, b) -> a + ", " + b).orElse("—"));
@@ -176,14 +186,14 @@ public class WALAnalyzer {
         // 4. Read schema from Page 1 (WAL-first)
         Map<Long, SchemaEntry> schema = readSchemaMerged(src, pageSize);
 
-        System.out.println("  Schema objects loaded (WAL + DB, no JDBC):");
+        out().println("  Schema objects loaded (WAL + DB, no JDBC):");
         if (schema.isEmpty()) {
-            System.out.println("    (none found — sqlite_schema may not be committed yet)");
+            out().println("    (none found — sqlite_schema may not be committed yet)");
         } else {
             schema.forEach((root, e) ->
-                    System.out.printf("    Root page %4d  %-8s  %s%n", root, e.type(), e.name()));
+                    out().printf("    Root page %4d  %-8s  %s%n", root, e.type(), e.name()));
         }
-        System.out.println();
+        out().println();
 
         // 5. Build a complete page-to-owner map by traversing all B-Trees
         //    pageOwner: pageNumber -> SchemaEntry
@@ -495,33 +505,33 @@ public class WALAnalyzer {
     // =========================================================================
     static void printWalHeader(byte[] wal) {
         ByteBuffer h = ByteBuffer.wrap(wal, 0, WAL_HEADER_SIZE).order(ByteOrder.BIG_ENDIAN);
-        System.out.printf("  WAL header:%n");
-        System.out.printf("    Magic               : 0x%08X%n", h.getInt());
-        System.out.printf("    File format version : %d%n",     h.getInt());
-        System.out.printf("    Page size (WAL)     : %d%n",     h.getInt());
-        System.out.printf("    Checkpoint sequence : %d%n",     h.getInt());
-        System.out.printf("    Salt-1 / Salt-2     : 0x%08X / 0x%08X%n%n", h.getInt(), h.getInt());
+        out().printf("  WAL header:%n");
+        out().printf("    Magic               : 0x%08X%n", h.getInt());
+        out().printf("    File format version : %d%n",     h.getInt());
+        out().printf("    Page size (WAL)     : %d%n",     h.getInt());
+        out().printf("    Checkpoint sequence : %d%n",     h.getInt());
+        out().printf("    Salt-1 / Salt-2     : 0x%08X / 0x%08X%n%n", h.getInt(), h.getInt());
     }
 
     static void printResults(List<FrameInfo> frames) {
         sep();
-        System.out.println("  Frame analysis");
+        out().println("  Frame analysis");
         sep();
-        System.out.printf("  %-6s  %-8s  %-10s  %-28s  %-8s  %s%n",
+        out().printf("  %-6s  %-8s  %-10s  %-28s  %-8s  %s%n",
                 "Frame", "Page", "Commit", "Page type", "DB type", "Object");
-        System.out.println("  " + "-".repeat(80));
+        out().println("  " + "-".repeat(80));
 
         for (FrameInfo f : frames) {
             String commit = f.commitSize() > 0
                     ? String.format("yes (%d)", f.commitSize()) : "no";
-            System.out.printf("  %-6d  %-8d  %-10s  %-28s  %-8s  %s%n",
+            out().printf("  %-6d  %-8d  %-10s  %-28s  %-8s  %s%n",
                     f.frameIndex(), f.pageNumber(), commit,
                     f.pageTypeName(), f.ownerType(), f.ownerName());
         }
 
         sep();
-        System.out.println("\n  Summary by database object:");
-        System.out.println("  " + "-".repeat(60));
+        out().println("\n  Summary by database object:");
+        out().println("  " + "-".repeat(60));
         Map<String, Set<Long>> byOwner = new LinkedHashMap<>();
         for (FrameInfo f : frames) {
             String key = f.ownerType().equals("—")
@@ -530,14 +540,14 @@ public class WALAnalyzer {
             byOwner.computeIfAbsent(key, k -> new TreeSet<>()).add(f.pageNumber());
         }
         byOwner.forEach((obj, pages) ->
-                System.out.printf("  %-45s  pages: %s%n", obj,
+                out().printf("  %-45s  pages: %s%n", obj,
                         pages.stream().map(Object::toString)
                                 .reduce((a, b) -> a + ", " + b).orElse("—")));
 
         long uncommitted = frames.stream().filter(f -> f.commitSize() == 0).count();
         if (uncommitted > 0) {
-            System.out.println();
-            System.out.printf("  ⚠  %d frame(s) not yet committed (not written to DB)%n",
+            out().println();
+            out().printf("  ⚠  %d frame(s) not yet committed (not written to DB)%n",
                     uncommitted);
         }
         sep();
@@ -607,5 +617,5 @@ public class WALAnalyzer {
         };
     }
 
-    static void sep() { System.out.println("=".repeat(80)); }
+    static void sep() { out().println("=".repeat(80)); }
 }

@@ -394,7 +394,7 @@ public class WALReader{
 		AppLog.info("Number of pages in WAL-file" + numberofpages);
 		markWALVersions();
 		long end = System.currentTimeMillis();
-		System.out.println("WAL Import duration in ms: " + (end-start));
+		AppLog.info("WAL Import duration in ms: " + (end-start));
 
 	}
 	

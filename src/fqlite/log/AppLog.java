@@ -1,25 +1,10 @@
 package fqlite.log;
 
 import java.nio.file.FileSystems;
-import java.util.Objects;
 import java.util.logging.FileHandler;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import java.util.logging.SimpleFormatter;
-import fqlite.base.GUI;
-import javafx.application.Application;
-import javafx.collections.ObservableList;
-import javafx.event.ActionEvent;
-import javafx.event.EventHandler;
-import javafx.geometry.Insets;
-import javafx.geometry.Pos;
-import javafx.scene.Scene;
-import javafx.scene.control.*;
-import javafx.scene.image.ImageView;
-import javafx.scene.input.ClipboardContent;
-import javafx.scene.layout.VBox;
-import javafx.scene.text.Font;
-import javafx.stage.Stage;
 
 /// This is the central Logger class for FQLite.
 /// We are using <code>java.util.logging.Logger</code> functionality
@@ -28,93 +13,50 @@ import javafx.stage.Stage;
 /// The maximum size of each log file is 4 MB.
 /// A text area is also updated with the log messages so that
 /// the last entries in the log file can be viewed via the interface
-/// if required.
+/// if required (see {@link AppLogWindow}; not created in the headless mode).
 ///
 /// @author pawlaszc
-public class AppLog extends Application {
+public class AppLog {
 
     public static final Logger LOGGER = Logger.getLogger(AppLog.class.getName());
-    public static TextArea textArea;
-    public static Scene myScene;
     
     static {
     	
         LOGGER.setUseParentHandlers(false);
-        try { 
-        	VBox layout = new VBox();
-            layout.setPadding(new Insets(5, 5, 5, 5));
-            layout.setSpacing(10);
-            layout.setAlignment(Pos.CENTER);
+        if (isHeadless())
+            initHeadless();
+        else
+            AppLogWindow.setup();  // log window + log file (GUI mode)
+    }
 
-            textArea = new TextArea();
-          	textArea.setEditable(false);
-            textArea.setFont(Font.font("Monospaced", 13));
-            textArea.setPrefHeight(550);
-            
-            // This block configures the logger with a handler and a formatter
-			FileHandler fh = new FileHandler(GUI.baseDir.getAbsolutePath() + FileSystems.getDefault().getSeparator() + "fqlite.log",4096*1000,3,true);
-            //System.out.println("Log File: " + fh.toString());
+    /**
+     * true if FQLite runs without a JavaFX user interface, i.e. as a library
+     * ({@code fqlite.headless.FQLiteHeadless}) - set by the system property
+     * {@code fqlite.headless=true}. In this mode no JavaFX control is created,
+     * so only the module javafx.base is needed and no display/toolkit.
+     */
+    public static boolean isHeadless() {
+        return Boolean.getBoolean("fqlite.headless");
+    }
+
+    /**
+     * Logger set-up of the headless mode: no log window. A log file is only written
+     * if the system property {@code fqlite.log.dir} names a directory.
+     */
+    private static void initHeadless() {
+        String dir = System.getProperty("fqlite.log.dir");
+        if (dir == null || dir.isBlank())
+            return;
+        try {
+            java.io.File d = new java.io.File(dir);
+            d.mkdirs();
+            FileHandler fh = new FileHandler(d.getAbsolutePath() + FileSystems.getDefault().getSeparator()
+                    + "fqlite.log", 4096 * 1000, 3, true);
+            fh.setFormatter(new SimpleFormatter());
             LOGGER.addHandler(fh);
-            SimpleFormatter formatter = new SimpleFormatter();  
-            fh.setFormatter(formatter);
-            LOGGER.addHandler(new TextAreaHandler(textArea));
-            LOGGER.severe("<FQLite message log>");
-
-            ButtonBar buttonBar = new ButtonBar();
-            buttonBar.setPadding( new Insets(10) );
-
-            Button copyButton = new Button("Copy");
-
-            String s = Objects.requireNonNull(GUI.class.getResource("/icon24_copy.png")).toExternalForm();
-            ImageView iv = new ImageView(s);
-            iv.setFitHeight(16);
-            iv.setFitWidth(16);
-            copyButton.setGraphic(iv);
-            copyButton.setTooltip(new Tooltip("copy log to clipboard"));
-            copyButton.setOnAction(new EventHandler<ActionEvent>() {
-
-                @Override
-                @SuppressWarnings("rawtypes")
-                public void handle(ActionEvent event) {
-
-                    StringBuilder sb = new StringBuilder();
-                    final javafx.scene.input.Clipboard clipboard = javafx.scene.input.Clipboard.getSystemClipboard();
-                    final ClipboardContent content = new ClipboardContent();
-                    content.putString(textArea.getText());
-                    clipboard.setContent(content);
-                }
-            });
-
-            Button backButton = new Button("Back");
-            s = Objects.requireNonNull(GUI.class.getResource("/icon32_exit.png")).toExternalForm();
-            iv = new ImageView(s);
-            iv.setFitWidth(16);
-            iv.setFitHeight(16);
-            backButton.setGraphic(iv);
-            backButton.setTooltip(new Tooltip("Go back to main window"));
-
-            ButtonBar.setButtonData(copyButton, ButtonBar.ButtonData.OK_DONE);
-            ButtonBar.setButtonData(backButton, ButtonBar.ButtonData.CANCEL_CLOSE);
-            buttonBar.getButtons().addAll(copyButton, backButton);
-
-            backButton.setOnAction(
-                    new EventHandler<ActionEvent>() {
-                        @Override
-                        public void handle(final ActionEvent e) {
-                            // get a handle on the stage
-                            Stage stage = (Stage) backButton.getScene().getWindow();
-                            // do what you have to do
-                            stage.close();
-                        }
-                    });
-
-            layout.getChildren().addAll(textArea,buttonBar);
-
-            myScene = new Scene(layout, 600, 400);
-            
-        } catch (Exception e) {  
-            e.printStackTrace();  
-        } 
+        } catch (Exception e) {
+            System.err.println("FQLite: log file could not be created in " + dir + ": " + e.getMessage());
+        }
     }
 
     public static void debug(String log){
@@ -135,15 +77,5 @@ public class AppLog extends Application {
     
     public static void setLevel(Level newLevel){
     	LOGGER.setLevel(newLevel);
-    }
-    
-    @Override
-    public void start(Stage primaryStage) {
-       
-    	primaryStage.setTitle("FQLite - Log");
-        primaryStage.setScene(myScene);
-        primaryStage.show();
-
-        
     }
 }

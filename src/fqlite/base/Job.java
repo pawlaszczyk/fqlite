@@ -1757,16 +1757,23 @@ public class Job {
 
 		// Cleanup: post a fence runLater so the JavaFX thread processes all
 		// pending GUI updates *before* we close the db buffer on this thread.
-		java.util.concurrent.CountDownLatch guiFence = new java.util.concurrent.CountDownLatch(1);
-		Platform.runLater(() -> {
+		// Without a GUI (CLI / headless library) there are no JavaFX callbacks and the
+		// JavaFX toolkit may not be running at all: clean up directly.
+		if (gui == null) {
 			tasklist.clear();
 			tasklist = null;
-			guiFence.countDown();
-		});
-		try {
-			guiFence.await();
-		} catch (InterruptedException ie) {
-			Thread.currentThread().interrupt();
+		} else {
+			java.util.concurrent.CountDownLatch guiFence = new java.util.concurrent.CountDownLatch(1);
+			Platform.runLater(() -> {
+				tasklist.clear();
+				tasklist = null;
+				guiFence.countDown();
+			});
+			try {
+				guiFence.await();
+			} catch (InterruptedException ie) {
+				Thread.currentThread().interrupt();
+			}
 		}
 		// Now safe to close: all JavaFX callbacks that touch db have run.
 		try {
@@ -3390,6 +3397,8 @@ public class Job {
 	public void info(String message) {
 		if (gui != null)
 			gui.doLog(message);
+		else if (AppLog.isHeadless())
+			AppLog.info(message);          // library mode: no output on the console
 		else
 			System.out.println(message);
 	}
@@ -3402,6 +3411,8 @@ public class Job {
 			alert.setContentText(message);
 			alert.showAndWait();
 		}
+		else if (AppLog.isHeadless())
+			AppLog.error(message);
 		else
 			System.err.println("ERROR: " + message);
 	}
@@ -3925,20 +3936,9 @@ public class Job {
 		if (gui != null) {
 			final boolean warn = !ok;
 			final String text = lighthouseCheck;
-			Platform.runLater(() -> {
-				Alert alert = new Alert(warn ? AlertType.WARNING : AlertType.INFORMATION);
-				alert.setTitle("Lighthouse database");
-				alert.setHeaderText(warn ? "Records differ from the import log" : "Lighthouse (ETSI) database recognised");
-				javafx.scene.control.Label body = new javafx.scene.control.Label(text);
-				body.setWrapText(true);
-				body.setMaxWidth(580);
-				body.setMinHeight(javafx.scene.layout.Region.USE_PREF_SIZE);
-				alert.getDialogPane().setContent(body);
-				alert.getDialogPane().setPrefWidth(620);
-				alert.getDialogPane().setMinHeight(javafx.scene.layout.Region.USE_PREF_SIZE);
-				alert.setResizable(true);
-				alert.show();
-			});
+			// the dialog lives in its own class: it is only loaded with a GUI, so the
+			// headless mode needs no JavaFX controls (see fqlite.headless)
+			Platform.runLater(() -> JobDialogs.showLighthouseCheck(warn, text));
 		}
 	}
 

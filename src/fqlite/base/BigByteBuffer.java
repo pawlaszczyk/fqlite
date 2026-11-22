@@ -33,6 +33,8 @@ import java.util.Map;
  * If a RandomAccessFile is passed in by the caller, BigByteBuffer takes
  * ownership of it as well — do NOT close the RAF externally afterwards.
  * Call {@link #close()} when done to release all resources.
+ *
+ * @author pawlaszc
  */
 public class BigByteBuffer {
 
@@ -419,12 +421,16 @@ public class BigByteBuffer {
 			// so a missing --add-opens flag is visible instead of silently
 			// pushing all unmap work onto the Reference Handler thread.
 			if (unmapWarningLogged.compareAndSet(false, true)) {
-				System.err.println(
+				String msg =
 						"BigByteBuffer: explicit unmap unavailable (" + e.getClass().getSimpleName()
 						+ "); falling back to GC for native memory release. "
 						+ "Add '--add-opens java.base/jdk.internal.ref=ALL-UNNAMED' and "
 						+ "'--add-opens java.base/sun.nio.ch=ALL-UNNAMED' to the JVM launch "
-						+ "options to avoid this.");
+						+ "options to avoid this.";
+				if (fqlite.log.AppLog.isHeadless())
+					fqlite.log.AppLog.warning(msg);   // library mode: no console output
+				else
+					System.err.println(msg);
 			}
 		}
 	}
