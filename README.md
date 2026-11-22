@@ -71,10 +71,10 @@ Some features:
 
 FQLite's recovery engine can be used without the user interface - as a Java library in other
 applications or as a command-line tool (JSON / CSV output). `./gradlew headlessJar` builds
-`build/headless/fqlite-headless-5.21.jar`:
+`build/headless/fqlite-headless-5.3.jar`:
 
 ```bash
-java -jar build/headless/fqlite-headless-5.21.jar --json result.json evidence.db
+java -jar build/headless/fqlite-headless-5.3.jar --json result.json evidence.db
 ```
 
 ```java
