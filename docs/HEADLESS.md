@@ -7,9 +7,9 @@ other Java applications.
 ## Build
 
 ```bash
-./gradlew headlessJar          # build/headless/fqlite-headless-5.21.jar + build/headless/lib/
-./gradlew headlessDist         # build/distributions/fqlite-headless-5.21.zip
-./gradlew publishToMavenLocal  # org.fqlite:fqlite-headless:5.21 into ~/.m2
+./gradlew headlessJar          # build/headless/fqlite-headless-5.3.jar + build/headless/lib/
+./gradlew headlessDist         # build/distributions/fqlite-headless-5.3.zip
+./gradlew publishToMavenLocal  # org.fqlite:fqlite-headless:5.3 into ~/.m2
 ```
 
 The JAR holds only FQLite's classes. At runtime it needs **Java 21** plus two libraries:
@@ -25,9 +25,9 @@ The JAR holds only FQLite's classes. At runtime it needs **Java 21** plus two li
 ## Command line
 
 ```bash
-java -jar fqlite-headless-5.21.jar evidence.db                 # JSON to stdout
-java -jar fqlite-headless-5.21.jar --json out.json evidence.db
-java -jar fqlite-headless-5.21.jar --csv out/ --summary evidence.db
+java -jar fqlite-headless-5.3.jar evidence.db                 # JSON to stdout
+java -jar fqlite-headless-5.3.jar --json out.json evidence.db
+java -jar fqlite-headless-5.3.jar --csv out/ --summary evidence.db
 ```
 
 | Option | |
