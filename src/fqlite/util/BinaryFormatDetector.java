@@ -11,7 +11,7 @@ import java.util.Arrays;
 public class BinaryFormatDetector {
 
     public enum BinaryFormat {
-        PNG, GIF, BMP, JPEG, TIFF, HEIC, PDF, PLIST, GZIP, AVRO, BIN
+        PNG, GIF, BMP, JPEG, TIFF, HEIC, PDF, PLIST, GZIP, AVRO, JSONB, BIN
     }
 
     /**
@@ -97,6 +97,12 @@ public class BinaryFormatDetector {
         if (data.length >= 4 && matchesAt(data, 0,
                 (byte) 0x4F, (byte) 0x62, (byte) 0x6A, (byte) 0x01)) {
             return BinaryFormat.AVRO;
+        }
+
+        // SQLite JSONB (3.45.0+): no magic number - only accepted if the whole BLOB is a
+        // structurally valid JSONB array or object (checked last, after all signatures)
+        if (fqlite.blob.Jsonb.isJsonb(data)) {
+            return BinaryFormat.JSONB;
         }
 
         return BinaryFormat.BIN;

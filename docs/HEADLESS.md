@@ -59,6 +59,7 @@ for (RecoveredRecord rec : r.getRecords("messages")) {
 }
 
 byte[] picture = r.getBlob(rec, 2);                  // bytes of a value "[BLOB-n]"
+String json = r.getJson(rec, 3);                     // JSON text of a JSONB BLOB (SQLite 3.45+), else null
 r.writeJson(Path.of("evidence.json"));
 r.writeCsv(Path.of("evidence-csv"));
 ```

@@ -10,7 +10,9 @@ import java.util.List;
  * {@code [table, info, rowid, status, offset, (WAL: commit, dbpage, walframe, salt1, salt2,) values...]};
  * this class exposes the parts by name. Values are FQLite's display strings; a BLOB value
  * appears as a reference like {@code [BLOB-3]} whose bytes are available through
- * {@link RecoveryResult#getBlob(RecoveredRecord, int)}.</p>
+ * {@link RecoveryResult#getBlob(RecoveredRecord, int)}. A BLOB holding SQLite binary JSON
+ * (JSONB) additionally carries a preview, e.g. {@code [BLOB-0] JSONB {"a":1}}; the full JSON
+ * text is available through {@link RecoveryResult#getJson(RecoveredRecord, int)}.</p>
  *
  * @author pawlaszc
  */

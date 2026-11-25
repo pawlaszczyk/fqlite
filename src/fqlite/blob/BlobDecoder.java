@@ -78,6 +78,11 @@ public final class BlobDecoder {
 				chain.add(k != NOT_KEYED ? "bplist (NSKeyedArchiver)" : "bplist");
 				return k != NOT_KEYED ? k : v;
 			}
+			if (Jsonb.isJsonb(d)) {
+				Object v = fromJson(new JsonParser().parse(Jsonb.toJson(d)), 0);
+				chain.add("JSONB");
+				return v;
+			}
 			String text = utf8(d);
 			if (text != null) {
 				String t = text.strip();

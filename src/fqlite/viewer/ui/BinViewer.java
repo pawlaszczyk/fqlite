@@ -141,6 +141,8 @@ public class BinViewer{
     private byte[]                  parsedBytes;
     /** True when fileBytes were Base64-decoded before parsing. */
     private boolean                 wasBase64;
+    /** content was SQLite binary JSON (JSONB); parsedBytes holds the JSON text, the hex dump the raw bytes */
+    private boolean                 wasJsonb;
 
     private FormatDetector.Format   currentFormat = FormatDetector.Format.UNKNOWN;
     private List<ProtoField>        protoFields;
@@ -985,10 +987,11 @@ public class BinViewer{
         } else {
             parsedBytes = fileBytes;
         }
+        jsonbToJson();
 
         // Window title
         stage.setTitle("Binary Viewer – " + file.getName()
-                       + "  [" + layerPrefix() + FormatDetector.formatName(currentFormat) + "]");
+                       + "  [" + layerPrefix() + formatTitle() + "]");
         updateFormatBadge();
 
         // Hex dump shows the *raw* file bytes
@@ -1105,7 +1108,8 @@ public class BinViewer{
             jsonRoot = jsonParser.parse(jsonText);
             buildJsonTree(jsonRoot);
             treeView.setShowRoot(true);
-            String b64hint = (wasBase64 ? "  [Base64-decoded]" : "") + (layers.isEmpty() ? "" : "  [decompressed: " + layers + "]");
+            String b64hint = (wasBase64 ? "  [Base64-decoded]" : "") + (layers.isEmpty() ? "" : "  [decompressed: " + layers + "]")
+                    + (wasJsonb ? "  [SQLite JSONB, " + fileBytes.length + " bytes binary]" : "");
             int topCount = switch (jsonRoot.getType()) {
                 case OBJECT -> jsonRoot.getObjectEntries().size();
                 case ARRAY  -> jsonRoot.getArrayElements().size();
@@ -1270,6 +1274,7 @@ public class BinViewer{
         fileBytes     = null;
         parsedBytes   = null;
         wasBase64     = false;
+        wasJsonb      = false;
         protoFields   = null;
         bplistRoot    = null;
         xmlRoot       = null;
@@ -1882,6 +1887,7 @@ public class BinViewer{
         this.parsedBytes  = isB64
                 ? Base64Detector.detect(data).decodedBytes()
                 : data;
+        jsonbToJson();
 
         // ── SEGB fast-path (Magic kann hinter einem Biome-Outer-Header liegen) ──
         if (findSegbMagic(data) >= 0) {
@@ -1894,7 +1900,7 @@ public class BinViewer{
         }
 
         stage.setTitle("BinViewer – " + displayName
-                       + "  [" + layerPrefix() + FormatDetector.formatName(currentFormat) + "]");
+                       + "  [" + layerPrefix() + formatTitle() + "]");
         updateFormatBadge();
         hexDumpArea.setText(HexDump.dump(fileBytes));
 
@@ -1944,6 +1950,29 @@ public class BinViewer{
         if (u.error() != null)
             showError("Damaged compressed data", u.error() + "\nThe part decoded before the error is shown.");
         return u.data();
+    }
+
+    /**
+     * SQLite JSONB (binary JSON, jsonb() since SQLite 3.45) has no magic number: if the whole
+     * content is a valid JSONB array/object, the JSON tree is built from its decoded text while
+     * the hex dump keeps showing the raw bytes.
+     */
+    private void jsonbToJson() {
+        wasJsonb = false;
+        if (wasBase64 || parsedBytes == null || !fqlite.blob.Jsonb.isJsonb(parsedBytes))
+            return;
+        try {
+            parsedBytes = fqlite.blob.Jsonb.toJson(parsedBytes).getBytes(StandardCharsets.UTF_8);
+            currentFormat = FormatDetector.Format.JSON;
+            wasJsonb = true;
+        } catch (RuntimeException ex) {
+            // not decodable after all: keep the bytes and the detected format
+        }
+    }
+
+    private String formatTitle() {
+        String name = FormatDetector.formatName(currentFormat);
+        return wasJsonb ? "SQLite JSONB \u2192 " + name : name;
     }
 
     private String layerPrefix() {

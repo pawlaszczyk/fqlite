@@ -119,6 +119,15 @@ public final class RecoveryResult {
 		return e == null ? null : e.binary;
 	}
 
+	/**
+	 * JSON text of a BLOB value stored as SQLite binary JSON (JSONB, written by {@code jsonb()},
+	 * {@code jsonb_set()} etc. since SQLite 3.45). Returns null if the value is not a BLOB or not
+	 * a valid JSONB array/object. The bytes themselves are available unchanged via {@link #getBlob}.
+	 */
+	public String getJson(RecoveredRecord record, int column) {
+		return fqlite.blob.Jsonb.tryJson(getBlob(record, column));
+	}
+
 	/** number of records per table and status - a quick overview */
 	public Map<String, Map<Status, Integer>> summary() {
 		Map<String, Map<Status, Integer>> m = new LinkedHashMap<>();

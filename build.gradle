@@ -78,6 +78,16 @@ tasks.register('nodeQlSmokeTest', JavaExec) {
     systemProperty 'nodeql.screenshot', layout.buildDirectory.file('reports/nodeql/editor.png').get().asFile.absolutePath
 }
 
+// JSONB decoder (SQLite binary JSON) against SQLite's json(), JSONB in recovered records,
+// 64-bit rowids. No GUI; uses a temporary database.
+tasks.register('jsonbTest', JavaExec) {
+    group = 'verification'
+    description = 'Check the JSONB decoder and 64-bit rowids in recovered records.'
+    dependsOn tasks.named('testClasses')
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'JsonbTest'
+}
+
 // Writes a CASE/UCO JSON-LD sample with the writer of the CASE export (no GUI, no database).
 // Check it with case_validate from case-utils (pip install case-utils).
 tasks.register('caseExportSample', JavaExec) {

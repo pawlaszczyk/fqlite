@@ -48,6 +48,27 @@ public class VIntIter {
 		return (position < limit);
 	}
 
+	/**
+	 * Next varint as a 64-bit value with SQLite semantics (up to 9 bytes, the ninth byte
+	 * contributes all 8 bits). Serial types of BLOBs/texts larger than about 1 GiB
+	 * (serial type = 2 * length + 12) do not fit into an int; use this method for them.
+	 * Returns -1 if no value is left.
+	 */
+	public long nextLong() {
+		if (position >= limit)
+			return -1;
+		long v = 0;
+		for (int i = 0; i < 9 && position < limit; i++) {
+			int b = values[position++] & 0xFF;
+			if (i == 8)
+				return (v << 8) | b;
+			v = (v << 7) | (b & 0x7F);
+			if ((b & 0x80) == 0)
+				return v;
+		}
+		return v;
+	}
+
 	public int next() {
 
 		value = -1;

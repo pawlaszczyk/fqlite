@@ -2459,7 +2459,7 @@ public class GUI extends Application {
 							return;
 						BLOBTYPE type = e.type;
 						if (fqlite.blob.Codecs.detect(e.binary) != null || fqlite.blob.TypedStream.isTypedStream(e.binary)
-								|| type == BLOBTYPE.PLIST) {
+								|| type == BLOBTYPE.PLIST || type == BLOBTYPE.JSONB) {
 							BinViewer.openBytes(e.binary, table.tablename + " " + col.getText() + " (offset " + off.getValue() + ")");
 							return;
 						}

@@ -507,7 +507,7 @@ public class Auxiliary {
                         if ((bf.position() + en.getlength()) > bf.limit()) break;
                         byte[] value = new byte[en.getlength()];
                         bf.get(value);
-                        blobcolidx = appendColumn(record, hexdump, en, value, blobcolidx, false, 2);
+                        blobcolidx = appendColumn(record, hexdump, en, value, blobcolidx, false, 0);
                     }
                     buffer.position(Math.min(last + so - phl - 1, buffer.limit()));
                     bs.set(m.end, buffer.position(), true);
@@ -531,7 +531,16 @@ public class Auxiliary {
 
                 ByteBuffer bf;
                 if (overflow > 0 && overflow < job.numberofpages && plausibleOverflow((long) pll - so)) {
-                    byte[] extended = readOverflowIterativ(overflow - 1, false, pll - so);
+                    byte[] c = allocPayload(pll);
+                    if (c == null) return null;
+                    byte[] originalbuffer = copyBufferToArray(buffer);
+                    buffer.position(last);
+                    System.arraycopy(originalbuffer, buffer.position(), c, 0, Math.min(so + 7, originalbuffer.length - buffer.position()));
+                    int got = readOverflowInto(overflow - 1, false, c, so - phl - 1, pll - so);
+                    if (got <= 0) {
+                        // nothing of the chain readable: same as an unfollowable chain (local part only)
+                        c = null;
+                    }
                     for (int op : lastOverflowPages) {
                         // a freelist trunk page starts with [next trunk][count][leaf numbers...]:
                         // those bytes of the former overflow page are overwritten
@@ -540,19 +549,19 @@ public class Auxiliary {
                             AppLog.debug("readDeletedRecord: overflow page " + (op + 1) + " is now a freelist trunk page - content partly overwritten");
                         }
                     }
-                    byte[] originalbuffer = copyBufferToArray(buffer);
-                    byte[] c = new byte[pll + job.ps];
-                    buffer.position(last);
-
-                    System.arraycopy(originalbuffer, buffer.position(), c, 0, so + 7);
-                    try {
-                        if (extended != null) {
-                            System.arraycopy(extended, 0, c, so - phl - 1, pll - so);
+                    if (c == null) {
+                        pll = so;
+                        bf = buffer;
+                        damage = FLAG_TRUNCATED;   // overflow chain not followable: local part only
+                    } else {
+                        if (got < pll - so) {
+                            // chain ended early (pages reused): previously the whole record was
+                            // dropped; now the part that could be read is kept and flagged
+                            AppLog.debug("readDeletedRecord: overflow chain ended after " + got + " of " + (pll - so) + " bytes.");
+                            if (damage == null)
+                                damage = FLAG_TRUNCATED;
                         }
                         bf = ByteBuffer.wrap(c);
-                    } catch (ArrayIndexOutOfBoundsException | NullPointerException err) {
-                        AppLog.debug("Overflow merge error: " + err.getMessage());
-                        bf = null;
                     }
                 } else {
                     pll = so;
@@ -576,7 +585,7 @@ public class Auxiliary {
                     byte[] value = new byte[en.getlength()];
                     bf.get(value);
                     //hexdump.add(value);
-                    blobcolidx = appendColumn(record, hexdump, en, value, blobcolidx, false, 2);
+                    blobcolidx = appendColumn(record, hexdump, en, value, blobcolidx, false, 0);
                 }
 
                 int finalPos = last + so - phl - 1;
@@ -1040,18 +1049,26 @@ public class Auxiliary {
             return null;
         }
 
-        int pll = readUnsignedVarInt(buffer);
-        AppLog.debug("Payload length: " + pll + " (" + Integer.toHexString(pll) + ")");
+        long pll64 = readVarLong(buffer);
+        AppLog.debug("Payload length: " + pll64 + " (" + Long.toHexString(pll64) + ")");
 
-        if (pll < 4) return null;
+        if (pll64 < 4) return null;
+        if (pll64 > MAX_PAYLOAD) {
+            // SQLite never writes a record larger than SQLITE_MAX_LENGTH (at most 2^31-1 bytes),
+            // and a Java array cannot hold more: corrupted or manipulated cell
+            AppLog.debug("readRecord: payload length " + pll64 + " exceeds the SQLite maximum - record skipped.");
+            return null;
+        }
+        int pll = (int) pll64;
 
-        int rowid = 0;
+        // rowids are signed 64-bit integers (varint, 9 bytes for negative values)
+        long rowid = 0;
         if (!withoutROWID) {
             if (unknown) {
-                rowid = readUnsignedVarInt(buffer);
+                rowid = readVarLong(buffer);
             } else if (td != null ? td.ROWID
                        : (pagenumber_db >= job.pages.length || job.pages[pagenumber_db] == null || job.pages[pagenumber_db].ROWID)) {
-                rowid = readUnsignedVarInt(buffer);
+                rowid = readVarLong(buffer);
             }
         }
 
@@ -1125,24 +1142,23 @@ public class Auxiliary {
 
             buffer.position(last);
 
-            byte[] extended;
-            if (filetype == Global.WAL_ARCHIVE_FILE) {
-                extended = readOverflowIterativ(overflow, true, pll - so);
-            } else {
-                extended = readOverflowIterativ(overflow - 1, false, pll - so);
-            }
-
+            // record body = local part + overflow chain, assembled in one array; the chain is
+            // copied straight into it (no intermediate copies - matters for BLOBs of hundreds
+            // of MiB up to the SQLite maximum of 2 GiB)
+            byte[] c = allocPayload(pll);
+            if (c == null) return null;
             byte[] originalbuffer = copyBufferToArray(buffer);
-            byte[] c = new byte[pll + job.ps];
             buffer.position(last);
 
             if (so - phl > 0) {
                 System.arraycopy(originalbuffer, buffer.position(), c, 0, so - phl);
             }
             try {
-                if (extended != null) {
-                    System.arraycopy(extended, 0, c, so - phl - 1, pll - so);
-                }
+                int got = filetype == Global.WAL_ARCHIVE_FILE
+                        ? readOverflowInto(overflow, true, c, so - phl - 1, pll - so)
+                        : readOverflowInto(overflow - 1, false, c, so - phl - 1, pll - so);
+                if (got < pll - so)
+                    AppLog.debug("readRecord: overflow chain ended after " + got + " of " + (pll - so) + " bytes.");
             } catch (ArrayIndexOutOfBoundsException | NullPointerException err) {
                 AppLog.debug("Overflow merge error: " + err.getMessage());
             }
@@ -1202,7 +1218,7 @@ public class Auxiliary {
                 }
                 if (rowid_col == co && !withoutROWID) {
                     record.add(rowid + "");
-                    byte[] bytes = ByteBuffer.allocate(8).putInt(rowid).array();
+                    byte[] bytes = ByteBuffer.allocate(8).putLong(rowid).array();
                     hexdump.add(bytes);
                     if (cells != null) cells.add("rowid");
                     co++;
@@ -1376,6 +1392,8 @@ public class Auxiliary {
             //if (!isVT && text.length() > 32) display += "..";
             if (isVT)
                 display = "..";
+            else
+                display += jsonbPreview(value);
             record.add(display);
             storeBLOB(record, blobcolidx, text, value, offsetidx);
             // Keep `raw` 1:1 with `record`: every branch of this method adds
@@ -1393,6 +1411,26 @@ public class Auxiliary {
         record.add("");
         raw.add(null);
         return blobcolidx;
+    }
+
+    /** characters of a decoded JSONB value shown in the table cell after "[BLOB-n] " */
+    public static final int JSONB_PREVIEW_CHARS = 200;
+
+    /**
+     * "JSONB {...}" if the BLOB is SQLite binary JSON (jsonb(), SQLite 3.45+), otherwise "".
+     * The cell keeps its "[BLOB-n]" reference; the raw bytes stay in the BLOB cache unchanged.
+     */
+    static String jsonbPreview(byte[] value) {
+        if (value == null || value.length < 2 || !fqlite.blob.Jsonb.isJsonb(value))
+            return "";
+        try {
+            String json = fqlite.blob.Jsonb.toJson(value);
+            if (json.length() > JSONB_PREVIEW_CHARS)
+                json = json.substring(0, JSONB_PREVIEW_CHARS) + "\u2026";
+            return "JSONB " + json;
+        } catch (RuntimeException e) {
+            return "";
+        }
     }
 
     // -------------------------------------------------------------------------
@@ -1455,6 +1493,9 @@ public class Auxiliary {
             }
             case AVRO  -> {
                 job.bincache.put(base,  new BLOBElement(value, BLOBTYPE.AVRO));
+            }
+            case JSONB  -> {
+                job.bincache.put(base,  new BLOBElement(value, BLOBTYPE.JSONB));
             }
             case BIN  -> {
                 job.bincache.put(base,  new BLOBElement(value, BLOBTYPE.UNKOWN));
@@ -1740,6 +1781,65 @@ public class Auxiliary {
      * collected. The chain length is thus bounded by ceil(maxBytes / (ps-4)) pages instead of
      * following arbitrary (possibly reused or garbage) next-pointers through the whole file.
      */
+    /**
+     * Reads an overflow chain directly into {@code dest} at {@code destOff}, at most {@code len}
+     * bytes. Same traversal as {@link #readOverflowIterativ(int, boolean, int)} (cycle and range
+     * checks, {@link #lastOverflowPages}), but without collecting the pages in a list and
+     * concatenating them afterwards: for large BLOBs this saves two full copies of the value.
+     *
+     * @return number of bytes copied (less than {@code len} if the chain ends early)
+     */
+    private int readOverflowInto(int pagenumber, boolean fromWAL, byte[] dest, int destOff, int len) {
+        lastOverflowPages.clear();
+        Set<Integer> visited = new HashSet<>();
+        int next   = pagenumber;
+        int saved  = -1;
+        int frame  = -1;
+        int copied = 0;
+        len = Math.max(0, Math.min(len, dest.length - destOff));
+
+        if (fromWAL) {
+            saved = job.wal.wal.position();
+            frame = saved / (job.ps + 24) + 1;
+        }
+
+        while (copied < len) {
+            if (visited.contains(next)) {
+                AppLog.debug("readOverflowInto: cycle detected at page " + next + " - stopping.");
+                break;
+            }
+            if (!fromWAL && (next < 0 || next >= job.numberofpages)) {
+                AppLog.debug("readOverflowInto: page " + next + " out of range - stopping.");
+                break;
+            }
+
+            ByteBuffer overflowpage = fromWAL
+                    ? job.readWALOverflowPage(frame, next, job.ps, pagenumber)
+                    : job.readPageWithNumber(next, job.ps);
+            visited.add(next);
+            if (!fromWAL)
+                lastOverflowPages.add(next);
+            if (overflowpage == null) break;
+
+            overflowpage.position(0);
+            int nextRaw = overflowpage.getInt();
+            next = fromWAL ? nextRaw : nextRaw - 1;
+
+            int n = Math.min(job.ps - 4, len - copied);
+            overflowpage.position(4);
+            overflowpage.get(dest, destOff + copied, n);
+            copied += n;
+
+            boolean more = fromWAL ? (nextRaw > 0) : (next >= 0);
+            if (!more) break;
+        }
+
+        if (fromWAL && saved > 0) {
+            job.wal.wal.position(saved);
+        }
+        return copied;
+    }
+
     private byte[] readOverflowIterativ(int pagenumber, boolean fromWAL, int maxBytes) {
         lastOverflowPages.clear();
         List<ByteBuffer> parts   = new LinkedList<>();
@@ -1822,12 +1922,12 @@ public class Auxiliary {
     public int computePayloadLength(String header) {
         byte[]   bcol   = Auxiliary.decode(header);
         VIntIter columns = VIntIter.wrap(bcol, 1);
-        int      pll    = header.length() / 2 + 1;
+        long     pll    = header.length() / 2 + 1;
 
         while (columns.hasNext()) {
-            pll += serialTypeByteLength(columns.next());
+            pll += serialTypeByteLength(columns.nextLong());
         }
-        return pll;
+        return clampPayload(pll);
     }
 
     /**
@@ -1842,29 +1942,58 @@ public class Auxiliary {
      * header offset.
      */
     public static int computePayloadLengthByte(byte[] bcol, int hoffset) {
-        int[] columns = readVarInt(bcol);
-        int   pll     = hoffset;
-        for (int col : columns) {
-            pll += serialTypeByteLength(col);
+        VIntIter columns = new VIntIter(bcol);
+        long     pll     = hoffset;
+        while (columns.hasNext()) {
+            pll += serialTypeByteLength(columns.nextLong());
         }
-        return pll;
+        return clampPayload(pll);
     }
 
-    /** Returns the data byte length for a given SQLite serial type code. */
-    private static int serialTypeByteLength(int serialType) {
-        switch (serialType) {
-            case 0: case 8: case 9: case 10: case 11: return 0;
-            case 1: return 1;
-            case 2: return 2;
-            case 3: return 3;
-            case 4: return 4;
-            case 5: return 6;
-            case 6: case 7: return 8;
-            default:
-                return (serialType % 2 == 0)
-                        ? (serialType - 12) / 2   // BLOB
-                        : (serialType - 13) / 2;  // STRING
+    /**
+     * Largest payload (record) FQLite accepts: SQLite's hard limit SQLITE_MAX_LENGTH is
+     * 2^31-1 bytes for a BLOB, a string and a whole row - also with the 64-bit APIs
+     * (sqlite3_bind_blob64() etc. only widen the parameter type). A few bytes are kept free
+     * because the JVM cannot allocate arrays of exactly Integer.MAX_VALUE elements.
+     */
+    public static final long MAX_PAYLOAD = Integer.MAX_VALUE - 16L;
+
+    /** payload length as int; impossible lengths (above {@link #MAX_PAYLOAD}) become Integer.MAX_VALUE */
+    private static int clampPayload(long pll) {
+        return pll < 0 || pll > MAX_PAYLOAD ? Integer.MAX_VALUE : (int) pll;
+    }
+
+    /** buffer for a record body of {@code pll} bytes (+ slack for the copy of the local part); null if impossible */
+    private byte[] allocPayload(int pll) {
+        if (pll < 0 || pll > MAX_PAYLOAD) {
+            AppLog.debug("payload length " + pll + " exceeds the SQLite maximum - record skipped.");
+            return null;
         }
+        try {
+            return new byte[pll + 8];
+        } catch (OutOfMemoryError e) {
+            AppLog.error("Not enough memory for a record of " + pll + " bytes (large BLOB) - record skipped. Start FQLite with a larger -Xmx.");
+            return null;
+        }
+    }
+
+    /** Returns the data byte length for a given SQLite serial type code (64 bit: BLOBs/texts > 1 GiB). */
+    private static long serialTypeByteLength(long serialType) {
+        if (serialType < 0) return 0;
+        if (serialType < 12) {
+            switch ((int) serialType) {
+                case 1: return 1;
+                case 2: return 2;
+                case 3: return 3;
+                case 4: return 4;
+                case 5: return 6;
+                case 6: case 7: return 8;
+                default: return 0;
+            }
+        }
+        return (serialType % 2 == 0)
+                ? (serialType - 12) / 2   // BLOB
+                : (serialType - 13) / 2;  // STRING
     }
 
     /**
@@ -1975,7 +2104,20 @@ public class Auxiliary {
     private static List<SqliteElement> getElements(VIntIter columns) {
         LinkedList<SqliteElement> result = new LinkedList<>();
         while (columns.hasNext()) {
-            result.add(toSqliteElement(columns.next()));
+            long type = columns.nextLong();
+            if (type > Integer.MAX_VALUE) {
+                // BLOB/text of more than ~1 GiB: serial type does not fit into an int
+                long len = serialTypeByteLength(type);
+                if (len > MAX_PAYLOAD) {
+                    columns.setBack();
+                    return null;     // impossible length: not a valid record header
+                }
+                result.add(type % 2 == 0
+                        ? new SqliteElement(SerialTypes.BLOB,   StorageClass.BLOB, (int) len)
+                        : new SqliteElement(SerialTypes.STRING, StorageClass.TEXT, (int) len));
+                continue;
+            }
+            result.add(toSqliteElement((int) type));
         }
         columns.setBack();
         return result;
@@ -2014,6 +2156,24 @@ public class Auxiliary {
      * @param buffer source buffer (position is advanced past the varint)
      * @return decoded integer value
      */
+    /**
+     * Reads a SQLite varint as a 64-bit value (1-9 bytes; the ninth byte contributes all
+     * 8 bits, so negative rowids come out correctly). Use this for rowids and payload
+     * lengths - {@link #readUnsignedVarInt} truncates values above 2^31.
+     */
+    public static long readVarLong(ByteBuffer buffer) {
+        long v = 0;
+        for (int i = 0; i < 9 && buffer.hasRemaining(); i++) {
+            int b = buffer.get() & 0xFF;
+            if (i == 8)
+                return (v << 8) | b;
+            v = (v << 7) | (b & 0x7F);
+            if ((b & 0x80) == 0)
+                return v;
+        }
+        return v;
+    }
+
     public static int readUnsignedVarInt(ByteBuffer buffer) {
         byte b     = buffer.get();
         int  value = b & 0x7F;
