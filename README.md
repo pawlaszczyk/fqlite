@@ -114,6 +114,11 @@ Code or any other MCP client can analyse a SQLite database itself: run the recov
 the schema, filter deleted records, search for keywords, export BLOBs and write the results
 to a report - while the examiner directs the investigation in natural language.
 
+<p align="center">
+  <img width="80%" height="80%" src="img/fqlite_agentic_workflow.png?raw=true" alt="agentic workflow architecture"/>
+</p>
+
+
 The server is built for forensic use:
 
 * **read-only**: the evidence is never written; the database and its `-wal` / `-journal` are
