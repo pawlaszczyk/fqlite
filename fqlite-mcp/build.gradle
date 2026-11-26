@@ -1,0 +1,90 @@
+// fqlite-mcp: MCP server (Model Context Protocol, stdio) for FQLite's forensic SQLite recovery.
+//
+//   ../gradlew -p fqlite-mcp fatJar     build/libs/fqlite-mcp-<v>.jar (all dependencies included)
+//
+// Uses the published engine io.github.pawlaszczyk:fqlite-headless from Maven Central.
+plugins {
+    id 'java'
+    id 'application'
+}
+
+group = 'io.github.pawlaszczyk'
+version = '0.1.0'
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(21)
+    }
+}
+
+repositories {
+    mavenCentral()
+}
+
+// javafx-base is pure Java (collections only), any platform jar works on every OS;
+// the build host's one is used. The dependency of fqlite-headless on javafx-base has no
+// classifier (Maven picks it through profiles, Gradle cannot), so it is replaced here.
+def os = org.gradle.internal.os.OperatingSystem.current()
+def arch = System.getProperty('os.arch')
+def fxPlatform = project.findProperty('fxPlatform') ?: (os.macOsX ? (arch == 'aarch64' ? 'mac-aarch64' : 'mac')
+        : os.windows ? 'win' : (arch == 'aarch64' ? 'linux-aarch64' : 'linux'))
+
+// -PheadlessJar=<path>: build against a locally built fqlite-headless JAR instead of the
+// release on Maven Central (used by the GitHub workflow, so the server in a release contains
+// the engine of the same commit)
+def localHeadless = project.findProperty('headlessJar')
+
+dependencies {
+    if (localHeadless) {
+        implementation files(localHeadless)
+        implementation 'org.antlr:antlr4-runtime:4.8'
+    } else {
+        implementation('io.github.pawlaszczyk:fqlite-headless:5.3') {
+            exclude group: 'org.openjfx'
+        }
+    }
+    implementation "org.openjfx:javafx-base:22:${fxPlatform}"
+    implementation 'com.google.code.gson:gson:2.11.0'
+}
+
+compileJava.options.encoding = 'UTF-8'
+
+application {
+    mainClass = 'fqlite.mcp.FQLiteMcpServer'
+    applicationDefaultJvmArgs = ['--add-opens=java.base/java.nio=ALL-UNNAMED',
+                                 '--add-opens=java.base/jdk.internal.ref=ALL-UNNAMED',
+                                 '--add-opens=java.base/sun.nio.ch=ALL-UNNAMED']
+}
+
+def mainManifest = {
+    attributes(
+            'Main-Class': 'fqlite.mcp.FQLiteMcpServer',
+            'Implementation-Title': 'fqlite-mcp',
+            'Implementation-Version': project.version,
+            // lets BigByteBuffer unmap memory-mapped windows early (only honoured by java -jar)
+            'Add-Opens': 'java.base/java.nio java.base/jdk.internal.ref java.base/sun.nio.ch'
+    )
+}
+
+jar {
+    manifest mainManifest
+}
+
+tasks.register('fatJar', Jar) {
+    group = 'build'
+    description = 'Self-contained server JAR: java -jar build/libs/fqlite-mcp-<version>.jar'
+    archiveBaseName = 'fqlite-mcp'
+    archiveClassifier = ''
+    archiveVersion = project.version.toString()
+    destinationDirectory = layout.buildDirectory.dir('libs')
+    manifest mainManifest
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+    dependsOn configurations.runtimeClasspath
+    from sourceSets.main.output
+    from { configurations.runtimeClasspath.collect { it.isDirectory() ? it : zipTree(it) } } {
+        exclude 'META-INF/*.SF', 'META-INF/*.RSA', 'META-INF/*.DSA', 'META-INF/MANIFEST.MF',
+                'module-info.class', 'META-INF/versions/*/module-info.class'
+    }
+}
+// the plain jar task would write the same file name
+tasks.named('jar') { archiveClassifier = 'plain' }

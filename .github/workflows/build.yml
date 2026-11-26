@@ -324,11 +324,79 @@ jobs:
           overwrite: true
           retention-days: 14
 
+  jars:
+    name: Build JARs (headless library, MCP server)
+    runs-on: ubuntu-latest
+    needs: get-version
+    permissions:
+      id-token: write
+      attestations: write
+    env:
+      VERSION: ${{ needs.get-version.outputs.version }}
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4.2.2
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Make gradlew executable
+        run: chmod +x ./gradlew
+
+      # headless library: JAR + ZIP with lib/ (javafx-base, antlr4-runtime) and HEADLESS.md
+      - name: Build headless library
+        run: ./gradlew --stacktrace headlessJar headlessDist
+
+      # MCP server, built against the headless JAR of this commit (not the Maven Central release)
+      - name: Build MCP server
+        run: |
+          HEADLESS_JAR="$(realpath build/headless/fqlite-headless-${VERSION}.jar)"
+          ./gradlew -p fqlite-mcp --stacktrace fatJar -PheadlessJar="$HEADLESS_JAR"
+
+      - name: Collect release files
+        run: |
+          mkdir -p release-jars
+          cp "build/headless/fqlite-headless-${VERSION}.jar" release-jars/
+          cp "build/distributions/fqlite-headless-${VERSION}.zip" release-jars/
+          cp fqlite-mcp/build/libs/fqlite-mcp-*.jar release-jars/
+          ls -lh release-jars
+
+      # the JARs must run: headless CLI on a small database, MCP server answers initialize
+      - name: Smoke test
+        run: |
+          python3 -c "import sqlite3; c=sqlite3.connect('/tmp/smoke.db'); c.execute('create table t(a,b)'); c.executemany('insert into t values(?,?)', [(i, 'x'*i) for i in range(50)]); c.commit(); c.execute('delete from t where a < 10'); c.commit()"
+          mkdir -p /tmp/headless && unzip -q -o "release-jars/fqlite-headless-${VERSION}.zip" -d /tmp/headless
+          java -jar "/tmp/headless/fqlite-headless-${VERSION}.jar" --json /tmp/smoke.json --summary /tmp/smoke.db
+          python3 -c "import json; d=json.load(open('/tmp/smoke.json')); assert len(d['records']) >= 40, len(d['records']); print(len(d['records']), 'records')"
+          echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"ci","version":"1"}}}' \
+            | java -jar release-jars/fqlite-mcp-*.jar --output /tmp/mcp-out | tee /tmp/mcp.json
+          grep -q '"serverInfo"' /tmp/mcp.json
+
+      - name: Generate artifact attestation
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: "release-jars/*"
+
+      - name: Upload JAR artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: fqlite-jars
+          path: release-jars/
+          overwrite: true
+          retention-days: 14
+
   publish:
     name: Publish release artefacts
     runs-on: ubuntu-latest
     needs:
       - build
+      - jars
       - get-version
     outputs:
       version: ${{ steps.create-version.outputs.version }}
