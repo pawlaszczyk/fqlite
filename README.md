@@ -4,7 +4,7 @@
 
 ### FQLite - Forensic SQLite Data Recovery Tool
 
-FQLite is a tool to find and restore deleted records in SQLite databases. It therefore examines the database for entries marked as deleted. Those entries can be recovered and displayed. It is written in the Java programming language. The program can operate with a simple graphical user interface (GUI mode). The program is able to search a SQLite database file for regular as well as deleted records.
+FQLite is a tool to find and restore deleted records in SQLite databases. It therefore examines the database for entries marked as deleted. Those entries can be recovered and displayed. It is written in the Java programming language. The program can operate with a simple graphical user interface (GUI mode). The program is able to search a SQLite database file for regular as well as deleted records. The recovery engine is also available without GUI - as a Java library and command-line tool ([headless](#headless-library--command-line-no-gui)) and as an MCP server for agentic AI workflows ([agentic AI support](#agentic-ai-support-mcp-server)).
 
 
 <p align="center">
@@ -45,6 +45,10 @@ FQLite allows you to:
 * Text-to-SQL generation with AI-based Assistant (since 4.0)
 * Graphic SQL-Schema analyzer (based on Mermaid.js)
 * Export recovered data to CASE/UCO JSON-LD format (CASE 1.5 / UCO 1.4, validates with case_validate): live, deleted and older record versions with recovery state, file offset, source file hashes and provenance
+* decoding of SQLite's binary JSON (JSONB, SQLite 3.45+) in live, deleted and WAL records - identical to SQLite's `json()`
+* BLOBs and texts larger than 1 GiB and 64-bit rowids (e.g. timestamps or 64-bit ids as INTEGER PRIMARY KEY) are recovered correctly
+* headless library and command-line tool without GUI (JSON/CSV output), available on Maven Central as `io.github.pawlaszczyk:fqlite-headless`
+* MCP server (Model Context Protocol) for agentic AI workflows, e.g. with Claude Desktop or Claude Code - read-only, with evidence hashes and audit log
 * white and black theme support
 * support of sqlcipher encrypted databases
 * Apple DMG Installer is signed (since 4.22)
@@ -70,11 +74,26 @@ Some features:
 ### Headless library / command line (no GUI)
 
 FQLite's recovery engine can be used without the user interface - as a Java library in other
-applications or as a command-line tool (JSON / CSV output). `./gradlew headlessJar` builds
-`build/headless/fqlite-headless-5.3.jar`:
+applications (e.g. forensic frameworks) or as a command-line tool with JSON / CSV output. It
+needs no JavaFX toolkit and no display, so it also runs on servers and in containers.
+
+**Download:** every [release](https://github.com/pawlaszczyk/fqlite/releases) contains
+`fqlite-headless-<version>.zip` (JAR with its `lib/` folder, ready to run) and
+`fqlite-headless-<version>.jar`. To build it yourself: `./gradlew headlessJar`.
 
 ```bash
-java -jar build/headless/fqlite-headless-5.3.jar --json result.json evidence.db
+java -jar fqlite-headless-<version>.jar --json result.json --summary evidence.db
+java -jar fqlite-headless-<version>.jar --csv out/ evidence.db
+```
+
+**As a library** from [Maven Central](https://central.sonatype.com/artifact/io.github.pawlaszczyk/fqlite-headless):
+
+```xml
+<dependency>
+  <groupId>io.github.pawlaszczyk</groupId>
+  <artifactId>fqlite-headless</artifactId>
+  <version>5.3</version>
+</dependency>
 ```
 
 ```java
@@ -82,7 +101,101 @@ RecoveryResult r = fqlite.headless.FQLiteHeadless.analyze(Path.of("evidence.db")
 r.getRecords(Status.DELETED).forEach(rec -> System.out.println(rec.getValues()));
 ```
 
-See [docs/HEADLESS.md](docs/HEADLESS.md).
+The result contains live, deleted and freelist records of the database file, its WAL archive
+and rollback journal - each with status, rowid, byte offset and flags (older version,
+incomplete) - plus BLOB contents and decoded JSONB. See [docs/HEADLESS.md](docs/HEADLESS.md).
+
+### Agentic AI support (MCP server)
+
+FQLite can be used by AI agents. `fqlite-mcp` is a server for the
+[Model Context Protocol](https://modelcontextprotocol.io) (MCP), the open standard through
+which AI assistants call external tools. With it, an assistant such as Claude Desktop, Claude
+Code or any other MCP client can analyse a SQLite database itself: run the recovery, look at
+the schema, filter deleted records, search for keywords, export BLOBs and write the results
+to a report - while the examiner directs the investigation in natural language.
+
+The server is built for forensic use:
+
+* **read-only**: the evidence is never written; the database and its `-wal` / `-journal` are
+  hashed (SHA-256) before and after the analysis, a change is reported
+* **traceable**: every record carries its source file, status, rowid and byte offset, so each
+  statement of the assistant can be checked in the hex viewer
+* **audit log**: every tool call (time, tool, arguments, outcome) is written to
+  `fqlite-mcp-audit.jsonl` - the questions that were put to the evidence through the model
+* **folder limits**: evidence is only read from the folders given with `--evidence`, files are
+  only written to the `--output` folder
+* **prompt injection**: recovered values are returned marked as untrusted data, and the model
+  is told never to follow instructions found in them - evidence can contain such text on purpose
+* **large databases**: the result stays in the server; the assistant fetches it filtered and
+  page by page instead of loading everything into its context
+
+| Tool | Purpose |
+|---|---|
+| `analyze` | run the recovery on a database file; returns an id, SHA-256 hashes and an overview |
+| `list_tables` | schema with columns, types, CREATE statement and record counts |
+| `get_records` | records filtered by table, status (live/deleted/freelist), source (database/WAL/journal), only recovered data; paged |
+| `search` | text or regular-expression search over all recovered values |
+| `get_record` | one record in full |
+| `export_blob` | write a BLOB (picture, attachment, ...) to a file; returns type and SHA-256 |
+| `export` | complete result as JSON or CSV |
+| `list_analyses`, `close_analysis` | analyses kept in memory |
+
+#### Setting it up
+
+1. Download `fqlite-mcp-<version>.jar` from the [release page](https://github.com/pawlaszczyk/fqlite/releases)
+   (self-contained, needs Java 21 or newer), or build it with `./gradlew -p fqlite-mcp fatJar`.
+2. Register it with your MCP client. **Claude Desktop** (Settings > Developer > Edit Config):
+
+   ```json
+   {
+     "mcpServers": {
+       "fqlite": {
+         "command": "/path/to/java-21/bin/java",
+         "args": ["-jar", "/path/to/fqlite-mcp-<version>.jar",
+                  "--evidence", "/path/to/Evidence",
+                  "--output", "/path/to/fqlite-mcp-output"]
+       }
+     }
+   }
+   ```
+
+   **Claude Code:**
+
+   ```bash
+   claude mcp add fqlite -- java -jar /path/to/fqlite-mcp-<version>.jar --evidence /path/to/Evidence --output /path/to/out
+   ```
+
+3. Optional, recommended: add the skill [`fqlite-mcp/skill/fqlite-forensics`](fqlite-mcp/skill/fqlite-forensics/SKILL.md)
+   to your assistant. It teaches the forensic workflow: order of the tools, citing every
+   finding with its location, interpreting record states and timestamp formats, and the
+   structure of a report.
+
+#### Using it in an agentic workflow
+
+Work on a forensic copy in the evidence folder and ask in plain language, for example:
+
+> *Analyse /Evidence/case-42/msgstore.db. Which messages were deleted? List them with sender,
+> time and location in the file.*
+
+> *Search all recovered records for the phone number +49 151 and for "Schließfach". Show only
+> data that is no longer live.*
+
+> *Export the deleted pictures from the table media and write a short report with the hashes
+> of the evidence and the exported files.*
+
+The assistant then calls the tools itself - typically `analyze` (and notes the hashes),
+`list_tables`, `get_records` with `only_recovered` or `search`, `get_record` for every record
+it quotes, and `export_blob` / `export` for the annex - and answers with findings that name
+table, status, rowid and byte offset. The audit log documents every step.
+
+Please keep in mind:
+
+* The assistant supports the examiner, it does not replace the examination. Check its
+  findings - every one can be verified through the offset - and draw the conclusions yourself.
+* With a cloud-based model, the values the model requests leave your computer. For real case
+  data use a local model or an environment approved for this purpose.
+* The MCP server is a research prototype. Details, all options and the protocol test:
+  [fqlite-mcp/README.md](fqlite-mcp/README.md).
 
 ### Official Project Webpage
 
