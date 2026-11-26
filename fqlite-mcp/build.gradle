@@ -36,6 +36,8 @@ def localHeadless = project.findProperty('headlessJar')
 
 dependencies {
     if (localHeadless) {
+        if (!file(localHeadless).isFile())
+            throw new GradleException("-PheadlessJar: file not found: ${file(localHeadless)}")
         implementation files(localHeadless)
         implementation 'org.antlr:antlr4-runtime:4.8'
     } else {
